@@ -1,0 +1,350 @@
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  TL;DR — RIEPILOGO NON VINCOLANTE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🇮🇹  Questo codice è pubblicato ESCLUSIVAMENTE a scopo dimostrativo
+     e di portfolio. È consentito soltanto visualizzarlo e clonarlo
+     in locale per valutazione tecnica personale.
+     Qualsiasi altro utilizzo — commerciale, derivato, ridistribuito
+     o come servizio — è vietato senza autorizzazione scritta.
+
+🇬🇧  This code is published for portfolio and demonstration purposes
+     ONLY. You may view it and clone it locally for personal technical
+     evaluation. Any other use — commercial, derivative, redistributed,
+     or as a service — is strictly prohibited without prior written
+     permission.
+
+⚠️  NO use · NO modification · NO redistribution · NO AI training
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+════════════════════════════════════════════════════════════════
+  LICENZA PROPRIETARIA — TUTTI I DIRITTI RISERVATI
+  PROPRIETARY LICENSE — ALL RIGHTS RESERVED
+════════════════════════════════════════════════════════════════
+
+Copyright (c) 2026 Fabrizio Papa. Tutti i diritti riservati.
+
+
+───────────────────────────────────────────────────────────────
+  PARTE I — TESTO IN LINGUA ITALIANA (testo giuridicamente
+             vincolante)
+───────────────────────────────────────────────────────────────
+
+LICENZA PROPRIETARIA PER IL SOFTWARE "Payroll Gang Suite"
+
+Autore e titolare dei diritti: Fabrizio Papa
+Anno di prima pubblicazione: 2026
+
+
+ARTICOLO 1 — NATURA DELLA LICENZA E PROPRIETÀ INTELLETTUALE
+
+Il presente software, denominato "Payroll Gang Suite" (di seguito
+"Software"), unitamente a tutti i file sorgente, compilati,
+di configurazione, di documentazione e alle risorse ad esso
+associate, è di esclusiva proprietà di Fabrizio Papa (di seguito
+"Autore").
+
+Il Software è protetto dalle leggi italiane ed internazionali sul
+diritto d'autore e sulla proprietà intellettuale, incluse la Legge
+22 aprile 1941, n. 633 ("Legge sul diritto d'autore"), il Decreto
+Legislativo 10 febbraio 2005, n. 30 ("Codice della Proprietà
+Industriale") e le Direttive comunitarie applicabili.
+
+La pubblicazione del codice sorgente su piattaforme di hosting
+pubblico, inclusa GitHub, NON costituisce cessione, licenza
+implicita, abbandono o rinuncia ad alcun diritto di proprietà
+intellettuale da parte dell'Autore, né conferisce agli utenti
+alcun diritto di utilizzo al di là di quanto espressamente
+previsto dalla presente licenza.
+
+
+ARTICOLO 2 — SCOPO DELLA PUBBLICAZIONE
+
+Il Software è reso pubblicamente visibile esclusivamente allo
+scopo di:
+
+  a) mostrare le competenze tecniche dell'Autore nell'ambito di
+     attività di portfolio professionale;
+  b) consentire la valutazione tecnica del codice da parte di
+     potenziali datori di lavoro, recruiter o collaboratori,
+     previa consultazione della presente licenza.
+
+Qualsiasi utilizzo che esuli dalle finalità sopra indicate è
+soggetto alle restrizioni di cui all'Articolo 3 e richiede il
+previo consenso scritto dell'Autore ai sensi dell'Articolo 5.
+
+
+ARTICOLO 3 — DIVIETI
+
+È fatto divieto assoluto, senza il previo consenso scritto
+dell'Autore, di compiere le seguenti azioni, in tutto o in parte,
+direttamente o indirettamente, a titolo oneroso o gratuito:
+
+  3.1  USO COMMERCIALE
+       Utilizzare il Software, o qualsiasi sua parte, per finalità
+       commerciali, produttive, lucrative o a fini di profitto,
+       indipendentemente dalla forma o dalla struttura giuridica
+       del soggetto che ne fa uso.
+
+  3.2  MODIFICA E OPERE DERIVATE
+       Modificare, adattare, tradurre, decompilare, disassemblare,
+       effettuare reverse engineering, creare opere derivate o
+       altrimenti alterare il Software o qualsiasi sua componente,
+       in qualsiasi forma o con qualsiasi mezzo.
+
+  3.3  REDISTRIBUZIONE
+       Copiare, distribuire, pubblicare, sublicenziare, vendere,
+       affittare, cedere o trasferire in qualsiasi modo il Software
+       o parte di esso, sia nella forma di codice sorgente che
+       compilato o eseguibile, a terzi.
+
+  3.4  UTILIZZO PER INTELLIGENZA ARTIFICIALE
+       Utilizzare il Software, il suo codice sorgente, la sua
+       struttura, i suoi algoritmi o qualsiasi altra sua parte
+       come dato di addestramento, di validazione o di test per
+       sistemi di intelligenza artificiale, modelli di machine
+       learning, modelli linguistici di grandi dimensioni (LLM)
+       o tecnologie analoghe, indipendentemente dall'uso finale
+       di tali sistemi.
+
+  3.5  RIMOZIONE DEI RIFERIMENTI AL COPYRIGHT
+       Rimuovere, alterare, oscurare o sostituire le note di
+       copyright, la presente licenza, i riferimenti all'Autore
+       o qualsiasi altra indicazione relativa alla titolarità
+       dei diritti sul Software.
+
+  3.6  EROGAZIONE COME SERVIZIO
+       Eseguire il Software su server pubblici, reti aziendali
+       o infrastrutture cloud in modo tale da renderlo accessibile
+       a soggetti terzi, anche a titolo gratuito, incluse le
+       modalità Software-as-a-Service (SaaS), Platform-as-a-Service
+       (PaaS) o qualsiasi forma di hosting destinata ad utenti
+       diversi dall'Autore.
+
+
+ARTICOLO 4 — PERMESSI LIMITATI
+
+In deroga ai divieti di cui all'Articolo 3, sono consentite
+esclusivamente le seguenti azioni:
+
+  4.1  Visualizzare il codice sorgente del Software mediante
+       l'interfaccia pubblica della piattaforma GitHub o tramite
+       clone locale del repository.
+
+  4.2  Clonare il repository ed eseguire il Software in ambiente
+       locale, su macchine di uso personale, esclusivamente allo
+       scopo di effettuare una valutazione tecnica del codice
+       (es. da parte di recruiter, responsabili tecnici o potenziali
+       collaboratori), fermo restando il rispetto di tutti gli
+       altri vincoli della presente licenza.
+
+I permessi di cui al presente articolo non implicano alcuna
+concessione di diritti d'uso per finalità diverse da quelle
+indicate e non costituiscono licenza implicita per usi ulteriori.
+
+
+ARTICOLO 5 — AUTORIZZAZIONE PER USI NON PREVISTI
+
+Qualsiasi utilizzo del Software non espressamente consentito
+dalla presente licenza richiede il previo accordo scritto con
+l'Autore. Le richieste di autorizzazione possono essere indirizzate
+all'Autore tramite i recapiti indicati sul profilo GitHub
+(https://github.com/fabriziopapa) o mediante i canali di contatto
+professionali ivi riportati.
+
+
+ARTICOLO 6 — ESCLUSIONE DI GARANZIE
+
+IL SOFTWARE È FORNITO "COSÌ COM'È" ("AS IS"), SENZA ALCUNA
+GARANZIA DI QUALSIASI TIPO, ESPRESSA O IMPLICITA, IVI INCLUSE,
+A TITOLO ESEMPLIFICATIVO E NON ESAUSTIVO, LE GARANZIE IMPLICITE
+DI COMMERCIABILITÀ, IDONEITÀ A UNO SCOPO SPECIFICO E NON
+VIOLAZIONE DI DIRITTI DI TERZI.
+
+L'Autore non garantisce che il Software sia privo di errori,
+che il suo funzionamento sia ininterrotto, sicuro o privo di
+vulnerabilità, né che i risultati ottenuti dal suo utilizzo
+siano accurati o affidabili.
+
+
+ARTICOLO 7 — LIMITAZIONE DI RESPONSABILITÀ
+
+In nessun caso l'Autore sarà responsabile per danni di qualsiasi
+natura, diretti, indiretti, incidentali, speciali, consequenziali
+o punitivi, inclusi, a titolo esemplificativo, perdita di dati,
+perdita di profitti, interruzione dell'attività o danni all'immagine,
+derivanti dall'uso, dall'impossibilità di usare o dalle prestazioni
+del Software, anche qualora l'Autore sia stato informato della
+possibilità di tali danni.
+
+
+ARTICOLO 8 — LEGGE APPLICABILE E FORO COMPETENTE
+
+La presente licenza è regolata dalla legge italiana. Per qualsiasi
+controversia relativa all'interpretazione, alla validità o
+all'esecuzione della presente licenza, le parti eleggono quale
+foro esclusivamente competente il Tribunale nella cui
+giurisdizione risiede l'Autore al momento della controversia.
+
+
+ARTICOLO 9 — DISPOSIZIONI FINALI
+
+Qualora una o più clausole della presente licenza siano dichiarate
+nulle, invalide o inapplicabili da un'autorità giudiziaria
+competente, le restanti clausole conservano piena efficacia.
+La mancata applicazione di una o più disposizioni della presente
+licenza da parte dell'Autore non costituisce rinuncia al diritto
+di farle valere in futuro.
+
+La presente licenza può essere aggiornata dall'Autore in qualsiasi
+momento. La versione in vigore è quella pubblicata nel repository
+al momento della consultazione.
+
+
+───────────────────────────────────────────────────────────────
+  PART II — ENGLISH TRANSLATION (for reference only;
+             the Italian text above is the legally binding version)
+───────────────────────────────────────────────────────────────
+
+PROPRIETARY LICENSE FOR THE SOFTWARE "Payroll Gang Suite"
+
+Author and rights holder: Fabrizio Papa
+Year of first publication: 2026
+
+
+ARTICLE 1 — NATURE OF THE LICENSE AND INTELLECTUAL PROPERTY
+
+This software, named "Payroll Gang Suite" (hereinafter "Software"),
+together with all source files, compiled files, configuration files,
+documentation and associated resources, is the exclusive property
+of Fabrizio Papa (hereinafter "Author").
+
+The Software is protected by Italian and international copyright
+and intellectual property laws. The publication of source code on
+public hosting platforms, including GitHub, does NOT constitute
+assignment, implied license, abandonment or waiver of any
+intellectual property right by the Author, nor does it grant users
+any right of use beyond what is expressly provided in this license.
+
+
+ARTICLE 2 — PURPOSE OF PUBLICATION
+
+The Software is made publicly visible solely for the purpose of:
+
+  a) showcasing the Author's technical skills as part of a
+     professional portfolio;
+  b) allowing technical evaluation of the code by potential
+     employers, recruiters or collaborators, subject to this
+     license.
+
+Any use beyond these purposes is subject to the restrictions in
+Article 3 and requires prior written consent from the Author
+pursuant to Article 5.
+
+
+ARTICLE 3 — PROHIBITED USES
+
+Without the Author's prior written consent, the following actions
+are strictly prohibited, in whole or in part, directly or
+indirectly, whether for compensation or free of charge:
+
+  3.1  COMMERCIAL USE
+       Using the Software, or any part thereof, for commercial,
+       productive, lucrative or profit-oriented purposes.
+
+  3.2  MODIFICATION AND DERIVATIVE WORKS
+       Modifying, adapting, translating, decompiling, disassembling,
+       reverse engineering, creating derivative works or otherwise
+       altering the Software or any of its components.
+
+  3.3  REDISTRIBUTION
+       Copying, distributing, publishing, sublicensing, selling,
+       renting, assigning or transferring the Software or any part
+       thereof, whether in source, compiled or executable form.
+
+  3.4  USE FOR ARTIFICIAL INTELLIGENCE
+       Using the Software, its source code, structure, algorithms
+       or any other part thereof as training, validation or test
+       data for artificial intelligence systems, machine learning
+       models, large language models (LLMs) or similar technologies,
+       regardless of the final use of such systems.
+
+  3.5  REMOVAL OF COPYRIGHT NOTICES
+       Removing, altering, obscuring or replacing copyright notices,
+       this license, references to the Author or any other
+       indication of ownership rights in the Software.
+
+  3.6  PROVIDING THE SOFTWARE AS A SERVICE
+       Running the Software on public servers, corporate networks
+       or cloud infrastructure in a manner that makes it accessible
+       to third parties, including free-of-charge, in any SaaS,
+       PaaS or hosted form intended for users other than the Author.
+
+
+ARTICLE 4 — LIMITED PERMISSIONS
+
+Notwithstanding Article 3, the following actions are permitted:
+
+  4.1  Viewing the Software's source code through GitHub's public
+       interface or by locally cloning the repository.
+
+  4.2  Cloning the repository and running the Software locally,
+       on personal machines, solely for the purpose of technical
+       evaluation (e.g. by recruiters, technical leads or potential
+       collaborators), provided all other terms of this license
+       are observed.
+
+The permissions granted in this article do not imply any grant
+of rights for purposes other than those indicated and do not
+constitute an implied license for further uses.
+
+
+ARTICLE 5 — AUTHORIZATION FOR OTHER USES
+
+Any use of the Software not expressly permitted by this license
+requires prior written agreement with the Author. Authorization
+requests may be directed to the Author via the contact details
+on the GitHub profile (https://github.com/fabriziopapa) or
+through the professional contact channels listed therein.
+
+
+ARTICLE 6 — DISCLAIMER OF WARRANTIES
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NON-INFRINGEMENT. THE AUTHOR DOES NOT WARRANT THAT THE SOFTWARE
+WILL BE ERROR-FREE, UNINTERRUPTED, SECURE OR FREE OF VULNERABILITIES.
+
+
+ARTICLE 7 — LIMITATION OF LIABILITY
+
+IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DAMAGES OF ANY
+KIND, INCLUDING BUT NOT LIMITED TO LOSS OF DATA, LOSS OF PROFITS,
+BUSINESS INTERRUPTION OR REPUTATIONAL HARM, ARISING OUT OF OR IN
+CONNECTION WITH THE USE OR INABILITY TO USE THE SOFTWARE, EVEN IF
+THE AUTHOR HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+
+ARTICLE 8 — GOVERNING LAW AND JURISDICTION
+
+This license is governed by Italian law. Any dispute relating to
+the interpretation, validity or enforcement of this license shall
+be subject to the exclusive jurisdiction of the Italian court
+competent for the Author's place of residence at the time of
+the dispute.
+
+
+ARTICLE 9 — SEVERABILITY AND FINAL PROVISIONS
+
+If any provision of this license is held invalid or unenforceable,
+the remaining provisions shall remain in full force and effect.
+Failure to enforce any provision shall not constitute a waiver of
+the right to enforce it in the future. The Author reserves the
+right to update this license at any time; the version in force
+is the one published in the repository at the time of access.
+
+════════════════════════════════════════════════════════════════
+Copyright (c) 2026 Fabrizio Papa. All rights reserved.
+════════════════════════════════════════════════════════════════

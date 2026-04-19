@@ -1,0 +1,55 @@
+# ── Ambiente ─────────────────────────────────────────────────
+.env
+.env.local
+*.pem
+*.key
+
+# ── Dipendenze ───────────────────────────────────────────────
+node_modules/
+**/node_modules/
+
+# ── Build ────────────────────────────────────────────────────
+dist/
+build/
+client/dist/
+server/dist/
+*.tsbuildinfo
+
+# ── Log ──────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── OS ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE / Editor ─────────────────────────────────────────────
+.vscode/
+.idea/
+.cursor/
+
+# ── Audit ────────────────────────────────────────────────────
+audit-log.json
+
+# ── Dati HR (anagrafiche/voci — contengono dati personali) ───
+*.xml
+*.csv
+
+# ── File temporanei / junk ───────────────────────────────────
+*.txt
+*.png
+*.py
+admin-qr.html
+
+# ── Documenti interni non distribuibili ──────────────────────
+PROMPT_MULTI_AGENTE.md
+STATO_PROGETTO.md
+
+# ── Legacy root src (non usato, solo in radice) ──────────────
+/src/
+
+# ── SQL — copie di lavoro / file orfani ──────────────────────
+server/sql/setup - Copy.sql
+
+# ── Config server con dominio reale (usare nginx.conf.example) ─
+nginx.conf

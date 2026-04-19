@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)",
+      "Bash(xargs grep:*)",
+      "Bash(git -C \"/mnt/c/Users/segreteria/php\" status)",
+      "Bash(git -C \"C:/Users/segreteria/php\" status)",
+      "Bash(cmd.exe /c \"git status\")",
+      "Bash(ls /mnt/)",
+      "Read(//c//**)",
+      "Bash(git -C /c/Users/segreteria/php init --dry-run)",
+      "Bash(nslookup -type=MX fabriziopapa.com)",
+      "Bash(dig MX fabriziopapa.com)",
+      "Bash(nslookup -type=TXT fabriziopapa.com)",
+      "Bash(nslookup -type=TXT _dmarc.fabriziopapa.com)",
+      "Bash(nslookup -type=TXT _domainkey.fabriziopapa.com)",
+      "Bash(npm install:*)",
+      "Bash(findstr /i \"build\\\\|start\\\\|dist\\\\|out\")",
+      "Bash(grep -E \"\\\\.md$|^d\")",
+      "Bash(dir \"C:\\\\Users\\\\segreteria\\\\php\" /b /a-d)",
+      "Read(//mnt/**)"
+    ]
+  }
+}

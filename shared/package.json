@@ -1,0 +1,10 @@
+{
+  "name": "@payroll-gang/shared",
+  "version": "26.4.11",
+  "private": true,
+  "type": "module",
+  "main": "./types/index.ts",
+  "scripts": {
+    "build": "echo 'shared: nessun build necessario'"
+  }
+}
