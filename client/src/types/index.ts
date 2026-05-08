@@ -8,7 +8,7 @@
 // ------------------------------------------------------------
 
 export const APP_NAME = 'Payroll Gang Suite' as const;
-export const APP_VERSION = '26.04.11' as const;
+export const APP_VERSION = '26.05.08' as const;
 
 // ------------------------------------------------------------
 // RUOLI
