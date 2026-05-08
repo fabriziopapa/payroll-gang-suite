@@ -8,17 +8,20 @@ import { bozzeApi, type BozzaApi } from '../api/endpoints'
 import { showToast } from '../components/ToastManager'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 
+const PAGE_SIZE = 6
+
 export default function DashboardPage() {
   const {
     bozze, setBozze, upsertBozza, removeBozza,
-    newLiquidazione, loadBozzaInEditor,
+    newLiquidazione, loadBozzaInEditor, loadBozzaInViewer,
     setLoading, isLoading,
     user,
   } = useStore()
 
-  const [filter, setFilter] = useState<'tutte' | 'bozza' | 'archiviata'>('bozza')
-  const [deleting, setDeleting] = useState<string | null>(null)
-  const [archiving, setArchiving] = useState<string | null>(null)
+  const [filter, setFilter]               = useState<'tutte' | 'bozza' | 'archiviata'>('bozza')
+  const [page, setPage]                   = useState(1)
+  const [deleting, setDeleting]           = useState<string | null>(null)
+  const [archiving, setArchiving]         = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   // Carica bozze al mount
@@ -41,8 +44,14 @@ export default function DashboardPage() {
     filter === 'tutte' ? true : b.stato === filter,
   )
 
-  const countBozze     = bozze.filter(b => b.stato === 'bozza').length
+  const totalPages  = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const pagedItems  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
+  const countBozze      = bozze.filter(b => b.stato === 'bozza').length
   const countArchiviate = bozze.filter(b => b.stato === 'archiviata').length
+
+  // reset page on filter change
+  useEffect(() => { setPage(1) }, [filter])
 
   async function handleArchive(b: BozzaApi) {
     setArchiving(b.id)
@@ -118,21 +127,50 @@ export default function DashboardPage() {
       ) : filtered.length === 0 ? (
         <EmptyState onNew={() => newLiquidazione()} filter={filter} />
       ) : (
-        <div className="space-y-2">
-          {filtered.map(b => (
-            <BozzaCard
-              key={b.id}
-              bozza={b}
-              isOwn={b.createdBy === user?.id}
-              createdByUsername={b.createdByUsername}
-              onOpen={() => loadBozzaInEditor(b)}
-              onArchive={() => handleArchive(b)}
-              onDelete={() => setConfirmDeleteId(b.id)}
-              isArchiving={archiving === b.id}
-              isDeleting={deleting === b.id}
-            />
-          ))}
-        </div>
+        <>
+          <div className="space-y-2">
+            {pagedItems.map(b => (
+              <BozzaCard
+                key={b.id}
+                bozza={b}
+                isOwn={b.createdBy === user?.id}
+                createdByUsername={b.createdByUsername}
+                onOpen={() => loadBozzaInEditor(b)}
+                onView={() => loadBozzaInViewer(b)}
+                onArchive={() => handleArchive(b)}
+                onDelete={() => setConfirmDeleteId(b.id)}
+                isArchiving={archiving === b.id}
+                isDeleting={deleting === b.id}
+              />
+            ))}
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-4 px-1 text-sm text-slate-400">
+              <span>{(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} di {filtered.length}</span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className="px-2 py-1 rounded-md hover:bg-slate-800 transition disabled:opacity-30 disabled:cursor-not-allowed"
+                >‹</button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                  <button
+                    key={p}
+                    onClick={() => setPage(p)}
+                    className={`min-w-[2rem] px-2 py-1 rounded-md transition
+                      ${p === page ? 'bg-indigo-600 text-white font-medium' : 'hover:bg-slate-800'}`}
+                  >{p}</button>
+                ))}
+                <button
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className="px-2 py-1 rounded-md hover:bg-slate-800 transition disabled:opacity-30 disabled:cursor-not-allowed"
+                >›</button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <ConfirmDialog
@@ -168,11 +206,12 @@ function StatCard({ label, value, color }: {
   )
 }
 
-function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onArchive, onDelete, isArchiving, isDeleting }: {
+function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onView, onArchive, onDelete, isArchiving, isDeleting }: {
   bozza:              BozzaApi
   isOwn:              boolean
   createdByUsername:  string | null
   onOpen:             () => void
+  onView:             () => void
   onArchive:          () => void
   onDelete:           () => void
   isArchiving:        boolean
@@ -244,7 +283,7 @@ function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onArchive, onDelet
           - Archiviata:   sempre visibili (Ripristina + Elimina chiaramente accessibili) */}
       <div className={`flex items-center gap-1 transition
                        ${isArchiviata ? '' : 'opacity-0 group-hover:opacity-100'}`}>
-        {!isArchiviata && (
+        {!isArchiviata ? (
           <button
             onClick={onOpen}
             className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
@@ -253,6 +292,19 @@ function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onArchive, onDelet
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                 d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+          </button>
+        ) : (
+          <button
+            onClick={onView}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-sky-400 hover:bg-sky-950/30 transition"
+            title="Visualizza (sola lettura)"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
             </svg>
           </button>
         )}

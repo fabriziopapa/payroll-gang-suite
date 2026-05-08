@@ -57,6 +57,16 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    id:    'ricerca',
+    label: 'Ricerca',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+      </svg>
+    ),
+  },
+  {
     id:    'impostazioni',
     label: 'Impostazioni',
     icon: (
@@ -85,7 +95,7 @@ interface LayoutProps {
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const { currentPage, navigate, user, clearAuth, isDirty, currentBozzaNome } = useStore()
+  const { currentPage, navigate, user, clearAuth, isDirty, currentBozzaNome, viewerBozza } = useStore()
 
   // Nav items dinamici: "Utenti" visibile solo agli admin
   const visibleNavItems = NAV_ITEMS.filter(item =>
@@ -102,6 +112,7 @@ export default function Layout({ children }: LayoutProps) {
   }
 
   const isEditor = currentPage === 'editor'
+  const isViewer = currentPage === 'viewer'
 
   return (
     <div className="h-screen bg-slate-950 flex overflow-hidden">
@@ -136,7 +147,7 @@ export default function Layout({ children }: LayoutProps) {
               className={`
                 w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
                 transition-colors text-left
-                ${currentPage === item.id || (isEditor && item.id === 'dashboard')
+                ${currentPage === item.id || ((isEditor || isViewer) && item.id === 'dashboard')
                   ? 'bg-indigo-600/20 text-indigo-400'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'}
               `}
@@ -230,6 +241,21 @@ export default function Layout({ children }: LayoutProps) {
                     Non salvato
                   </span>
                 )}
+              </div>
+            ) : isViewer ? (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => navigate('dashboard')}
+                  className="text-slate-400 hover:text-white text-sm transition"
+                >
+                  Dashboard
+                </button>
+                <span className="text-slate-600">/</span>
+                <span className="text-white text-sm font-medium truncate">{viewerBozza?.nome || 'Liquidazione'}</span>
+                <span className="text-xs bg-slate-800 text-slate-400 border border-slate-700
+                                 px-1.5 py-0.5 rounded-full shrink-0">
+                  Sola lettura
+                </span>
               </div>
             ) : (
               <h1 className="text-white font-semibold text-sm">

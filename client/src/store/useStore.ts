@@ -22,6 +22,8 @@ export type PageId =
   | 'login'
   | 'dashboard'
   | 'editor'
+  | 'viewer'
+  | 'ricerca'
   | 'anagrafiche'
   | 'voci'
   | 'capitoli'
@@ -73,6 +75,9 @@ interface AppStore {
   protocolloDisplay: string
   isDirty:           boolean
 
+  // ── Viewer (sola lettura archiviate)
+  viewerBozza: BozzaApi | null
+
   // ── Dati da DB
   bozze:        BozzaApi[]
   anagrafiche:  AnagraficaApi[]
@@ -95,8 +100,9 @@ interface AppStore {
   navigate: (page: PageId) => void
 
   // ── Actions Editor
-  newLiquidazione:   (nome?: string) => void
-  loadBozzaInEditor: (bozza: BozzaApi) => void
+  newLiquidazione:    (nome?: string) => void
+  loadBozzaInEditor:  (bozza: BozzaApi) => void
+  loadBozzaInViewer:  (bozza: BozzaApi) => void
   addNominativo:     (data: Omit<Nominativo, 'id'>) => string
   updateNominativo:  (id: string, updates: Partial<Nominativo>) => void
   removeNominativo:  (id: string) => void
@@ -135,6 +141,7 @@ export const useStore = create<AppStore>()(
     accessToken:       null,
     bootstrapDone:     false,
     currentPage:       'login',
+    viewerBozza:       null,
     currentBozzaId:    null,
     currentBozzaNome:  '',
     nominativi:        [],
@@ -206,6 +213,12 @@ export const useStore = create<AppStore>()(
         s.currentPage       = 'editor'
       })
     },
+
+    loadBozzaInViewer: (bozza) =>
+      set(s => {
+        s.viewerBozza = bozza
+        s.currentPage = 'viewer'
+      }),
 
     addNominativo: (data) => {
       const id = uid()

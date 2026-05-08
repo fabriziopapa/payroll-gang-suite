@@ -21,6 +21,8 @@ import VociPage           from './pages/VociPage'
 import CapitoliPage       from './pages/CapitoliPage'
 import ImpostazioniPage   from './pages/ImpostazioniPage'
 import GestioneUtentiPage from './pages/GestioneUtentiPage'
+import ViewerPage         from './pages/ViewerPage'
+import RicercaPage        from './pages/RicercaPage'
 
 export default function App() {
   const {
@@ -111,6 +113,8 @@ export default function App() {
       {currentPage === 'capitoli'     && <CapitoliPage />}
       {currentPage === 'impostazioni' && <ImpostazioniPage />}
       {currentPage === 'utenti'       && <GestioneUtentiPage />}
+      {currentPage === 'viewer'       && <ViewerPage />}
+      {currentPage === 'ricerca'      && <RicercaPage />}
     </Layout>
   )
 }

@@ -56,8 +56,8 @@ export function buildCsvRows(
         ruolo:                       nom.ruolo,
         codiceVoce:                  det.voce,
         identificativoProvvedimento: det.identificativoProvvedimento,
-        tipoProvvedimento:           det.tipoProvvedimento,
-        numeroProvvedimento:         det.numeroProvvedimento,
+        tipoProvvedimento:           '',
+        numeroProvvedimento:         '',
         dataProvvedimento:           det.dataProvvedimento,
         annoCompetenzaLiquidazione:  anno,
         meseCompetenzaLiquidazione:  mese,
@@ -84,13 +84,13 @@ export function buildCsvRows(
 
 /** Header CSV HR (24 colonne) */
 const CSV_HEADER = [
-  'MATRICOLA', 'COMPARTO', 'RUOLO', 'CODICE_VOCE',
-  'IDENTIFICATIVO_PROVVEDIMENTO', 'TIPO_PROVVEDIMENTO', 'NUMERO_PROVVEDIMENTO',
-  'DATA_PROVVEDIMENTO', 'ANNO_COMPETENZA', 'MESE_COMPETENZA',
-  'DATA_COMPETENZA_VOCE', 'CODICE_STATO_VOCE', 'ALIQUOTA', 'PARTI',
-  'IMPORTO', 'CODICE_DIVISA', 'CODICE_ENTE', 'CODICE_CAPITOLO',
-  'CODICE_CENTRO_DI_COSTO', 'RIFERIMENTO', 'CODICE_RIFERIMENTO_VOCE',
-  'FLAG_ADEMPIMENTI', 'ID_CONTRATTO_CSA', 'NOTA',
+  'matricola', 'comparto', 'ruolo', 'codiceVoce',
+  'identificativoProvvedimento', 'tipoProvvedimento', 'numeroProvvedimento',
+  'dataProvvedimento', 'annoCompetenzaLiquidazione', 'meseCompetenzaLiquidazione',
+  'dataCompetenzaVoce', 'codiceStatoVoce', 'aliquota', 'parti',
+  'importo', 'codiceDivisa', 'codiceEnte', 'codiceCapitolo',
+  'codiceCentroDiCosto', 'riferimento', 'codiceRiferimentoVoce',
+  'flagAdempimenti', 'idContrattoCSA', 'nota',
 ].join(';')
 
 /**

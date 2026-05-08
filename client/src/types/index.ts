@@ -32,6 +32,13 @@ export type RuoloScorporabile = 'PA' | 'PO' | 'RD' | 'RU' | 'ND';
 /** Indica come il nominativo è stato aggiunto alla bozza */
 export type OrigineNominativo = 'pdf' | 'manuale';
 
+/** Singola voce del budget interno di un nominativo */
+export interface ImportoBudgetItem {
+  id:          string
+  descrizione: string
+  importo:     number
+}
+
 /**
  * Rappresenta una persona fisica associata a un DettaglioLiquidazione.
  * Può provenire dal PDF (mock OCR) o essere inserita manualmente.
@@ -60,6 +67,11 @@ export interface Nominativo {
    * Resettato a false dopo un aggiornamento automatico riuscito da DB.
    */
   ruoloModificato?: boolean;
+  /**
+   * Voci di budget interne. Se presente, importoLordo = sum(importoBudget[].importo).
+   * Opzionale per backward compat: nominativi senza budget usano solo importoLordo.
+   */
+  importoBudget?: ImportoBudgetItem[];
 }
 
 // ------------------------------------------------------------
@@ -297,7 +309,7 @@ export interface CsvExportRow {
   annoCompetenzaLiquidazione: string;
   meseCompetenzaLiquidazione: string;
   dataCompetenzaVoce: string;
-  codiceStatoVoce: '';
+  codiceStatoVoce: 'E';
   aliquota: number;
   parti: number;
   importo: number;

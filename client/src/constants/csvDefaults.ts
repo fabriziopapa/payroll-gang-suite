@@ -16,8 +16,8 @@ export const CSV_FIXED = {
   codiceDivisa: 'E' as const,
   /** Codice ente — fisso per l'ateneo */
   codiceEnte: '000000' as const,
-  /** Codice stato voce — sempre vuoto */
-  codiceStatoVoce: '' as const,
+  /** Codice stato voce — sempre "E" (Elaborato) */
+  codiceStatoVoce: 'E' as const,
   /** Codice riferimento voce — sempre vuoto */
   codiceRiferimentoVoce: '' as const,
 } as const;

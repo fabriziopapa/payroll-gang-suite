@@ -14,6 +14,7 @@ import RuoloDisambiguaModal, { type DisambiguaItem } from '../RuoloDisambiguaMod
 import ConflittoRuoloModal, { type ConflittoItem } from '../ConflittoRuoloModal'
 import ComunicazioneModal from './ComunicazioneModal'
 import type { Comunicazione } from '../../types'
+import BudgetPanel from './BudgetPanel'
 
 interface Props {
   dettaglio:        DettaglioLiquidazione
@@ -27,7 +28,8 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
     updateNominativo, settings,
     comunicazioni, addComunicazione, updateComunicazione, removeComunicazione,
   } = useStore()
-  const [collapsed, setCollapsed]     = useState(false)
+  const [collapsed, setCollapsed]             = useState(false)
+  const [editingImportoNomId, setEditingImportoNomId] = useState<string | null>(null)
   const [aggRuoloLoading, setAggRuoloLoading] = useState(false)
   const [disambiguaItems, setDisambiguaItems] = useState<DisambiguaItem[]>([])
   const [conflittoItems, setConflittoItems]   = useState<ConflittoItem[]>([])
@@ -476,13 +478,20 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
                 </tr>
               </thead>
               <tbody>
-                {noms.map(nom => (
+                {noms.map((nom, idx) => (
                   <NominativoRow
                     key={nom.id}
                     nom={nom}
                     dettaglio={dettaglio}
                     coefficienti={settings.coefficienti}
                     onRemove={() => setRemoveConfirmId(nom.id)}
+                    isEditingImporto={editingImportoNomId === nom.id}
+                    onStartEditImporto={() => setEditingImportoNomId(nom.id)}
+                    onStopEditImporto={() => setEditingImportoNomId(null)}
+                    onCommitAndNext={() => {
+                      const next = noms[idx + 1]
+                      setEditingImportoNomId(next ? next.id : null)
+                    }}
                   />
                 ))}
               </tbody>
@@ -529,26 +538,44 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
 
 // ── Riga nominativo ───────────────────────────────────────────
 
-function NominativoRow({ nom, dettaglio, coefficienti, onRemove }: {
-  nom:          Nominativo
-  dettaglio:    DettaglioLiquidazione
-  coefficienti: ReturnType<typeof useStore.getState>['settings']['coefficienti']
-  onRemove:     () => void
+function NominativoRow({ nom, dettaglio, coefficienti, onRemove,
+  isEditingImporto, onStartEditImporto, onStopEditImporto, onCommitAndNext,
+}: {
+  nom:                  Nominativo
+  dettaglio:            DettaglioLiquidazione
+  coefficienti:         ReturnType<typeof useStore.getState>['settings']['coefficienti']
+  onRemove:             () => void
+  isEditingImporto:     boolean
+  onStartEditImporto:   () => void
+  onStopEditImporto:    () => void
+  onCommitAndNext:      () => void
 }) {
   const { updateNominativo } = useStore()
   const importoCSV = calcolaImportoCSV(nom, dettaglio, coefficienti)
   const scorporato = dettaglio.flagScorporo && importoCSV !== nom.importoLordo
 
-  const [editingImporto, setEditingImporto] = useState(false)
-  const [tempImporto, setTempImporto]       = useState(String(nom.importoLordo))
+  const [tempImporto, setTempImporto] = useState(String(nom.importoLordo))
+  const [budgetAnchorEl, setBudgetAnchorEl] = useState<HTMLElement | null>(null)
+  const importoInputRef = useRef<HTMLInputElement>(null)
 
   const [editingRuolo, setEditingRuolo] = useState(false)
   const [tempRuolo, setTempRuolo]       = useState(nom.ruolo)
 
+  // Auto-focus + select when entering edit mode
+  useEffect(() => {
+    if (isEditingImporto) {
+      setTempImporto(nom.importoLordo === 0 ? '' : String(nom.importoLordo))
+      setTimeout(() => {
+        importoInputRef.current?.focus()
+        importoInputRef.current?.select()
+      }, 0)
+    }
+  }, [isEditingImporto]) // eslint-disable-line react-hooks/exhaustive-deps
+
   function commitImporto() {
     const val = parseFloat(tempImporto.replace(',', '.'))
-    if (!isNaN(val)) updateNominativo(nom.id, { importoLordo: val })
-    setEditingImporto(false)
+    if (!isNaN(val)) updateNominativo(nom.id, { importoLordo: val, importoBudget: undefined })
+    onStopEditImporto()
   }
 
   function commitRuolo() {
@@ -556,7 +583,7 @@ function NominativoRow({ nom, dettaglio, coefficienti, onRemove }: {
     if (val) {
       updateNominativo(nom.id, {
         ruolo:           val,
-        ruoloModificato: true,   // marca come modifica manuale
+        ruoloModificato: true,
       })
     }
     setEditingRuolo(false)
@@ -606,32 +633,54 @@ function NominativoRow({ nom, dettaglio, coefficienti, onRemove }: {
         )}
       </td>
       <td className="px-4 py-2 text-right text-sm font-mono">
-        {editingImporto ? (
+        {isEditingImporto ? (
           <input
-            autoFocus
+            ref={importoInputRef}
             type="number"
             step="0.01"
             value={tempImporto}
             onChange={e => setTempImporto(e.target.value)}
             onBlur={commitImporto}
             onKeyDown={e => {
-              if (e.key === 'Enter')  commitImporto()
-              if (e.key === 'Escape') setEditingImporto(false)
+              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault()
+              if (e.key === 'Enter')  { commitImporto(); onCommitAndNext() }
+              if (e.key === 'Escape') onStopEditImporto()
             }}
             className="w-28 px-2 py-0.5 rounded bg-slate-700 border border-indigo-500
                        text-white text-sm text-right outline-none"
           />
         ) : (
-          <button
-            onClick={() => {
-              setTempImporto(nom.importoLordo === 0 ? '' : String(nom.importoLordo))
-              setEditingImporto(true)
+          <span className="inline-flex items-center gap-1 justify-end">
+            <button
+              onClick={onStartEditImporto}
+              title="Clicca per modificare"
+              className={`hover:text-white transition ${nom.importoLordo === 0 ? 'text-amber-400' : 'text-slate-300'}`}
+            >
+              {formatEur(nom.importoLordo)}
+            </button>
+            <button
+              onClick={e => setBudgetAnchorEl(e.currentTarget)}
+              title={nom.importoBudget && nom.importoBudget.length > 0
+                ? `Badge importo (${nom.importoBudget.length} ${nom.importoBudget.length === 1 ? 'voce' : 'voci'})`
+                : 'Badge importo — scomponi in voci'}
+              className={`w-5 h-5 rounded flex items-center justify-center text-xs font-bold transition
+                ${nom.importoBudget && nom.importoBudget.length > 0
+                  ? 'bg-indigo-600/40 text-indigo-300 border border-indigo-600/60 hover:bg-indigo-600/60'
+                  : 'bg-slate-800 text-slate-500 border border-slate-700 hover:bg-slate-700 hover:text-indigo-400'}`}
+            >+</button>
+          </span>
+        )}
+        {budgetAnchorEl && (
+          <BudgetPanel
+            initialItems={nom.importoBudget ?? []}
+            initialSingle={nom.importoLordo}
+            anchorEl={budgetAnchorEl}
+            onConfirm={(total, items) => {
+              updateNominativo(nom.id, { importoLordo: total, importoBudget: items })
+              setBudgetAnchorEl(null)
             }}
-            title="Clicca per modificare"
-            className={`hover:text-white transition ${nom.importoLordo === 0 ? 'text-amber-400' : 'text-slate-300'}`}
-          >
-            {formatEur(nom.importoLordo)}
-          </button>
+            onClose={() => setBudgetAnchorEl(null)}
+          />
         )}
       </td>
       {dettaglio.flagScorporo && (

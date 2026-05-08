@@ -9,9 +9,10 @@
 import { useState, useMemo, useRef, useEffect, useId, cloneElement, isValidElement, Children } from 'react'
 import { useStore, type BozzaDati } from '../../store/useStore'
 import { anagraficheApi, bozzeApi, type AnagraficaApi } from '../../api/endpoints'
-import type { DettaglioLiquidazione, Nominativo } from '../../types'
+import type { DettaglioLiquidazione, Nominativo, ImportoBudgetItem } from '../../types'
 import RuoloDisambiguaModal, { type DisambiguaItem } from '../RuoloDisambiguaModal'
 import { useModalKeyboard } from '../../hooks/useFocusTrap'
+import BudgetPanel from './BudgetPanel'
 
 interface Props {
   dettaglio: DettaglioLiquidazione
@@ -25,12 +26,84 @@ type Tab = 'manuale' | 'incolla' | 'copia'
 type PasteStatus = 'found' | 'not_found' | 'multiple' | 'duplicate'
 
 interface PasteRow {
-  input:    string
-  status:   PasteStatus
-  match?:   AnagraficaApi
-  matches?: AnagraficaApi[]
-  chosen?:  string
-  include:  boolean
+  input:         string
+  status:        PasteStatus
+  match?:        AnagraficaApi
+  matches?:      AnagraficaApi[]
+  chosen?:       string
+  include:       boolean
+  importoParsed: number   // importo estratto dal testo incollato
+}
+
+/**
+ * Riconosce numeri in formato italiano ed inglese:
+ *   1200  |  1200,00  |  1200.00  |  1.200,00  |  1.200  |  1,200.00
+ * Restituisce null se la stringa non è riconoscibile come numero.
+ */
+function parseItalianNum(raw: string): number | null {
+  const s = raw.trim().replace(/\s/g, '')
+  if (!s) return null
+  const neg = s.startsWith('-')
+  const abs = neg ? s.slice(1) : s
+
+  let value: number | null = null
+  // 1.200,50 — ita millesimale + decimale
+  if (/^\d{1,3}(\.\d{3})*,\d{1,2}$/.test(abs))
+    value = parseFloat(abs.replace(/\./g, '').replace(',', '.'))
+  // 1200,50 — ita semplice
+  else if (/^\d+,\d{1,2}$/.test(abs))
+    value = parseFloat(abs.replace(',', '.'))
+  // 1,200.50 — eng millesimale + decimale
+  else if (/^\d{1,3}(,\d{3})*\.\d{1,2}$/.test(abs))
+    value = parseFloat(abs.replace(/,/g, ''))
+  // 1200.50 — plain decimal
+  else if (/^\d+\.\d{1,2}$/.test(abs))
+    value = parseFloat(abs)
+  // 1.200 o 1.200.500 — ita millesimale senza decimale (gruppi esattamente di 3)
+  else if (/^\d+(\.\d{3})+$/.test(abs))
+    value = parseFloat(abs.replace(/\./g, ''))
+  // 1200 — intero
+  else if (/^\d+$/.test(abs))
+    value = parseInt(abs, 10)
+
+  if (value === null || isNaN(value)) return null
+  return neg ? -value : value
+}
+
+/**
+ * Estrae (name, importo) da una riga incollata.
+ * Formati supportati:
+ *   1) "Cognome Nome ; importo"  — separatore ; o \t (unambiguo)
+ *   2) "Cognome Nome importo"    — ultimo token spazio = numero
+ *   3) "Cognome Nome"            — solo nome, importo = 0
+ *   4) "matricola"               — solo matricola, importo = 0
+ *   5) "Cognome"                 — solo cognome, importo = 0
+ */
+function parsePasteLine(raw: string): { name: string; importo: number } {
+  const line = raw.trim()
+  if (!line) return { name: '', importo: 0 }
+
+  // 1. Separatore esplicito ; o tab → unambiguo
+  for (const sep of [';', '\t']) {
+    const idx = line.indexOf(sep)
+    if (idx > 0) {
+      const left  = line.slice(0, idx).trim()
+      const right = line.slice(idx + 1).trim()
+      const num   = parseItalianNum(right)
+      if (num !== null && left.length > 0) return { name: left, importo: num }
+    }
+  }
+
+  // 2. Ultimo token spazio-separato come numero
+  const tokens = line.split(/\s+/)
+  if (tokens.length >= 2) {
+    const last = tokens[tokens.length - 1]!
+    const num  = parseItalianNum(last)
+    if (num !== null) return { name: tokens.slice(0, -1).join(' '), importo: num }
+  }
+
+  // 3. Nessun importo trovato — tutta la riga è il nome/matricola
+  return { name: line, importo: 0 }
 }
 
 interface BozzaSource {
@@ -50,11 +123,15 @@ interface GroupedAnag {
   record:    AnagraficaApi
 }
 
+function normStr(s: string) {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+}
+
 function searchAnagGrouped(query: string, anagrafiche: AnagraficaApi[]): GroupedAnag[] {
-  const words = query.toLowerCase().trim().split(/\s+/).filter(Boolean)
+  const words = normStr(query).trim().split(/\s+/).filter(Boolean)
   if (words.length === 0) return []
   const matches = anagrafiche.filter(a => {
-    const hay = `${a.cognNome} ${a.matricola}`.toLowerCase()
+    const hay = normStr(`${a.cognNome} ${a.matricola}`)
     return words.every(w => hay.includes(w))
   })
   const grouped = new Map<string, GroupedAnag>()
@@ -108,13 +185,30 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
 
   // ── Ricerca su anagrafiche ────────────────────────────────
 
-  /** Ricerca grezza (tutti i match, inclusi duplicati matricola) */
+  /** Normalizza stringa: lowercase + rimuove accenti */
+  function norm(s: string) {
+    return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  }
+
+  /**
+   * Ricerca grezza per tab Incolla:
+   * 1. Strict — tutti i token presenti nel hay (cognNome + matricola)
+   * 2. Fuzzy  — almeno un token (≥3 car) presente, se strict = 0
+   * Gestisce: cognome/nome in ordine qualsiasi, matricola parziale,
+   *           singolo cognome, singola matricola.
+   */
   function searchAnag(query: string): AnagraficaApi[] {
-    const words = query.toLowerCase().trim().split(/\s+/).filter(Boolean)
-    if (words.length === 0) return []
+    const tokens = norm(query).trim().split(/\s+/).filter(Boolean)
+    if (tokens.length === 0) return []
+    const strict = anagrafiche.filter(a => {
+      const hay = norm(`${a.cognNome} ${a.matricola}`)
+      return tokens.every(t => hay.includes(t))
+    })
+    if (strict.length > 0) return strict
+    // Fallback fuzzy: almeno un token significativo (≥3 car) trovato
     return anagrafiche.filter(a => {
-      const hay = `${a.cognNome} ${a.matricola}`.toLowerCase()
-      return words.every(w => hay.includes(w))
+      const hay = norm(`${a.cognNome} ${a.matricola}`)
+      return tokens.some(t => t.length >= 3 && hay.includes(t))
     })
   }
 
@@ -122,18 +216,26 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
   // TAB MANUALE
   // ═══════════════════════════════════════════════════════════
 
-  const [mSearch, setMSearch]       = useState('')
-  const [showDrop, setShowDrop]     = useState(false)
-  const [mMatricola, setMMatricola] = useState('')
-  const [mCognNome, setMCognNome]   = useState('')
-  const [mRuolo, setMRuolo]         = useState('')
-  const [mDruolo, setMDruolo]       = useState('')
-  const [mImporto, setMImporto]     = useState('')
-  const [filled, setFilled]         = useState(false)
+  const [mSearch, setMSearch]         = useState('')
+  const [showDrop, setShowDrop]       = useState(false)
+  const [mMatricola, setMMatricola]   = useState('')
+  const [mCognNome, setMCognNome]     = useState('')
+  const [mRuolo, setMRuolo]           = useState('')
+  const [mDruolo, setMDruolo]         = useState('')
+  const [mImporto, setMImporto]       = useState('')
+  const [filled, setFilled]           = useState(false)
   const [fillLoading, setFillLoading] = useState(false)
-  const searchRef                   = useRef<HTMLDivElement>(null)
+  const [addedFlash, setAddedFlash]         = useState(false)
+  const [confirmedBudget, setConfirmedBudget] = useState<ImportoBudgetItem[]>([])
+  const [budgetAnchorEl, setBudgetAnchorEl]   = useState<HTMLElement | null>(null)
+  const searchRef                             = useRef<HTMLDivElement>(null)
+  const searchInputRef                        = useRef<HTMLInputElement>(null)
   // fillRef: incrementato a ogni nuova ricerca — scarta risposte stale
-  const fillRef                     = useRef(0)
+  const fillRef                               = useRef(0)
+
+  const importoEffettivo = confirmedBudget.length > 0
+    ? confirmedBudget.reduce((s, b) => s + b.importo, 0)
+    : (parseFloat(mImporto.replace(',', '.')) || 0)
 
   // Stato disambiguation modal (tab manuale)
   const [disambiguaItems, setDisambiguaItems] = useState<DisambiguaItem[]>([])
@@ -197,16 +299,32 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
 
   function handleAddManuale(e: React.FormEvent) {
     e.preventDefault()
+    const importoLordo = importoEffettivo
+    const importoBudget: ImportoBudgetItem[] | undefined =
+      confirmedBudget.length > 0 ? confirmedBudget : undefined
     addNominativo({
       matricola:    mMatricola.trim(),
       cognomeNome:  mCognNome.trim(),
       ruolo:        mRuolo.trim().toUpperCase(),
       druolo:       mDruolo.trim(),
       dettaglioId:  dettaglio.id,
-      importoLordo: parseFloat(mImporto.replace(',', '.')) || 0,
+      importoLordo,
+      importoBudget,
       origine:      'manuale',
     })
-    onClose()
+    // Rimane aperto — reset form
+    setMSearch('')
+    setMMatricola('')
+    setMCognNome('')
+    setMRuolo('')
+    setMDruolo('')
+    setMImporto('')
+    setConfirmedBudget([])
+    setBudgetAnchorEl(null)
+    setFilled(false)
+    setAddedFlash(true)
+    setTimeout(() => setAddedFlash(false), 2000)
+    searchInputRef.current?.focus()
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -218,15 +336,13 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
   const [searched, setSearched]     = useState(false)
 
   async function handleSearch() {
-    const lines = pasteText
-      .split(/\r?\n/)
-      .map(l => l.split(/[,;]/)[0]?.trim() ?? '')
-      .filter(Boolean)
+    const rawLines = pasteText.split(/\r?\n/).filter(l => l.trim())
+    const parsed   = rawLines.map(parsePasteLine)
 
     // Fase 1: ricerca locale con deduplicazione per matricola
-    const preliminary: PasteRow[] = lines.map(line => {
-      const rawMatches = searchAnag(line)
-      if (rawMatches.length === 0) return { input: line, status: 'not_found', include: false }
+    const preliminary: PasteRow[] = parsed.map(({ name, importo }) => {
+      const rawMatches = searchAnag(name)
+      if (rawMatches.length === 0) return { input: name, status: 'not_found', include: false, importoParsed: importo }
 
       // Deduplica per matricola: tieni il primo record per ogni persona
       const seen = new Set<string>()
@@ -238,10 +354,10 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
 
       const single = matches.length === 1 ? matches[0]! : null
       if (single && alreadyIn.has(single.matricola)) {
-        return { input: line, status: 'duplicate', match: single, include: false }
+        return { input: name, status: 'duplicate', match: single, include: false, importoParsed: importo }
       }
-      if (single) return { input: line, status: 'found', match: single, include: true }
-      return { input: line, status: 'multiple', matches, include: false }
+      if (single) return { input: name, status: 'found', match: single, include: true, importoParsed: importo }
+      return { input: name, status: 'multiple', matches, include: false, importoParsed: importo }
     })
 
     setPasteRows(preliminary)
@@ -309,11 +425,17 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
         ruolo:        a.ruolo,
         druolo:       a.druolo ?? '',
         dettaglioId:  dettaglio.id,
-        importoLordo: 0,
+        importoLordo: r.importoParsed,
         origine:      'pdf',
       })
     }
     onClose()
+  }
+
+  function updatePasteImporto(idx: number, value: string) {
+    setPasteRows(prev => prev.map((r, i) =>
+      i === idx ? { ...r, importoParsed: parseFloat(value.replace(',', '.')) || 0 } : r,
+    ))
   }
 
   const pasteAddCount = pasteRows.filter(r => r.include).length
@@ -475,6 +597,15 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
           {/* ══ TAB MANUALE ══════════════════════════════════ */}
           {tab === 'manuale' && (
             <form id="manuale-form" onSubmit={handleAddManuale} className="px-5 py-4 space-y-4">
+              {addedFlash && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-900/30
+                                border border-emerald-800/60 text-emerald-400 text-sm">
+                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/>
+                  </svg>
+                  Nominativo aggiunto — inserisci il prossimo
+                </div>
+              )}
               <div ref={searchRef} className="relative">
                 <label className="block text-sm font-medium text-slate-300 mb-1.5">
                   Cerca nominativo, matricola o codice fiscale
@@ -484,7 +615,7 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
                   )}
                 </label>
                 <div className="relative">
-                  <input autoFocus value={mSearch} disabled={loading}
+                  <input ref={searchInputRef} autoFocus value={mSearch} disabled={loading}
                     onChange={e => { setMSearch(e.target.value); setShowDrop(true); setFilled(false) }}
                     onFocus={() => mSearch.length >= 2 && setShowDrop(true)}
                     placeholder="es. Papa Fabrizio  oppure  000123  oppure  PPAFBR…"
@@ -557,11 +688,45 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
                 </Field>
               </div>
 
-              <Field label="Importo lordo (€) *">
-                <input required type="number" step="0.01" value={mImporto}
-                  onChange={e => setMImporto(e.target.value)}
-                  placeholder="es. 1234.56" className={inputCls} />
-              </Field>
+              {/* ── Importo + Badge ───────────────────────── */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1.5">
+                  Importo lordo (€) *
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    required={confirmedBudget.length === 0}
+                    type={confirmedBudget.length > 0 ? 'text' : 'number'}
+                    step="0.01"
+                    readOnly={confirmedBudget.length > 0}
+                    value={confirmedBudget.length > 0
+                      ? importoEffettivo.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'
+                      : mImporto}
+                    onChange={e => { if (confirmedBudget.length === 0) setMImporto(e.target.value) }}
+                    placeholder="es. 1234.56"
+                    className={`${inputCls} flex-1 ${confirmedBudget.length > 0 ? 'bg-slate-700/50 text-emerald-400 font-mono cursor-default' : ''}`}
+                  />
+                  <button
+                    type="button"
+                    onClick={e => setBudgetAnchorEl(e.currentTarget)}
+                    title="Badge importo — scomponi in voci"
+                    className="px-3 py-2 rounded-lg bg-indigo-600/20 text-indigo-400
+                               border border-indigo-700/50 hover:bg-indigo-600/40 transition text-sm font-bold"
+                  >+</button>
+                </div>
+                {budgetAnchorEl && (
+                  <BudgetPanel
+                    initialItems={confirmedBudget}
+                    initialSingle={parseFloat(mImporto.replace(',', '.')) || 0}
+                    anchorEl={budgetAnchorEl}
+                    onConfirm={(_total, items) => {
+                      setConfirmedBudget(items)
+                      setBudgetAnchorEl(null)
+                    }}
+                    onClose={() => setBudgetAnchorEl(null)}
+                  />
+                )}
+              </div>
             </form>
           )}
 
@@ -603,7 +768,8 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
                     {pasteRows.map((row, idx) => (
                       <PasteResultRow key={idx} row={row}
                         onToggle={() => toggleInclude(idx)}
-                        onChoose={m => chooseMatch(idx, m)} />
+                        onChoose={m => chooseMatch(idx, m)}
+                        onImportoChange={v => updatePasteImporto(idx, v)} />
                     ))}
                   </div>
                 </div>
@@ -783,7 +949,7 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
             <button type="submit" form="manuale-form"
               className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500
                          text-white text-sm font-medium transition">
-              Aggiungi nominativo
+              Aggiungi
             </button>
           )}
           {tab === 'incolla' && (
@@ -809,10 +975,11 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
 
 // ── Riga risultato incolla ────────────────────────────────────
 
-function PasteResultRow({ row, onToggle, onChoose }: {
-  row:      PasteRow
-  onToggle: () => void
-  onChoose: (matricola: string) => void
+function PasteResultRow({ row, onToggle, onChoose, onImportoChange }: {
+  row:             PasteRow
+  onToggle:        () => void
+  onChoose:        (matricola: string) => void
+  onImportoChange: (value: string) => void
 }) {
   const statusIcon: Record<PasteStatus, React.ReactNode> = {
     found:      <span className="text-emerald-400 text-xs font-bold shrink-0">✓</span>,
@@ -822,6 +989,10 @@ function PasteResultRow({ row, onToggle, onChoose }: {
   }
 
   const canToggle = row.status === 'found' || (row.status === 'multiple' && !!row.chosen)
+
+  const [localImporto, setLocalImporto] = useState(
+    row.importoParsed > 0 ? String(row.importoParsed) : '',
+  )
 
   return (
     <div className={`px-3 py-2.5 flex items-start gap-3 ${row.include ? 'bg-indigo-900/10' : ''}`}>
@@ -859,6 +1030,22 @@ function PasteResultRow({ row, onToggle, onChoose }: {
           </div>
         )}
       </div>
+      {/* Importo editabile per riga */}
+      {(row.status === 'found' || (row.status === 'multiple' && !!row.chosen)) && (
+        <div className="shrink-0 flex items-center gap-1">
+          <input
+            type="number"
+            step="0.01"
+            value={localImporto}
+            onChange={e => { setLocalImporto(e.target.value); onImportoChange(e.target.value) }}
+            placeholder="€ 0"
+            className="w-24 px-2 py-1 rounded-lg bg-slate-700 border border-slate-600
+                       text-white text-xs text-right font-mono
+                       focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          />
+          <span className="text-slate-600 text-xs">€</span>
+        </div>
+      )}
     </div>
   )
 }

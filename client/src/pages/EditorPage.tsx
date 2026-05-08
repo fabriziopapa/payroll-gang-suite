@@ -77,6 +77,28 @@ export default function EditorPage() {
     downloadCsv(csv, `liquidazione_${nomePart}_${datePart}.csv`)
   }
 
+  // ── Export TXT matricole per ruolo (tutti i gruppi) ──────
+  function handleDownloadMatricoleTxt() {
+    const byRuolo: Record<string, Set<string>> = {}
+    for (const nom of nominativi) {
+      if (!byRuolo[nom.ruolo]) byRuolo[nom.ruolo] = new Set()
+      byRuolo[nom.ruolo]!.add(nom.matricola)
+    }
+    const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    const nomePart = currentBozzaNome.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30)
+    Object.entries(byRuolo).forEach(([ruolo, matricole], i) => {
+      setTimeout(() => {
+        const blob = new Blob([[...matricole].join('\n') + '\n'], { type: 'text/plain;charset=utf-8' })
+        const url  = URL.createObjectURL(blob)
+        const a    = Object.assign(document.createElement('a'), {
+          href: url, download: `matricole_${nomePart}_${ruolo}_${datePart}.txt`,
+        })
+        a.click()
+        URL.revokeObjectURL(url)
+      }, i * 150)
+    })
+  }
+
   // ── Rinomina bozza ────────────────────────────────────────
   function commitNome() {
     const n = tempNome.trim()
@@ -165,6 +187,23 @@ export default function EditorPage() {
                   d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
               </svg>
               <span className="hidden sm:inline">CSV HR</span>
+            </button>
+
+            <button
+              onClick={handleDownloadMatricoleTxt}
+              disabled={!canExport}
+              title={!canExport ? 'Aggiungi almeno un gruppo con nominativi' : 'Scarica matricole TXT per ruolo — tutti i gruppi'}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm
+                         bg-emerald-700/30 text-emerald-400 border border-emerald-800/50
+                         hover:bg-emerald-700/50 transition
+                         disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586
+                     a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+              <span className="hidden sm:inline">TXT Ruoli</span>
             </button>
 
             <button
