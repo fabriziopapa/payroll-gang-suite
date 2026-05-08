@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.4.x-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.5.x-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -46,10 +46,10 @@ payroll-gang-suite/
 ├── client/          # SPA React/Vite
 │   └── src/
 │       ├── api/         # Client API tipizzati
-│       ├── components/  # Componenti React
-│       ├── pages/       # Dashboard, Editor, Anagrafiche, …
+│       ├── components/  # Componenti React (BudgetPanel, Layout, …)
+│       ├── pages/       # Dashboard, Editor, Viewer, Ricerca, Anagrafiche, …
 │       ├── store/       # Stato globale Zustand
-│       ├── types/       # Interfacce TypeScript condivise
+│       ├── types/       # Interfacce TypeScript condivise (ImportoBudgetItem, …)
 │       └── utils/       # CSV / PDF / EML builder, calcoli scorporo
 ├── server/          # API REST Fastify
 │   └── src/
@@ -65,10 +65,16 @@ payroll-gang-suite/
 
 ## Funzionalità principali
 
-- **Dashboard** — lista liquidazioni per utente (bozze / archiviate), multi-utente con badge creatore
+- **Dashboard** — lista bozze paginate (6 per pagina), bozze attive e archiviate separate, multi-utente con badge creatore
 - **Editor** — gruppi di liquidazione, nominativi HR, importi, ruoli storici
+  - **Badge importo** — scomposizione dell'importo lordo in voci singole (floating panel), memorizzazione persistente in `importoBudget[]`
+  - **Navigazione Excel** — `Enter` su importo passa al nominativo successivo, frecce su/giù disabilitate sul campo numerico
+  - **Incolla lista** — parsing intelligente di righe incollate: rileva automaticamente importo in formato italiano (`1.200,00`) o inglese (`1,200.00`), ricerca fuzzy con normalizzazione accenti e fallback per token parziali
+- **Viewer** — visualizzazione read-only delle liquidazioni archiviate con export CSV/TXT attivi
+- **Ricerca** — ricerca fulltext cross-bozza (per nome o testo libero), report aggregati per matricola / voce / periodo con export CSV
 - **Import XML** — anagrafiche e voci da file DATAPACKET HR
-- **Export CSV** — tracciato HR ufficiale, calcolo scorporo automatico
+- **Export CSV** — tracciato HR ufficiale (header camelCase, `codiceStatoVoce=E`, `numeroProvvedimento` e `tipoProvvedimento` sempre vuoti), calcolo scorporo automatico
+- **Export TXT Ruoli** — file per ruolo con deduplicazione matricole (disponibile sia sul singolo gruppo che globale su tutta la bozza)
 - **Comunicazioni** — generazione email con allegato PDF nominale
 - **Gestione utenti** — admin panel, TOTP onboarding, ruoli admin/base
 
