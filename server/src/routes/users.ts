@@ -23,8 +23,14 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
 
   // ----------------------------------------------------------
   // DELETE /api/v1/users/:id — elimina utente
+  // SEC-C03: richiede header X-Confirm-Delete: true per operazioni distruttive
   // ----------------------------------------------------------
   app.delete('/:id', { preHandler }, async (request, reply) => {
+    // SEC-C03: protezione CSRF-like su operazioni distruttive
+    if (request.headers['x-confirm-delete'] !== 'true') {
+      return reply.code(400).send({ error: 'MISSING_CONFIRM_HEADER' })
+    }
+
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
 
     // Impedisce l'auto-cancellazione
@@ -88,6 +94,24 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
         default:
           throw err
       }
+    }
+  })
+
+  // ----------------------------------------------------------
+  // POST /api/v1/users/:id/unlock — sblocca account OTP (admin only)
+  // SEC-M01 FIX G: rimuove il lockout TOTP senza reimpostare la password
+  // ----------------------------------------------------------
+  app.post('/:id/unlock', { preHandler }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
+
+    try {
+      await app.authService.unlockUser(id, request.user!.id, request.ip)
+      return reply.send({ success: true })
+    } catch (err: any) {
+      if (err.message === 'USER_NOT_FOUND') {
+        return reply.code(404).send({ error: 'USER_NOT_FOUND' })
+      }
+      throw err
     }
   })
 

@@ -53,7 +53,11 @@ export interface BozzaApi {
   nome:               string
   stato:              'bozza' | 'archiviata'
   protocolloDisplay:  string | null
-  dati:               unknown
+  /**
+   * FIX H-1: `dati` assente nella risposta GET /bozze (lista).
+   * Presente solo in GET /bozze/:id (singola bozza, usata dall'editor/viewer).
+   */
+  dati?:              unknown
   createdBy:          string | null
   createdByUsername:  string | null
   createdAt:          string
@@ -131,7 +135,10 @@ export const usersApi = {
     apiFetch<UserManagementEntry[]>('/users'),
 
   delete: (id: string) =>
-    apiFetch<void>(`/users/${id}`, { method: 'DELETE' }),
+    apiFetch<void>(`/users/${id}`, {
+      method:  'DELETE',
+      headers: { 'X-Confirm-Delete': 'true' },
+    }),
 
   setActive: (id: string, active: boolean) =>
     apiFetch<{ success: boolean }>(`/users/${id}/active`, {
@@ -147,6 +154,10 @@ export const usersApi = {
       method: 'PUT',
       body:   JSON.stringify({ isAdmin }),
     }),
+
+  /** SEC-M01 FIX G: sblocca account bloccato per OTP (admin only). */
+  unlock: (id: string) =>
+    apiFetch<{ success: boolean }>(`/users/${id}/unlock`, { method: 'POST' }),
 }
 
 // ── Bozze ─────────────────────────────────────────────────────
@@ -154,6 +165,13 @@ export const usersApi = {
 export const bozzeApi = {
   list: () =>
     apiFetch<BozzaApi[]>('/bozze'),
+
+  /**
+   * FIX H-1: recupera una bozza completa (con campo `dati`) via GET /bozze/:id.
+   * Usata da RicercaPage dopo la lista summary, e dall'editor/viewer per caricare i dati.
+   */
+  getById: (id: string) =>
+    apiFetch<BozzaApi>(`/bozze/${id}`),
 
   create: (nome: string, dati: unknown, protocolloDisplay?: string) =>
     apiFetch<BozzaApi>('/bozze', {
@@ -174,7 +192,10 @@ export const bozzeApi = {
     apiFetch<BozzaApi>(`/bozze/${id}/restore`, { method: 'POST' }),
 
   delete: (id: string) =>
-    apiFetch<void>(`/bozze/${id}`, { method: 'DELETE' }),
+    apiFetch<void>(`/bozze/${id}`, {
+      method:  'DELETE',
+      headers: { 'X-Confirm-Delete': 'true' },
+    }),
 }
 
 // ── Anagrafiche ───────────────────────────────────────────────

@@ -105,7 +105,7 @@ export default function ImpostazioniPage() {
     try {
       await settingsApi.update({ rubrica: data })
       setSettings({ ...settings, rubrica: data })
-    } catch { showToast('Errore salvataggio rubrica', 'error') } finally { setSavingRub(false) }
+    } catch { showToast('Errore nel salvataggio della rubrica', 'error') } finally { setSavingRub(false) }
   }
 
   // ── Actions Modelli ───────────────────────────────────────
@@ -141,7 +141,7 @@ export default function ImpostazioniPage() {
     try {
       await settingsApi.update({ modelliComunicazione: data })
       setSettings({ ...settings, modelliComunicazione: data })
-    } catch { showToast('Errore salvataggio modello', 'error') } finally { setSavingMod(false) }
+    } catch { showToast('Errore nel salvataggio del modello', 'error') } finally { setSavingMod(false) }
   }
 
   const TABS: Array<{ id: Tab; label: string }> = [

@@ -16,6 +16,25 @@ import type {
 } from '../db/IRepository.js'
 
 // ------------------------------------------------------------
+// SEC-M02: sanitizzazione XML difensiva
+// Rimuove DOCTYPE e dichiarazioni ENTITY prima del parsing
+// per prevenire attacchi di entity expansion (billion laughs)
+// ------------------------------------------------------------
+
+function sanitizeXml(xml: string): string {
+  return xml
+    // Rimuove blocchi DOCTYPE (anche multiriga)
+    .replace(/<!DOCTYPE[\s\S]*?>/gi, '')
+    // Rimuove dichiarazioni ENTITY inline
+    .replace(/<!ENTITY[^>]*>/gi, '')
+    // SEC-M02 FIX C: rimuove SOLO i riferimenti a entità non-standard (es. &xxe;, &foo;).
+    // Mantiene le 5 entità XML built-in: &amp; &lt; &gt; &quot; &apos;
+    // (es. "Dipartimento di Fisica &amp; Chimica" viene preservato correttamente).
+    // La negative lookahead impedisce di strippare entità valide.
+    .replace(/&(?!amp;|lt;|gt;|quot;|apos;)\w+;/g, '')
+}
+
+// ------------------------------------------------------------
 // Parser XML minimale (senza dipendenze esterne)
 // Il formato DATAPACKET usa solo attributi su tag <ROW ... />
 // ------------------------------------------------------------
@@ -80,12 +99,22 @@ function parseDateV2(s: string | undefined): string | undefined {
   return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`
 }
 
+// FIX M-3: limite massimo righe per import — prevenzione OOM / attacchi DoS
+const MAX_IMPORT_ROWS = 5_000
+
 export async function importAnagrafiche(
   xmlContent:        string,
   repo:              IAnagraficheRepository,
   dataAggiornamento: Date = new Date(),
 ): Promise<ImportResult> {
-  const rows  = parseDatapacketRows(xmlContent)
+  // SEC-M02: sanifica prima di qualsiasi parsing
+  const rows  = parseDatapacketRows(sanitizeXml(xmlContent))
+
+  // FIX M-3: guard row count — lancia prima di qualsiasi allocazione pesante
+  if (rows.length > MAX_IMPORT_ROWS) {
+    throw new Error(`FILE_TOO_MANY_ROWS: il file contiene ${rows.length} righe (max ${MAX_IMPORT_ROWS})`)
+  }
+
   const items: AnagraficaInput[] = []
   const errors: ImportResult['errors'] = []
 
@@ -127,7 +156,13 @@ export async function importVoci(
   xmlContent: string,
   repo:       IVociRepository,
 ): Promise<ImportResult> {
-  const rows = parseDatapacketRows(xmlContent)
+  // SEC-M02: sanifica prima di qualsiasi parsing
+  const rows = parseDatapacketRows(sanitizeXml(xmlContent))
+
+  // FIX M-3: guard row count
+  if (rows.length > MAX_IMPORT_ROWS) {
+    throw new Error(`FILE_TOO_MANY_ROWS: il file contiene ${rows.length} righe (max ${MAX_IMPORT_ROWS})`)
+  }
 
   const vociMap = new Map<string, VoceInput>()
   const errors: ImportResult['errors'] = []
@@ -200,7 +235,14 @@ export async function importCapitoli(
   sorgente:   CapitoloSorgente,
   repo:       ICapitoliAnagRepository,
 ): Promise<ImportResult> {
-  const rows  = parseDatapacketRows(xmlContent)
+  // SEC-M02: sanifica prima di qualsiasi parsing
+  const rows  = parseDatapacketRows(sanitizeXml(xmlContent))
+
+  // FIX M-3: guard row count
+  if (rows.length > MAX_IMPORT_ROWS) {
+    throw new Error(`FILE_TOO_MANY_ROWS: il file contiene ${rows.length} righe (max ${MAX_IMPORT_ROWS})`)
+  }
+
   const items: CapitoloAnagInput[] = []
   const errors: ImportResult['errors'] = []
 

@@ -27,6 +27,8 @@ module.exports = {
       max_restarts:     10,
       min_uptime:       '10s',
       restart_delay:    4000,
+      // FIX L-1: riavvia il processo se supera 512 MB — prevenzione memory leak
+      max_memory_restart: '512M',
       // Graceful shutdown (aspetta che Fastify chiuda le connessioni)
       kill_timeout:     5000,
       listen_timeout:   10000,

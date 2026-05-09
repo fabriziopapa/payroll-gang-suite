@@ -138,8 +138,43 @@ await app.register(capitoliRoutes,    { prefix: '/api/v1/capitoli' })
 await app.register(bozzeRoutes,       { prefix: '/api/v1/bozze' })
 await app.register(settingsRoutes,    { prefix: '/api/v1/settings' })
 
-// Health check (no auth)
-app.get('/health', async () => ({ status: 'ok', version: '26.4.11' }))
+// Health check (no auth) — SEC-M07: solo status minimale, nessuna info di versione/sistema
+app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
+
+// ------------------------------------------------------------
+// SEC-C02: pulizia periodica jwt_blocklist — ogni ora
+// Rimuove i record scaduti per evitare crescita illimitata della tabella
+// ------------------------------------------------------------
+{
+  const { jwtBlocklist } = await import('./db/schema.js')
+  const { lt } = await import('drizzle-orm')
+
+  const cleanupJwtBlocklist = async (): Promise<void> => {
+    try {
+      await db.delete(jwtBlocklist).where(lt(jwtBlocklist.expiresAt, new Date()))
+    } catch (err) {
+      app.log.warn({ err }, 'Cleanup jwt_blocklist fallito')
+    }
+  }
+
+  // Prima pulizia dopo 1 minuto dall'avvio, poi ogni ora.
+  // FIX D: conserva il riferimento all'interval e lo cancella nell'hook onClose
+  // per permettere a Node.js di drenare l'event loop durante il graceful shutdown
+  // (PM2 kill_timeout non deve scattare per un setInterval fantasma).
+  let cleanupInterval: ReturnType<typeof setInterval> | undefined
+
+  setTimeout(() => {
+    void cleanupJwtBlocklist()
+    cleanupInterval = setInterval(() => { void cleanupJwtBlocklist() }, 60 * 60 * 1000)
+  }, 60 * 1000)
+
+  app.addHook('onClose', async () => {
+    if (cleanupInterval !== undefined) {
+      clearInterval(cleanupInterval)
+      cleanupInterval = undefined
+    }
+  })
+}
 
 // ------------------------------------------------------------
 // Avvio

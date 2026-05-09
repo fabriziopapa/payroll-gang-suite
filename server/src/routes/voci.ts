@@ -32,13 +32,28 @@ export async function vociRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // POST /api/v1/voci/import (solo admin)
+  // FIX M-3: bodyLimit 5 MB — prevenzione upload di file enormi
   app.post('/import', {
     preHandler: [app.authenticate, requireAdmin],
+    bodyLimit: 5 * 1024 * 1024,
   }, async (request, reply) => {
     const schema = z.object({ xml: z.string().min(1) })
     const { xml } = schema.parse(request.body)
 
-    const result = await importVoci(xml, repo)
+    // FIX M-3: check esplicito sulla dimensione del payload XML in bytes
+    if (Buffer.byteLength(xml, 'utf8') > 5_000_000) {
+      return reply.status(413).send({ error: 'File troppo grande (max 5 MB)' })
+    }
+
+    let result
+    try {
+      result = await importVoci(xml, repo)
+    } catch (err: any) {
+      if (err.message?.startsWith('FILE_TOO_MANY_ROWS')) {
+        return reply.status(413).send({ error: err.message })
+      }
+      throw err
+    }
     return reply.code(200).send(result)
   })
 }

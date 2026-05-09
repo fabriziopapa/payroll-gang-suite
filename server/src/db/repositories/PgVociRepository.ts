@@ -61,73 +61,116 @@ export class PgVociRepository implements IVociRepository {
 
     if (items.length === 0) return result
 
-    for (let i = 0; i < items.length; i += BATCH_SIZE) {
-      const batch = items.slice(i, i + BATCH_SIZE)
+    // FIX H-2: un'unica transazione esterna — un bulk upsert per tutte le voci,
+    // poi un bulk upsert per tutti i capitoli. Riduce N transazioni a 2 query.
+    await this.db.transaction(async tx => {
+      // ── Fase 1: bulk upsert di tutte le voci in batch ──────────────────────
+      const allVoceRows: Array<{ id: number; createdAt: Date; codice: string; dataIn: string }> = []
 
-      for (const item of batch) {
-        await this.db.transaction(async tx => {
-          // 1. Upsert voce
-          const [voce] = await tx
-            .insert(schema.voci)
-            .values({
-              codice:      item.codice,
-              descrizione: item.descrizione,
-              dataIn:      item.dataIn,
-              dataFin:     item.dataFin,
-              tipo:        item.tipo        ?? null,
-              personale:   item.personale   ?? null,
-              immissione:  item.immissione  ?? null,
-              conguaglio:  item.conguaglio  ?? null,
-              updatedAt:   new Date(),
-            })
-            .onConflictDoUpdate({
-              target: [schema.voci.codice, schema.voci.dataIn],
-              set: {
-                descrizione: sql`EXCLUDED.descrizione`,
-                dataFin:     sql`EXCLUDED.data_fin`,
-                tipo:        sql`EXCLUDED.tipo`,
-                personale:   sql`EXCLUDED.personale`,
-                immissione:  sql`EXCLUDED.immissione`,
-                conguaglio:  sql`EXCLUDED.conguaglio`,
-                updatedAt:   sql`now()`,
-              },
-              where: sql`
-                ${schema.voci.descrizione} IS DISTINCT FROM EXCLUDED.descrizione
-                OR ${schema.voci.dataFin}  IS DISTINCT FROM EXCLUDED.data_fin
-                OR ${schema.voci.tipo}     IS DISTINCT FROM EXCLUDED.tipo
-                OR ${schema.voci.personale} IS DISTINCT FROM EXCLUDED.personale
-                OR ${schema.voci.immissione} IS DISTINCT FROM EXCLUDED.immissione
-                OR ${schema.voci.conguaglio} IS DISTINCT FROM EXCLUDED.conguaglio
-              `,
-            })
-            .returning({ id: schema.voci.id, createdAt: schema.voci.createdAt })
+      for (let i = 0; i < items.length; i += BATCH_SIZE) {
+        const batch = items.slice(i, i + BATCH_SIZE)
 
-          if (!voce) {
-            result.skipped++  // nulla è cambiato
-            return
-          }
-          const age = Date.now() - voce.createdAt.getTime()
+        const rows = await tx
+          .insert(schema.voci)
+          .values(batch.map(item => ({
+            codice:      item.codice,
+            descrizione: item.descrizione,
+            dataIn:      item.dataIn,
+            dataFin:     item.dataFin,
+            tipo:        item.tipo        ?? null,
+            personale:   item.personale   ?? null,
+            immissione:  item.immissione  ?? null,
+            conguaglio:  item.conguaglio  ?? null,
+            updatedAt:   new Date(),
+          })))
+          .onConflictDoUpdate({
+            target: [schema.voci.codice, schema.voci.dataIn],
+            set: {
+              descrizione: sql`EXCLUDED.descrizione`,
+              dataFin:     sql`EXCLUDED.data_fin`,
+              tipo:        sql`EXCLUDED.tipo`,
+              personale:   sql`EXCLUDED.personale`,
+              immissione:  sql`EXCLUDED.immissione`,
+              conguaglio:  sql`EXCLUDED.conguaglio`,
+              updatedAt:   sql`now()`,
+            },
+            where: sql`
+              ${schema.voci.descrizione} IS DISTINCT FROM EXCLUDED.descrizione
+              OR ${schema.voci.dataFin}  IS DISTINCT FROM EXCLUDED.data_fin
+              OR ${schema.voci.tipo}     IS DISTINCT FROM EXCLUDED.tipo
+              OR ${schema.voci.personale} IS DISTINCT FROM EXCLUDED.personale
+              OR ${schema.voci.immissione} IS DISTINCT FROM EXCLUDED.immissione
+              OR ${schema.voci.conguaglio} IS DISTINCT FROM EXCLUDED.conguaglio
+            `,
+          })
+          .returning({ id: schema.voci.id, createdAt: schema.voci.createdAt, codice: schema.voci.codice, dataIn: schema.voci.dataIn })
+
+        const now = Date.now()
+        rows.forEach(r => {
+          const age = now - r.createdAt.getTime()
           if (age < 2000) result.inserted++
           else result.updated++
-
-          // 2. Upsert capitoli per questa voce
-          if (item.capitoli.length > 0) {
-            await tx
-              .insert(schema.capitoli)
-              .values(item.capitoli.map(c => ({
-                voceId:      voce.id,
-                codice:      c.codice,
-                descrizione: c.descrizione ?? null,
-              })))
-              .onConflictDoUpdate({
-                target: [schema.capitoli.voceId, schema.capitoli.codice],
-                set: { descrizione: sql`EXCLUDED.descrizione` },
-                where: sql`${schema.capitoli.descrizione} IS DISTINCT FROM EXCLUDED.descrizione`,
-              })
-          }
         })
+        // Righe non restituite = già presenti e invariate
+        result.skipped += batch.length - rows.length
+
+        allVoceRows.push(...rows)
       }
-    }
+
+      // ── Fase 2: bulk upsert di tutti i capitoli in un unico batch ───────────
+      // Mappa (codice|dataIn) → voce_id per collegare capitoli alle voci
+      const voceIdMap = new Map<string, number>()
+      for (const r of allVoceRows) {
+        voceIdMap.set(`${r.codice}|${r.dataIn}`, r.id)
+      }
+
+      // Per le voci skippate (non restituite dall'upsert), recupera gli id esistenti
+      // usando i valori di codice+dataIn degli item originali non trovati in allVoceRows
+      const missingKeys = items
+        .filter(item => !voceIdMap.has(`${item.codice}|${item.dataIn}`))
+        .map(item => `${item.codice}|${item.dataIn}`)
+
+      if (missingKeys.length > 0) {
+        // Recupera gli id delle voci già presenti non restituite dall'upsert
+        const existingRows = await tx
+          .select({ id: schema.voci.id, codice: schema.voci.codice, dataIn: schema.voci.dataIn })
+          .from(schema.voci)
+          .where(inArray(
+            sql`(${schema.voci.codice} || '|' || ${schema.voci.dataIn})`,
+            missingKeys,
+          ))
+        for (const r of existingRows) {
+          voceIdMap.set(`${r.codice}|${r.dataIn}`, r.id)
+        }
+      }
+
+      // Raccoglie tutti i capitoli con voce_id risolto
+      const allCapitoli: Array<{ voceId: number; codice: string; descrizione: string | null }> = []
+      for (const item of items) {
+        const voceId = voceIdMap.get(`${item.codice}|${item.dataIn}`)
+        if (voceId === undefined) continue  // voce non trovata: skip sicuro
+        for (const c of item.capitoli) {
+          allCapitoli.push({
+            voceId,
+            codice:      c.codice,
+            descrizione: c.descrizione ?? null,
+          })
+        }
+      }
+
+      if (allCapitoli.length > 0) {
+        for (let i = 0; i < allCapitoli.length; i += BATCH_SIZE) {
+          await tx
+            .insert(schema.capitoli)
+            .values(allCapitoli.slice(i, i + BATCH_SIZE))
+            .onConflictDoUpdate({
+              target: [schema.capitoli.voceId, schema.capitoli.codice],
+              set: { descrizione: sql`EXCLUDED.descrizione` },
+              where: sql`${schema.capitoli.descrizione} IS DISTINCT FROM EXCLUDED.descrizione`,
+            })
+        }
+      }
+    })
 
     // Aggiorna last_import_voci
     await this.db

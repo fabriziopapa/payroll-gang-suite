@@ -50,6 +50,7 @@ export class PgUsersRepository implements IUsersRepository {
   async findByUsername(username: string): Promise<(UserRow & {
     totpSecret:   string
     lastOtpToken: string | null
+    lockedUntil:  Date | null
   }) | null> {
     const [row] = await this.db
       .select()
@@ -63,6 +64,7 @@ export class PgUsersRepository implements IUsersRepository {
       ...toUserRow(row),
       totpSecret:   row.totpSecret,
       lastOtpToken: row.lastOtpToken ?? null,
+      lockedUntil:  row.lockedUntil ?? null,
     }
   }
 
@@ -173,6 +175,51 @@ export class PgUsersRepository implements IUsersRepository {
       .update(schema.users)
       .set({ isAdmin })
       .where(eq(schema.users.id, id))
+  }
+
+  // ── SEC-M01: TOTP brute-force lockout ──────────────────────
+
+  async incrementFailedOtp(userId: string): Promise<void> {
+    // Legge il contatore corrente, poi decide se bloccare
+    const [row] = await this.db
+      .select({ failedOtpCount: schema.users.failedOtpCount })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1)
+
+    if (!row) return
+
+    const newCount = (row.failedOtpCount ?? 0) + 1
+
+    if (newCount >= 5) {
+      // Blocca per 15 minuti e resetta il contatore
+      const lockedUntil = new Date(Date.now() + 15 * 60 * 1000)
+      await this.db
+        .update(schema.users)
+        .set({ failedOtpCount: 0, lockedUntil })
+        .where(eq(schema.users.id, userId))
+    } else {
+      await this.db
+        .update(schema.users)
+        .set({ failedOtpCount: newCount })
+        .where(eq(schema.users.id, userId))
+    }
+  }
+
+  async resetFailedOtp(userId: string): Promise<void> {
+    await this.db
+      .update(schema.users)
+      .set({ failedOtpCount: 0, lockedUntil: null })
+      .where(eq(schema.users.id, userId))
+  }
+
+  // ── SEC-M01 FIX G: sblocco manuale admin ───────────────────
+
+  async unlockUser(userId: string): Promise<void> {
+    await this.db
+      .update(schema.users)
+      .set({ failedOtpCount: 0, lockedUntil: null })
+      .where(eq(schema.users.id, userId))
   }
 }
 

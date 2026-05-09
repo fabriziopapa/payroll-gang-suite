@@ -5,7 +5,7 @@
 
 import jwt from 'jsonwebtoken'
 import argon2 from 'argon2'
-import { randomBytes, createHash } from 'node:crypto'
+import { randomBytes, createHash, randomUUID } from 'node:crypto'
 import { jwtKeys, env, REFRESH_TOKEN_MS } from '../config/env.js'
 import type { IAuthModule } from './IAuthModule.js'
 import type { IUsersRepository, IAuditRepository, UserRow } from '../db/IRepository.js'
@@ -18,6 +18,7 @@ export interface AccessTokenPayload {
   sub:      string   // userId
   username: string
   isAdmin:  boolean
+  jti:      string   // SEC-C02: JWT ID — usato per revoca al logout
   iat:      number
   exp:      number
 }
@@ -127,15 +128,25 @@ export class AuthService {
       throw new Error('AUTH_FAILED')
     }
 
+    // SEC-M01: controlla lockout per-utente — prima di qualsiasi verifica OTP
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      await this.#logFailedLogin(username, ip, 'ACCOUNT_LOCKED')
+      throw new Error('ACCOUNT_LOCKED')
+    }
+
     const result = await this.authModule.verify(
       user.id, user.totpSecret, otpToken, user.lastOtpToken,
     )
 
     if (!result.valid) {
       await this.#logFailedLogin(username, ip, result.reason ?? 'INVALID_OTP')
+      // SEC-M01: incrementa contatore fallimenti; blocca dopo 5 tentativi
+      await this.usersRepo.incrementFailedOtp(user.id)
       throw new Error('AUTH_FAILED')
     }
 
+    // SEC-M01: reset contatore dopo login riuscito
+    await this.usersRepo.resetFailedOtp(user.id)
     // Aggiorna last token usato (replay prevention)
     await this.usersRepo.updateLastOtpToken(user.id, otpToken)
     await this.usersRepo.updateLastLogin(user.id)
@@ -168,41 +179,57 @@ export class AuthService {
     const { refreshTokens, users } = await import('../db/schema.js')
     const { eq, and, gt, isNull } = await import('drizzle-orm')
 
-    // Cerca tutti i token attivi dell'utente e verifica con Argon2
-    const activeTokens = await db
+    // FIX C-1: estrai selector (primi 16 char hex = primi 8 byte) dal raw token (hex 64 chars)
+    // Il raw token è ora 32 byte hex (64 chars); il selector sono i primi 16 chars.
+    const tokenSelector = rawToken.slice(0, 16)
+
+    // Lookup O(1) tramite selector — un solo record, nessuna iterazione Argon2
+    const [matchedToken] = await db
       .select()
       .from(refreshTokens)
       .where(and(
+        eq(refreshTokens.tokenSelector, tokenSelector),
         isNull(refreshTokens.revokedAt),
         gt(refreshTokens.expiresAt, new Date()),
       ))
-      .limit(50)
-
-    let matchedToken = null
-    for (const t of activeTokens) {
-      if (await argon2.verify(t.tokenHash, rawToken)) {
-        matchedToken = t
-        break
-      }
-    }
+      .limit(1)
 
     if (!matchedToken) throw new Error('INVALID_REFRESH_TOKEN')
 
-    // Verifica fingerprint (rileva token theft)
+    // Verifica Argon2 su UN solo record — non più O(n)
+    if (!(await argon2.verify(matchedToken.tokenHash, rawToken))) {
+      throw new Error('INVALID_REFRESH_TOKEN')
+    }
+
+    // Verifica fingerprint (possibile segnale di furto o cambio User-Agent)
+    // SEC-H03: Argon2 verify (sopra) È l'autenticazione reale — il fingerprint è
+    // un segnale secondario. Se Argon2 ha passato ma il fingerprint non corrisponde,
+    // logghiamo il cambio senza revocare la sessione: l'utente potrebbe aver cambiato
+    // browser/dispositivo o aggiornato il browser stesso.
+    // Revochiamo TUTTI i token solo se anche il User-Agent manca completamente
+    // (comportamento anomalo che nessun browser legittimo produce).
     const fingerprint = this.#fingerprint(userAgent, ip)
     if (matchedToken.fingerprint !== fingerprint) {
-      // Possibile furto — revoca tutti i token dell'utente
-      await db
-        .update(refreshTokens)
-        .set({ revokedAt: new Date() })
-        .where(eq(refreshTokens.userId, matchedToken.userId))
-
       await this.auditRepo.log({
         userId: matchedToken.userId,
-        azione: 'REFRESH_TOKEN_THEFT_SUSPECTED',
+        azione: 'REFRESH_FINGERPRINT_CHANGED',
         ip, userAgent,
       })
-      throw new Error('TOKEN_THEFT_SUSPECTED')
+      // Se userAgent è vuoto (non inviato dal client) → comportamento anomalo → revoca tutto
+      if (!userAgent) {
+        await db
+          .update(refreshTokens)
+          .set({ revokedAt: new Date() })
+          .where(eq(refreshTokens.userId, matchedToken.userId))
+
+        await this.auditRepo.log({
+          userId: matchedToken.userId,
+          azione: 'REFRESH_TOKEN_THEFT_SUSPECTED',
+          ip, userAgent,
+        })
+        throw new Error('TOKEN_THEFT_SUSPECTED')
+      }
+      // userAgent presente ma cambiato (cambio browser/aggiornamento): continua normalmente
     }
 
     // Revoca token usato (rotazione)
@@ -230,25 +257,48 @@ export class AuthService {
   // Logout — revoca refresh token
   // ----------------------------------------------------------
 
-  async logout(rawToken: string): Promise<void> {
+  async logout(rawToken: string, rawAccessToken?: string): Promise<void> {
     const { db } = await import('../db/connection.js')
-    const { refreshTokens } = await import('../db/schema.js')
-    const { isNull, gt, and } = await import('drizzle-orm')
+    const { refreshTokens, jwtBlocklist } = await import('../db/schema.js')
+    const { eq, and, isNull, gt } = await import('drizzle-orm')
 
-    const activeTokens = await db
+    // FIX C-1: lookup O(1) tramite selector — evita la scansione O(n) con Argon2
+    const tokenSelector = rawToken.slice(0, 16)
+
+    const [token] = await db
       .select()
       .from(refreshTokens)
-      .where(and(isNull(refreshTokens.revokedAt), gt(refreshTokens.expiresAt, new Date())))
-      .limit(50)
+      .where(and(
+        eq(refreshTokens.tokenSelector, tokenSelector),
+        isNull(refreshTokens.revokedAt),
+        gt(refreshTokens.expiresAt, new Date()),
+      ))
+      .limit(1)
 
-    for (const t of activeTokens) {
-      if (await argon2.verify(t.tokenHash, rawToken)) {
-        const { eq } = await import('drizzle-orm')
+    if (token) {
+      // Verifica Argon2 su UN solo record
+      if (await argon2.verify(token.tokenHash, rawToken)) {
         await db
           .update(refreshTokens)
           .set({ revokedAt: new Date() })
-          .where(eq(refreshTokens.id, t.id))
-        break
+          .where(eq(refreshTokens.id, token.id))
+      }
+    }
+
+    // SEC-C02: blocklist il JWT access token se presente
+    if (rawAccessToken) {
+      try {
+        const payload = this.verifyAccessToken(rawAccessToken)
+        if (payload.jti && payload.exp) {
+          const expiresAt = new Date(payload.exp * 1000)
+          // Inserisci in blocklist; ignora conflitti (logout doppio)
+          await db
+            .insert(jwtBlocklist)
+            .values({ jti: payload.jti, expiresAt })
+            .onConflictDoNothing()
+        }
+      } catch {
+        // Token già scaduto o invalido — non serve blocklisting
       }
     }
   }
@@ -268,8 +318,10 @@ export class AuthService {
   // ----------------------------------------------------------
 
   #issueAccessToken(userId: string, username: string, isAdmin: boolean): string {
+    // SEC-C02: jti (JWT ID) univoco per ogni token — permette revoca al logout
+    const jti = randomUUID()
     return jwt.sign(
-      { sub: userId, username, isAdmin },
+      { sub: userId, username, isAdmin, jti },
       jwtKeys.private,
       { algorithm: 'ES256', expiresIn: env.JWT_ACCESS_EXPIRES as jwt.SignOptions['expiresIn'] },
     )
@@ -279,7 +331,13 @@ export class AuthService {
     const { db } = await import('../db/connection.js')
     const { refreshTokens } = await import('../db/schema.js')
 
-    const rawToken    = randomBytes(48).toString('base64url')
+    // FIX C-1: rawToken = 32 byte hex (64 chars).
+    // tokenSelector = primi 8 byte in hex = primi 16 chars del rawToken.
+    // Il selector è non-segreto ma univoco — permette lookup O(1).
+    const rawBytes     = randomBytes(32)
+    const rawToken     = rawBytes.toString('hex')            // 64 char hex
+    const tokenSelector = rawToken.slice(0, 16)              // primi 8 byte = 16 char hex
+
     const tokenHash   = await argon2.hash(rawToken, {
       type:        argon2.argon2id,
       // Parametri espliciti — immunizza da cambi di default nelle versioni future
@@ -293,14 +351,19 @@ export class AuthService {
     // FIX: usa REFRESH_TOKEN_MS da env — unica sorgente di verità con il cookie
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_MS)
 
-    await db.insert(refreshTokens).values({ userId, tokenHash, fingerprint, expiresAt })
+    await db.insert(refreshTokens).values({ userId, tokenHash, tokenSelector, fingerprint, expiresAt })
 
     return rawToken
   }
 
-  #fingerprint(userAgent: string, ip: string): string {
+  // SEC-H03: fingerprint basato solo su User-Agent — IP escluso.
+  // IP mobility (VPN, cambio rete mobile, DHCP) è comune e non è un segnale
+  // di furto affidabile nel 2026. Il cambio di User-Agent è un segnale molto
+  // più forte. L'IP continua ad essere registrato nell'audit log.
+  // Firma: ip mantenuto per compatibilità dei caller, non usato nell'hash.
+  #fingerprint(userAgent: string, _ip: string): string {
     return createHash('sha256')
-      .update(`${userAgent}|${ip}`)
+      .update(userAgent)
       .digest('hex')
       .slice(0, 64)
   }
@@ -345,6 +408,24 @@ export class AuthService {
    *  - Un admin non può cambiare il proprio ruolo.
    *  - L'utente con username "admin" non può essere declassato da nessuno.
    */
+  /**
+   * SEC-M01 FIX G: sblocca un account bloccato per troppi OTP falliti.
+   * Solo admin può chiamare questo metodo; la route verifica requireAdmin.
+   * Emette audit log per tracciabilità.
+   */
+  async unlockUser(userId: string, adminId: string, ip: string): Promise<void> {
+    const user = await this.usersRepo.findById(userId)
+    if (!user) throw new Error('USER_NOT_FOUND')
+    await this.usersRepo.unlockUser(userId)
+    await this.auditRepo.log({
+      userId:   adminId,
+      azione:   'USER_UNLOCKED',
+      entita:   'users',
+      entitaId: userId,
+      ip,
+    })
+  }
+
   async setUserAdmin(
     userId:  string,
     isAdmin: boolean,
@@ -401,10 +482,15 @@ export class AuthService {
 
   // ----------------------------------------------------------
 
+  // SEC-M05: GDPR Art.5 data minimisation — username (PII) rimosso dai dettagli.
+  // Se l'utente esiste, userId nel log è sufficiente per correlazione.
+  // Se non esiste (login con username inesistente), si salva solo un hash troncato
+  // a 16 hex chars (64-bit) — sufficiente per correlazione, non reversibile.
   async #logFailedLogin(username: string, ip: string, reason: string): Promise<void> {
+    const usernameHash = createHash('sha256').update(username).digest('hex').slice(0, 16)
     await this.auditRepo.log({
       azione:   'LOGIN_FAILED',
-      dettagli: { username, reason },
+      dettagli: { usernameHash, reason },
       ip,
     })
   }

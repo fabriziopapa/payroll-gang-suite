@@ -24,28 +24,42 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
 
   /**
    * Ritorna il record attivo più recente per ogni matricola.
-   * Se (per anomalia nei dati) una persona ha N righe con fin_rap IS NULL,
-   * viene esposta solo quella con decor_inq massimo.
-   * → una sola riga per persona.
+   * FIX M-1: la deduplicazione ora avviene server-side tramite DISTINCT ON —
+   * nessun trasferimento di righe duplicate e nessuna dedup in JS.
+   * DISTINCT ON (matricola) + ORDER BY matricola, decor_inq DESC
+   * → PostgreSQL mantiene solo la riga con decor_inq massimo per ogni matricola.
+   * Il risultato viene poi ordinato per cognNome in un subquery/CTE implicito.
    */
   async findAll(): Promise<AnagraficaRow[]> {
-    // Ordina per matricola + decor_inq DESC così il primo di ogni gruppo è il più recente
-    const rows = await this.db
-      .select()
-      .from(schema.anagrafiche)
-      .where(isNull(schema.anagrafiche.finRap))
-      .orderBy(schema.anagrafiche.matricola, desc(schema.anagrafiche.decorInq))
+    // DISTINCT ON non è supportato nativamente da Drizzle — si usa sql tagged template.
+    // La query seleziona una riga per matricola (la più recente per decor_inq),
+    // poi ordina per cogn_nome a livello applicativo (costo O(n log n) solo sul result set finale).
+    const rows = await this.db.execute(sql`
+      SELECT DISTINCT ON (matricola)
+        id, matricola, cogn_nome, ruolo, druolo,
+        decor_inq, fin_rap, data_aggiornamento,
+        created_at, updated_at
+      FROM anagrafiche
+      WHERE fin_rap IS NULL
+      ORDER BY matricola, decor_inq DESC
+    `)
 
-    // Deduplication JS: mantieni solo il primo record per ogni matricola
-    const seen = new Set<string>()
-    const deduped = rows.filter(r => {
-      if (seen.has(r.matricola)) return false
-      seen.add(r.matricola)
-      return true
-    })
+    // Mappa i nomi snake_case restituiti da postgres.js → camelCase del tipo inferito
+    const mapped = (rows as Array<Record<string, unknown>>).map(r => ({
+      id:                r['id'] as number,
+      matricola:         r['matricola'] as string,
+      cognNome:          r['cogn_nome'] as string,
+      ruolo:             r['ruolo'] as string,
+      druolo:            r['druolo'] as string | null,
+      decorInq:          r['decor_inq'] as string,
+      finRap:            r['fin_rap'] as string | null,
+      dataAggiornamento: r['data_aggiornamento'] as string,
+      createdAt:         r['created_at'] as Date,
+      updatedAt:         r['updated_at'] as Date,
+    }))
 
-    // Riordina per cognNome (l'ORDER BY sopra era per matricola)
-    return deduped
+    // Riordina per cognNome (PostgreSQL DISTINCT ON richiede ORDER BY matricola)
+    return mapped
       .sort((a, b) => a.cognNome.localeCompare(b.cognNome, 'it'))
       .map(toRow)
   }

@@ -2,12 +2,19 @@
 // PAYROLL GANG SUITE — Layout principale (sidebar + topbar)
 // ============================================================
 
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useStore, type PageId } from '../store/useStore'
 import { authApi } from '../api/endpoints'
 import { APP_NAME, APP_VERSION } from '../types'
 import PrivacyCookieModal from './PrivacyCookieModal'
 import ToastManager from './ToastManager'
+import EasterEggCredits from './easter-egg/EasterEggCredits'
+
+// ── Easter Egg: sequenza tastiera "ALESSIO" ───────────────────
+const EE_SEQUENCE = ['a', 'l', 'e', 's', 's', 'i', 'o']
+const EE_TIMEOUT  = 3000  // ms — reset sequenza dopo inattività
+// ── Easter Egg: long press su badge versione (3 secondi) ──────
+const EE_HOLD_MS  = 3000
 
 interface NavItem {
   id:    PageId
@@ -104,6 +111,49 @@ export default function Layout({ children }: LayoutProps) {
   const [loggingOut, setLoggingOut]   = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [showPrivacy, setShowPrivacy] = useState(false)
+  const [showEasterEgg, setShowEasterEgg] = useState(false)
+
+  // ── Easter Egg: sequenza tastiera ─────────────────────────
+  const eeSeqRef      = useRef<string[]>([])
+  const eeSeqTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      // Ignora se si sta scrivendo in un input
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+
+      const key = e.key.toLowerCase()
+      eeSeqRef.current.push(key)
+
+      // Reset timeout
+      if (eeSeqTimer.current) clearTimeout(eeSeqTimer.current)
+      eeSeqTimer.current = setTimeout(() => { eeSeqRef.current = [] }, EE_TIMEOUT)
+
+      // Controlla se la coda termina con la sequenza
+      const seq  = eeSeqRef.current
+      const tail = seq.slice(-EE_SEQUENCE.length)
+      if (tail.length === EE_SEQUENCE.length && tail.every((c, i) => c === EE_SEQUENCE[i])) {
+        eeSeqRef.current = []
+        setShowEasterEgg(true)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  // ── Easter Egg: long press badge versione ─────────────────
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const holdStart = useRef<number>(0)
+
+  const onVersionPointerDown = useCallback(() => {
+    holdStart.current = Date.now()
+    holdTimer.current = setTimeout(() => setShowEasterEgg(true), EE_HOLD_MS)
+  }, [])
+
+  const onVersionPointerUp = useCallback(() => {
+    if (holdTimer.current) clearTimeout(holdTimer.current)
+  }, [])
 
   async function handleLogout() {
     setLoggingOut(true)
@@ -134,7 +184,13 @@ export default function Layout({ children }: LayoutProps) {
           </div>
           <div className="min-w-0">
             <p className="text-sm font-semibold text-white truncate">{APP_NAME}</p>
-            <p className="text-xs text-slate-500">v{APP_VERSION}</p>
+            <p
+              className="text-xs text-slate-500 cursor-default select-none"
+              onPointerDown={onVersionPointerDown}
+              onPointerUp={onVersionPointerUp}
+              onPointerLeave={onVersionPointerUp}
+              title=""
+            >v{APP_VERSION}</p>
           </div>
         </div>
 
@@ -272,6 +328,9 @@ export default function Layout({ children }: LayoutProps) {
       </div>
       {showPrivacy && <PrivacyCookieModal onClose={() => setShowPrivacy(false)} />}
       <ToastManager />
+      {showEasterEgg && (
+        <EasterEggCredits onClose={() => setShowEasterEgg(false)} />
+      )}
     </div>
   )
 }

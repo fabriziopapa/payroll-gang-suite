@@ -170,25 +170,20 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
 
   // Lazy load anagrafiche e bozze se non in store
   useEffect(() => {
+    let cancelled = false
     const promises: Promise<unknown>[] = []
-    if (anagrafiche.length === 0) {
-      promises.push(anagraficheApi.list().then(d => setAnagrafiche(d)))
-    }
-    if (bozze.length === 0) {
-      promises.push(bozzeApi.list().then(d => setBozze(d)))
-    }
+    if (anagrafiche.length === 0)
+      promises.push(anagraficheApi.list().then(d => { if (!cancelled) setAnagrafiche(d) }))
+    if (bozze.length === 0)
+      promises.push(bozzeApi.list().then(d => { if (!cancelled) setBozze(d) }))
     if (promises.length > 0) {
       setLoading(true)
-      Promise.all(promises).finally(() => setLoading(false))
+      Promise.all(promises).finally(() => { if (!cancelled) setLoading(false) })
     }
+    return () => { cancelled = true }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Ricerca su anagrafiche ────────────────────────────────
-
-  /** Normalizza stringa: lowercase + rimuove accenti */
-  function norm(s: string) {
-    return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-  }
 
   /**
    * Ricerca grezza per tab Incolla:
@@ -198,16 +193,16 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
    *           singolo cognome, singola matricola.
    */
   function searchAnag(query: string): AnagraficaApi[] {
-    const tokens = norm(query).trim().split(/\s+/).filter(Boolean)
+    const tokens = normStr(query).trim().split(/\s+/).filter(Boolean)
     if (tokens.length === 0) return []
     const strict = anagrafiche.filter(a => {
-      const hay = norm(`${a.cognNome} ${a.matricola}`)
+      const hay = normStr(`${a.cognNome} ${a.matricola}`)
       return tokens.every(t => hay.includes(t))
     })
     if (strict.length > 0) return strict
     // Fallback fuzzy: almeno un token significativo (≥3 car) trovato
     return anagrafiche.filter(a => {
-      const hay = norm(`${a.cognNome} ${a.matricola}`)
+      const hay = normStr(`${a.cognNome} ${a.matricola}`)
       return tokens.some(t => t.length >= 3 && hay.includes(t))
     })
   }
@@ -334,8 +329,10 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
   const [pasteText, setPasteText]   = useState('')
   const [pasteRows, setPasteRows]   = useState<PasteRow[]>([])
   const [searched, setSearched]     = useState(false)
+  const searchCancelRef             = useRef(0)
 
   async function handleSearch() {
+    const myGen = ++searchCancelRef.current
     const rawLines = pasteText.split(/\r?\n/).filter(l => l.trim())
     const parsed   = rawLines.map(parsePasteLine)
 
@@ -367,6 +364,8 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
     const dataDate = dettaglio.dataCompetenzaVoce || undefined
     if (!dataDate) return  // senza data non ha senso il lookup storico
 
+    if (searchCancelRef.current !== myGen) return
+
     const toEnrich = preliminary
       .map((r, i) => ({ r, i }))
       .filter(({ r }) => r.status === 'found' && r.match)
@@ -391,7 +390,7 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
       }))
     }
 
-    if (enriched.size > 0) {
+    if (enriched.size > 0 && searchCancelRef.current === myGen) {
       setPasteRows(prev => prev.map((r, i) => {
         const e = enriched.get(i)
         if (!e || !r.match) return r
@@ -552,13 +551,17 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
       />
     )}
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/70"
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
     >
-      <div ref={dialogRef} className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl
-                      max-h-[90vh] flex flex-col shadow-2xl">
+      <div ref={dialogRef}
+        className="bg-slate-900 border-0 sm:border border-slate-700
+                   rounded-t-2xl sm:rounded-2xl w-full sm:max-w-2xl
+                   h-[100dvh] sm:h-auto sm:max-h-[90dvh]
+                   flex flex-col shadow-2xl"
+      >
 
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
@@ -591,8 +594,8 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
           ))}
         </div>
 
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto">
+        {/* Body — min-h-0 necessario per flex-shrink corretto su 100dvh */}
+        <div className="flex-1 overflow-y-auto min-h-0">
 
           {/* ══ TAB MANUALE ══════════════════════════════════ */}
           {tab === 'manuale' && (
@@ -938,8 +941,9 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
           )}
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-slate-800">
+        {/* Footer — flex-none: sempre visibile anche con tastiera mobile aperta */}
+        <div className="flex-none flex items-center justify-end gap-3 px-5 py-4 border-t border-slate-800"
+             style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
           <button type="button" onClick={onClose}
             className="px-4 py-2 rounded-lg text-slate-300 hover:bg-slate-800 text-sm transition">
             Annulla
@@ -993,6 +997,9 @@ function PasteResultRow({ row, onToggle, onChoose, onImportoChange }: {
   const [localImporto, setLocalImporto] = useState(
     row.importoParsed > 0 ? String(row.importoParsed) : '',
   )
+  useEffect(() => {
+    setLocalImporto(row.importoParsed > 0 ? String(row.importoParsed) : '')
+  }, [row.importoParsed])
 
   return (
     <div className={`px-3 py-2.5 flex items-start gap-3 ${row.include ? 'bg-indigo-900/10' : ''}`}>

@@ -17,7 +17,9 @@ const envSchema = z.object({
   DB_NAME: z.string().min(1),
   DB_USER: z.string().min(1),
   DB_PASSWORD: z.string().min(1),
-  DB_SSL: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
+  // SEC-H05: default true — le connessioni in produzione devono essere cifrate.
+  // Per sviluppo locale con PostgreSQL senza TLS, impostare DB_SSL=false nel .env
+  DB_SSL: z.enum(['true', 'false']).default('true').transform(v => v === 'true'),
   DB_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
   DB_POOL_IDLE_TIMEOUT: z.coerce.number().int().default(30000),
   DB_CONNECTION_TIMEOUT: z.coerce.number().int().default(5000),

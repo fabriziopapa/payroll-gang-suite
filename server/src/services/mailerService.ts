@@ -12,6 +12,20 @@
 
 import nodemailer from 'nodemailer'
 import { randomBytes } from 'node:crypto'
+import { env } from '../config/env.js'
+
+// ── SEC-H01: HTML escaping ────────────────────────────────────
+// Previene XSS: tutti i campi utente inseriti in template HTML
+// devono passare per escapeHtml prima di essere interpolati.
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
 
 // ── Config ────────────────────────────────────────────────────
 
@@ -39,9 +53,12 @@ export class MailerService {
         secure: config.secure ?? false,
         auth:   { user: config.user, pass: config.pass },
         // iCloud richiede STARTTLS su 587
+        // SEC-M08: forza TLS 1.2+ e cipher forti — no SSLv3/SSLv2
         tls: {
-          ciphers:            'SSLv3',
-          rejectUnauthorized: true,
+          minVersion:         'TLSv1.2' as const,
+          ciphers:            'HIGH:!aNULL:!MD5:!SSLv3:!SSLv2',
+          // SEC-M08: rejectUnauthorized false solo in sviluppo (server locale senza cert)
+          rejectUnauthorized: env.NODE_ENV === 'production',
         },
         // Riprova automatica in caso di errore temporaneo
         pool:           true,
@@ -217,7 +234,7 @@ function buildQrEmail(opts: {
                 Il tuo account è stato creato
               </h1>
               <p style="margin:0 0 24px;color:#94a3b8;font-size:14px;line-height:1.6">
-                È stato creato un account per <strong style="color:#f1f5f9">${opts.username}</strong>.
+                È stato creato un account per <strong style="color:#f1f5f9">${escapeHtml(opts.username)}</strong>.
                 Per accedere all'applicazione devi configurare Google Authenticator (o app compatibile TOTP)
                 e attivare il tuo account.
               </p>
@@ -259,7 +276,7 @@ function buildQrEmail(opts: {
               <table cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:24px">
                 <tr>
                   <td align="center">
-                    <a href="${opts.activateUrl}"
+                    <a href="${escapeHtml(opts.activateUrl)}"
                       style="display:inline-block;padding:13px 28px;background:#4f46e5;
                              color:#fff;text-decoration:none;border-radius:10px;
                              font-size:14px;font-weight:600">
@@ -279,7 +296,7 @@ function buildQrEmail(opts: {
                     </p>
                     <p style="margin:0;color:#fbbf24;font-family:monospace;font-size:13px;
                                letter-spacing:2px;word-break:break-all">
-                      ${opts.backupKey}
+                      ${escapeHtml(opts.backupKey)}
                     </p>
                     <p style="margin:6px 0 0;color:#64748b;font-size:11px">
                       Usala per recuperare l'accesso se perdi il telefono.

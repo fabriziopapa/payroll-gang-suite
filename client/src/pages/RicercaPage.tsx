@@ -89,17 +89,25 @@ export default function RicercaPage() {
   const [pageSize, setPageSize]   = useState(20)
   const [reportMode, setReportMode] = useState<ReportMode>('matricola')
 
-  // Carica bozze (con dati completi) ad ogni mount della pagina
+  // Carica bozze con dati completi ad ogni mount della pagina.
+  // FIX H-1: GET /bozze (lista) non include `dati` JSONB.
+  // Recuperiamo prima la lista summary, poi fetchamo ogni bozza individualmente
+  // tramite GET /bozze/:id per ottenere il campo `dati` necessario a ricerca/report.
   useEffect(() => {
+    let cancelled = false
     async function load() {
       setLoading(true)
       try {
-        const data = await bozzeApi.list()
-        setBozze(data)
+        const summaries = await bozzeApi.list()
+        if (cancelled) return
+        // Fetch parallelo delle bozze complete (con dati)
+        const full = await Promise.all(summaries.map(s => bozzeApi.getById(s.id)))
+        if (!cancelled) setBozze(full)
       } catch { /* usa dati già in store */ }
-      finally { setLoading(false) }
+      finally { if (!cancelled) setLoading(false) }
     }
     load()
+    return () => { cancelled = true }
   }, [setBozze])
 
   // Flat join di tutte le bozze
@@ -207,13 +215,17 @@ export default function RicercaPage() {
   const pagedReport = reportRows.slice((page - 1) * pageSize, page * pageSize)
 
   function handleExportReport() {
-    const modeLabel = reportMode === 'matricola' ? 'Matricola;Nominativo;Ruolo'
-      : reportMode === 'voce' ? 'Voce' : 'Periodo'
-    const header = `${modeLabel};N. Righe;N. Liquidazioni;Importo Lordo;Importo CSV\r\n`
-    const body   = reportRows.map(r =>
-      [r.label, r.sub, r.count, r.nBozze,
-       r.lordo.toFixed(2), r.csv.toFixed(2)].filter((_, i) => reportMode === 'matricola' || i !== 1).join(';'),
-    ).join('\r\n')
+    const header = reportMode === 'matricola'
+      ? 'Matricola / Nominativo;Ruolo;N. Righe;N. Liquidazioni;Importo Lordo;Importo CSV\r\n'
+      : `${reportMode === 'voce' ? 'Voce HR' : 'Periodo'};N. Righe;N. Liquidazioni;Importo Lordo;Importo CSV\r\n`
+    const body = reportRows.map(r => {
+      if (reportMode === 'matricola') {
+        // 6 columns: label, sub (ruolo), count, nBozze, lordo, csv
+        return [r.label, r.sub, r.count, r.nBozze, r.lordo.toFixed(2), r.csv.toFixed(2)].join(';')
+      }
+      // 5 columns: label, count, nBozze, lordo, csv
+      return [r.label, r.count, r.nBozze, r.lordo.toFixed(2), r.csv.toFixed(2)].join(';')
+    }).join('\r\n')
     downloadPlainCsv(header + body, `report_${reportMode}_${new Date().toISOString().slice(0,10)}.csv`)
   }
 

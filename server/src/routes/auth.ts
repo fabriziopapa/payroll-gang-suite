@@ -47,27 +47,26 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       request.ip,
     )
 
-    // Invia QR via email (fire-and-forget — non blocca la risposta)
-    let emailSent = false
-    if (app.mailer.isConfigured()) {
-      try {
-        // FIX #4: URL contiene il token opaco (non l'UUID utente)
-        const activateUrl = `${env.CLIENT_ORIGIN}?activate=${result.activationToken}`
-        await app.mailer.sendQrCode({
-          to:          body.username,
-          username:    body.username,
-          qrCodeUrl:   result.qrCodeUrl,
-          backupKey:   result.backupKey,
-          activateUrl,
-        })
-        emailSent = true
-      } catch (mailErr) {
-        app.log.warn({ mailErr }, 'Invio email QR fallito — l\'utente è stato creato ugualmente')
-      }
-    }
+    // FIX L-3: invia la risposta prima dell'email — sendQrCode è fire-and-forget.
+    // Il client riceve immediatamente il 201 senza attendere l'I/O SMTP.
+    // QR code restituito UNA SOLA VOLTA — non viene mai riloggato.
+    // emailSent = false in questa risposta; l'email è best-effort asincrono.
+    reply.code(201).send({ ...result, emailSent: app.mailer.isConfigured() })
 
-    // QR code restituito UNA SOLA VOLTA — non viene mai riloggato
-    return reply.code(201).send({ ...result, emailSent })
+    // Invia QR via email dopo aver già risposto al client (truly fire-and-forget)
+    if (app.mailer.isConfigured()) {
+      // FIX #4: URL contiene il token opaco (non l'UUID utente)
+      const activateUrl = `${env.CLIENT_ORIGIN}?activate=${result.activationToken}`
+      app.mailer.sendQrCode({
+        to:          body.username,
+        username:    body.username,
+        qrCodeUrl:   result.qrCodeUrl,
+        backupKey:   result.backupKey,
+        activateUrl,
+      }).catch((mailErr: unknown) => {
+        app.log.warn({ mailErr }, 'Invio email QR fallito — l\'utente è stato creato ugualmente')
+      })
+    }
   })
 
   // ----------------------------------------------------------
@@ -110,7 +109,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         request.headers['user-agent'] ?? '',
         request.ip,
       )
-    } catch {
+    } catch (err: any) {
+      // SEC-M01: account bloccato — informazione differenziata
+      if (err.message === 'ACCOUNT_LOCKED') {
+        return reply.code(423).send({ error: 'ACCOUNT_LOCKED' })
+      }
       // Risposta generica — non rivela se l'utente esiste
       return reply.code(401).send({ error: 'AUTH_FAILED' })
     }
@@ -149,10 +152,20 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   // ----------------------------------------------------------
   // POST /api/v1/auth/logout
+  // SEC-C02: estrae anche il JWT access token dall'Authorization header
+  // per inserirlo nella blocklist ed evitare uso post-logout (finestra 15m)
   // ----------------------------------------------------------
   app.post('/logout', async (request, reply) => {
-    const rawToken = request.cookies[REFRESH_COOKIE]
-    if (rawToken) await app.authService.logout(rawToken)
+    const rawRefreshToken = request.cookies[REFRESH_COOKIE]
+    // Estrai JWT grezzo dall'header Authorization (se presente)
+    const authHeader      = request.headers.authorization
+    const rawAccessToken  = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : undefined
+
+    if (rawRefreshToken) {
+      await app.authService.logout(rawRefreshToken, rawAccessToken)
+    }
 
     reply.clearCookie(REFRESH_COOKIE, { path: '/api/v1/auth' })
     return reply.send({ success: true })

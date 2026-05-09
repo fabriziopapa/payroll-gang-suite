@@ -53,6 +53,22 @@ export default function DashboardPage() {
   // reset page on filter change
   useEffect(() => { setPage(1) }, [filter])
 
+  // FIX H-1: GET /bozze lista non include `dati` JSONB.
+  // Prima del caricamento in editor/viewer, fetcha bozza completa via GET /bozze/:id.
+  async function handleOpenEditor(b: BozzaApi) {
+    try {
+      const full = await bozzeApi.getById(b.id)
+      loadBozzaInEditor(full)
+    } catch { showToast("Errore nell'apertura della liquidazione", 'error') }
+  }
+
+  async function handleOpenViewer(b: BozzaApi) {
+    try {
+      const full = await bozzeApi.getById(b.id)
+      loadBozzaInViewer(full)
+    } catch { showToast("Errore nell'apertura dell'anteprima", 'error') }
+  }
+
   async function handleArchive(b: BozzaApi) {
     setArchiving(b.id)
     try {
@@ -69,7 +85,7 @@ export default function DashboardPage() {
     try {
       await bozzeApi.delete(id)
       removeBozza(id)
-    } catch { showToast('Errore eliminazione bozza', 'error') }
+    } catch { showToast("Errore durante l'eliminazione della bozza", 'error') }
     finally { setDeleting(null) }
   }
 
@@ -135,8 +151,8 @@ export default function DashboardPage() {
                 bozza={b}
                 isOwn={b.createdBy === user?.id}
                 createdByUsername={b.createdByUsername}
-                onOpen={() => loadBozzaInEditor(b)}
-                onView={() => loadBozzaInViewer(b)}
+                onOpen={() => handleOpenEditor(b)}
+                onView={() => handleOpenViewer(b)}
                 onArchive={() => handleArchive(b)}
                 onDelete={() => setConfirmDeleteId(b.id)}
                 isArchiving={archiving === b.id}
@@ -152,20 +168,25 @@ export default function DashboardPage() {
                 <button
                   onClick={() => setPage(p => Math.max(1, p - 1))}
                   disabled={page <= 1}
-                  className="px-2 py-1 rounded-md hover:bg-slate-800 transition disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="min-w-[2.5rem] min-h-[2.5rem] px-2 rounded-md hover:bg-slate-800
+                             transition disabled:opacity-30 disabled:cursor-not-allowed
+                             flex items-center justify-center"
                 >‹</button>
                 {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
                   <button
                     key={p}
                     onClick={() => setPage(p)}
-                    className={`min-w-[2rem] px-2 py-1 rounded-md transition
-                      ${p === page ? 'bg-indigo-600 text-white font-medium' : 'hover:bg-slate-800'}`}
+                    className={`min-w-[2.5rem] min-h-[2.5rem] px-2 rounded-md transition
+                      flex items-center justify-center font-medium
+                      ${p === page ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800'}`}
                   >{p}</button>
                 ))}
                 <button
                   onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                   disabled={page >= totalPages}
-                  className="px-2 py-1 rounded-md hover:bg-slate-800 transition disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="min-w-[2.5rem] min-h-[2.5rem] px-2 rounded-md hover:bg-slate-800
+                             transition disabled:opacity-30 disabled:cursor-not-allowed
+                             flex items-center justify-center"
                 >›</button>
               </div>
             </div>
@@ -279,10 +300,13 @@ function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onView, onArchive,
       </span>
 
       {/* Azioni
-          - Bozza attiva: visibili solo su hover (opacity-0 → group-hover:opacity-100)
-          - Archiviata:   sempre visibili (Ripristina + Elimina chiaramente accessibili) */}
-      <div className={`flex items-center gap-1 transition
-                       ${isArchiviata ? '' : 'opacity-0 group-hover:opacity-100'}`}>
+          - Mouse:  visibili su hover (group-hover)
+          - Touch:  sempre visibili [@media(hover:none)]
+          - Archiviata: sempre visibili */}
+      <div className={`flex items-center gap-1 transition-opacity
+                       ${isArchiviata
+                         ? ''
+                         : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100'}`}>
         {!isArchiviata ? (
           <button
             onClick={onOpen}

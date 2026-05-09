@@ -18,6 +18,19 @@ import {
 } from 'drizzle-orm/pg-core'
 
 // ------------------------------------------------------------
+// JWT BLOCKLIST (SEC-C02 — revoca access token al logout)
+// ------------------------------------------------------------
+
+export const jwtBlocklist = pgTable('jwt_blocklist', {
+  /** JWT ID (jti claim) — UUID v4 generato al momento dell'emissione */
+  jti:       varchar('jti', { length: 36 }).primaryKey(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+}, (t) => [
+  // Indice per la pulizia periodica dei token scaduti
+  index('idx_jwt_blocklist_expires_at').on(t.expiresAt),
+])
+
+// ------------------------------------------------------------
 // UTENTI (Auth — passwordless TOTP)
 // ------------------------------------------------------------
 
@@ -41,6 +54,13 @@ export const users = pgTable('users', {
    */
   activationTokenHash:  varchar('activation_token_hash', { length: 64 }),
   activationExpiresAt:  timestamp('activation_expires_at', { withTimezone: true }),
+  /**
+   * SEC-M01 — TOTP brute-force lockout.
+   * Counter incrementato ad ogni OTP errato; resettato ad ogni login riuscito.
+   */
+  failedOtpCount: integer('failed_otp_count').notNull().default(0),
+  /** NULL = non bloccato. Impostato a now+15m quando failedOtpCount raggiunge 5. */
+  lockedUntil:    timestamp('locked_until', { withTimezone: true }),
 })
 
 // ------------------------------------------------------------
@@ -52,6 +72,12 @@ export const refreshTokens = pgTable('refresh_tokens', {
   userId:       uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   /** Hash Argon2 del token — il token grezzo non viene mai salvato */
   tokenHash:    text('token_hash').notNull(),
+  /**
+   * FIX C-1 / M-4: primi 8 byte del raw token in hex (16 chars).
+   * Non segreto ma univoco — permette lookup O(1) senza scan su tokenHash.
+   * Indice UNIQUE garantisce lookup istantaneo senza iterare tutti i token.
+   */
+  tokenSelector: varchar('token_selector', { length: 16 }).notNull(),
   /** Fingerprint: User-Agent + IP hash — rileva token theft */
   fingerprint:  varchar('fingerprint', { length: 64 }).notNull(),
   expiresAt:    timestamp('expires_at', { withTimezone: true }).notNull(),
@@ -59,6 +85,10 @@ export const refreshTokens = pgTable('refresh_tokens', {
   createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   index('idx_refresh_tokens_user_id').on(t.userId),
+  // FIX C-1 / M-4: lookup O(1) per selector — evita la scansione O(n) con Argon2
+  uniqueIndex('idx_refresh_tokens_selector').on(t.tokenSelector),
+  // FIX M-4: compound index per query userId + expiresAt (pulizia token scaduti)
+  index('idx_refresh_tokens_user_expires').on(t.userId, t.expiresAt),
 ])
 
 // ------------------------------------------------------------
@@ -205,6 +235,7 @@ export const auditLog = pgTable('audit_log', {
 export type User              = typeof users.$inferSelect
 export type NewUser           = typeof users.$inferInsert
 export type RefreshToken      = typeof refreshTokens.$inferSelect
+export type JwtBlocklistEntry = typeof jwtBlocklist.$inferSelect
 export type Anagrafica        = typeof anagrafiche.$inferSelect   // ha decorInq, finRap; no codFisc/ruoloCorr
 export type NewAnagrafica     = typeof anagrafiche.$inferInsert
 export type Voce              = typeof voci.$inferSelect

@@ -4,7 +4,7 @@
 // salvataggio bozza, export CSV HR
 // ============================================================
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { useStore } from '../store/useStore'
 import { bozzeApi } from '../api/endpoints'
 import { buildCsvRows, serializeCsv, downloadCsv } from '../utils/biz'
@@ -16,7 +16,7 @@ import type { DettaglioLiquidazione } from '../types'
 
 export default function EditorPage() {
   const {
-    dettagli, nominativi, comunicazioni, settings,
+    dettagli, nominativi, settings,
     currentBozzaId, currentBozzaNome, protocolloDisplay, isDirty,
     upsertBozza, markSaved,
     setCurrentBozzaNome,
@@ -39,23 +39,29 @@ export default function EditorPage() {
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [editingNome, setEditingNome] = useState(false)
   const [tempNome, setTempNome]     = useState(currentBozzaNome)
+  const savingRef                   = useRef(false)
 
   // ── Salva bozza ───────────────────────────────────────────
   async function handleSave() {
+    if (savingRef.current) return   // guard against concurrent calls
+    savingRef.current = true
     setSaving(true)
     setSaveError(null)
     setSaveSuccess(false)
     try {
-      const dati = { nominativi, dettagli, protocolloDisplay, comunicazioni }
+      // Read currentBozzaId from live store state, not stale closure
+      const liveId = useStore.getState().currentBozzaId
+      const { nominativi: liveNoms, dettagli: liveDets, protocolloDisplay: liveProt, comunicazioni: liveCom, currentBozzaNome: liveNome } = useStore.getState()
+      const dati = { nominativi: liveNoms, dettagli: liveDets, protocolloDisplay: liveProt, comunicazioni: liveCom }
       let saved
-      if (currentBozzaId) {
-        saved = await bozzeApi.update(currentBozzaId, {
-          nome: currentBozzaNome,
+      if (liveId) {
+        saved = await bozzeApi.update(liveId, {
+          nome: liveNome,
           dati,
-          ...(protocolloDisplay ? { protocolloDisplay } : {}),
+          ...(liveProt ? { protocolloDisplay: liveProt } : {}),
         })
       } else {
-        saved = await bozzeApi.create(currentBozzaNome, dati, protocolloDisplay || undefined)
+        saved = await bozzeApi.create(liveNome, dati, liveProt || undefined)
       }
       upsertBozza(saved)
       markSaved(saved.id)
@@ -65,6 +71,7 @@ export default function EditorPage() {
       setSaveError((err as Error).message ?? 'Errore durante il salvataggio.')
     } finally {
       setSaving(false)
+      savingRef.current = false
     }
   }
 

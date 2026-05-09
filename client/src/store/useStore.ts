@@ -135,7 +135,7 @@ interface AppStore {
 // ── Store ─────────────────────────────────────────────────────
 
 export const useStore = create<AppStore>()(
-  immer((set, get) => ({
+  immer((set) => ({
     // ── Stato iniziale ───────────────────────────────────────
     user:              null,
     accessToken:       null,
@@ -159,17 +159,16 @@ export const useStore = create<AppStore>()(
 
     // ── Auth ─────────────────────────────────────────────────
     setAuth: (user, token) => {
-      setAccessToken(token)
       set(s => {
         s.user         = user
         s.accessToken  = token
         s.currentPage  = 'dashboard'
         s.bootstrapDone = true
       })
+      setAccessToken(token)
     },
 
     clearAuth: () => {
-      setAccessToken(null)
       set(s => {
         s.user            = null
         s.accessToken     = null
@@ -180,6 +179,7 @@ export const useStore = create<AppStore>()(
         s.bozze           = []
         s.bootstrapDone   = true
       })
+      setAccessToken(null)
     },
 
     setBootstrap: (done) => set(s => { s.bootstrapDone = done }),
@@ -237,30 +237,32 @@ export const useStore = create<AppStore>()(
 
     addDettaglio: (partial) => {
       const id = uid()
-      const { settings, dettagli } = get()
-      const csv = settings.csvDefaults
-      const det: DettaglioLiquidazione = {
-        id,
-        colore:                      nextDetColor(dettagli),
-        nomeDescrittivo:             partial?.nomeDescrittivo             ?? '',
-        voce:                        partial?.voce                        ?? '',
-        capitolo:                    partial?.capitolo                    ?? '',
-        competenzaLiquidazione:      partial?.competenzaLiquidazione      ?? '',
-        dataCompetenzaVoce:          partial?.dataCompetenzaVoce          ?? '',
-        flagScorporo:                partial?.flagScorporo                ?? false,
-        riferimentoCedolino:         partial?.riferimentoCedolino         ?? '',
-        identificativoProvvedimento: partial?.identificativoProvvedimento ?? '000000000',
-        tipoProvvedimento:           partial?.tipoProvvedimento           ?? csv.tipoProvvedimento,
-        numeroProvvedimento:         partial?.numeroProvvedimento         ?? '',
-        dataProvvedimento:           partial?.dataProvvedimento           ?? '',
-        aliquota:                    partial?.aliquota                    ?? csv.aliquota,
-        parti:                       partial?.parti                       ?? csv.parti,
-        flagAdempimenti:             partial?.flagAdempimenti             ?? csv.flagAdempimenti,
-        idContrattoCSA:              partial?.idContrattoCSA              ?? csv.idContrattoCSA,
-        centroCosto:                 partial?.centroCosto                 ?? '',
-        note:                        partial?.note                        ?? '',
-      }
-      set(s => { s.dettagli.push(det); s.isDirty = true })
+      set(s => {
+        const csv = s.settings.csvDefaults
+        const det: DettaglioLiquidazione = {
+          id,
+          colore:                      nextDetColor(s.dettagli),
+          nomeDescrittivo:             partial?.nomeDescrittivo             ?? '',
+          voce:                        partial?.voce                        ?? '',
+          capitolo:                    partial?.capitolo                    ?? '',
+          competenzaLiquidazione:      partial?.competenzaLiquidazione      ?? '',
+          dataCompetenzaVoce:          partial?.dataCompetenzaVoce          ?? '',
+          flagScorporo:                partial?.flagScorporo                ?? false,
+          riferimentoCedolino:         partial?.riferimentoCedolino         ?? '',
+          identificativoProvvedimento: partial?.identificativoProvvedimento ?? '000000000',
+          tipoProvvedimento:           partial?.tipoProvvedimento           ?? csv.tipoProvvedimento,
+          numeroProvvedimento:         partial?.numeroProvvedimento         ?? '',
+          dataProvvedimento:           partial?.dataProvvedimento           ?? '',
+          aliquota:                    partial?.aliquota                    ?? csv.aliquota,
+          parti:                       partial?.parti                       ?? csv.parti,
+          flagAdempimenti:             partial?.flagAdempimenti             ?? csv.flagAdempimenti,
+          idContrattoCSA:              partial?.idContrattoCSA              ?? csv.idContrattoCSA,
+          centroCosto:                 partial?.centroCosto                 ?? '',
+          note:                        partial?.note                        ?? '',
+        }
+        s.dettagli.push(det)
+        s.isDirty = true
+      })
       return id
     },
 

@@ -5,6 +5,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { PgBozzeRepository } from '../db/repositories/PgBozzeRepository.js'
+// BozzaSummaryRow is used by the list endpoint — no dati JSONB (FIX H-1)
 
 export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
 
@@ -22,9 +23,10 @@ export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
   }
 
   // GET / — admin vede tutte; utente normale solo le proprie
+  // FIX H-1: usa findAllSummary() — omette dati JSONB (20KB/riga) dalla lista
   app.get('/', { preHandler: [app.authenticate] }, async (req, reply) => {
     const userId = req.user!.isAdmin ? undefined : req.user!.id
-    return reply.send(await repo.findAll(userId))
+    return reply.send(await repo.findAllSummary(userId))
   })
 
   // GET /:id — admin può accedere a qualsiasi bozza; utente solo la propria
@@ -76,7 +78,11 @@ export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // DELETE — solo il proprietario può eliminare; l'admin NON può eliminare bozze altrui
+  // SEC-C03: richiede header X-Confirm-Delete: true per operazioni distruttive
   app.delete('/:id', { preHandler: [app.authenticate] }, async (req, reply) => {
+    if (req.headers['x-confirm-delete'] !== 'true') {
+      return reply.code(400).send({ error: 'MISSING_CONFIRM_HEADER' })
+    }
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params)
     const bozza  = await repo.findById(id)
     if (!bozza) return reply.code(404).send({ error: 'NOT_FOUND' })

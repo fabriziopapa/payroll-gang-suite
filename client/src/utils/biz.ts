@@ -112,29 +112,29 @@ export function formatCsvDate(isoDate: string): string {
 export function serializeCsv(rows: CsvExportRow[]): string {
   const dataRows = rows.map(r =>
     [
-      r.matricola,
-      r.comparto,
-      r.ruolo,
-      r.codiceVoce,
-      r.identificativoProvvedimento,
-      r.tipoProvvedimento,
-      r.numeroProvvedimento,
-      r.dataProvvedimento,
-      r.annoCompetenzaLiquidazione,
-      r.meseCompetenzaLiquidazione,
-      formatCsvDate(r.dataCompetenzaVoce),
-      r.codiceStatoVoce,
+      csvEscape(r.matricola),
+      csvEscape(r.comparto),
+      csvEscape(r.ruolo),
+      csvEscape(r.codiceVoce),
+      csvEscape(r.identificativoProvvedimento),
+      csvEscape(r.tipoProvvedimento),
+      csvEscape(r.numeroProvvedimento),
+      csvEscape(r.dataProvvedimento),
+      csvEscape(r.annoCompetenzaLiquidazione),
+      csvEscape(r.meseCompetenzaLiquidazione),
+      csvEscape(formatCsvDate(r.dataCompetenzaVoce)),
+      csvEscape(r.codiceStatoVoce),
       String(r.aliquota),
       String(r.parti),
       String(r.importo),
-      r.codiceDivisa,
-      r.codiceEnte,
-      r.codiceCapitolo,
-      r.codiceCentroDiCosto,
+      csvEscape(r.codiceDivisa),
+      csvEscape(r.codiceEnte),
+      csvEscape(r.codiceCapitolo),
+      csvEscape(r.codiceCentroDiCosto),
       csvEscape(r.riferimento),
-      r.codiceRiferimentoVoce,
+      csvEscape(r.codiceRiferimentoVoce),
       String(r.flagAdempimenti),
-      r.idContrattoCSA,
+      csvEscape(r.idContrattoCSA),
       csvEscape(r.nota),
     ].join(';'),
   )
@@ -158,7 +158,10 @@ export function downloadCsv(content: string, filename: string): void {
 
 /** "MM/YYYY" → ["YYYY", "MM"] */
 function parseCompetenza(competenza: string): [string, string] {
-  const [mm = '', yyyy = ''] = competenza.split('/')
+  const parts = competenza.split('/')
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return ['', '']
+  const [mm = '', yyyy = ''] = parts
+  if (!/^\d{2}$/.test(mm) || !/^\d{4}$/.test(yyyy)) return ['', '']
   return [yyyy, mm]
 }
 
@@ -181,15 +184,23 @@ export function lastDayOfMonth(competenza: string): string {
 
 /**
  * ISO date → "DD/MM/YYYY" (campo dataProvvedimento CSV).
+ * Parse date-only ISO strings as local time to avoid UTC midnight offset bug.
  */
 export function formatDateItalian(isoDate: string): string {
-  const d = new Date(isoDate)
-  if (isNaN(d.getTime())) return isoDate
-  return d.toLocaleDateString('it-IT', {
-    day:   '2-digit',
-    month: '2-digit',
-    year:  'numeric',
-  })
+  const parts = isoDate.split('-')
+  if (parts.length === 3) {
+    const y = parseInt(parts[0]!, 10)
+    const m = parseInt(parts[1]!, 10) - 1
+    const d = parseInt(parts[2]!, 10)
+    if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+      const date = new Date(y, m, d)
+      return date.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    }
+  }
+  // Fallback for datetime strings
+  const dt = new Date(isoDate)
+  if (isNaN(dt.getTime())) return isoDate
+  return dt.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
 /**

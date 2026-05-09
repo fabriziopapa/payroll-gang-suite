@@ -17,6 +17,25 @@ interface NewUserForm {
   isAdmin:  boolean
 }
 
+// ── Helper messaggi di errore ─────────────────────────────────
+
+const ruoloErrorMsg = (code: string): string => {
+  if (code === 'CANNOT_CHANGE_OWN_ROLE') return 'Non puoi modificare il tuo stesso ruolo.'
+  if (code === 'USER_NOT_FOUND')         return 'Utente non trovato.'
+  return 'Errore durante la modifica del ruolo.'
+}
+
+const deleteErrorMsg = (code: string): string => {
+  if (code === 'CANNOT_DELETE_SELF') return 'Non puoi eliminare il tuo stesso account.'
+  if (code === 'USER_NOT_FOUND')     return 'Utente non trovato.'
+  return "Errore durante l'eliminazione dell'utente."
+}
+
+const qrErrorMsg = (code: string): string => {
+  if (code === 'USER_NOT_FOUND') return 'Utente non trovato.'
+  return 'Errore durante la rigenerazione del QR.'
+}
+
 // ── Componente ────────────────────────────────────────────────
 
 export default function GestioneUtentiPage() {
@@ -124,7 +143,7 @@ export default function GestioneUtentiPage() {
       if (code === 'CANNOT_DEMOTE_SUPERADMIN') {
         showToast('L\'utente "admin" non può essere declassato.', 'warning')
       } else {
-        showToast(`Impossibile modificare il ruolo: ${code}`, 'error')
+        showToast(ruoloErrorMsg(code), 'error')
       }
       await loadUsers()
     } finally {
@@ -140,7 +159,7 @@ export default function GestioneUtentiPage() {
       setUsers(list => list.filter(u => u.id !== user.id))
     } catch (err) {
       const code = err instanceof ApiError ? err.code : (err as Error).message ?? 'ERRORE'
-      showToast(`Impossibile eliminare l'utente: ${code}`, 'error')
+      showToast(deleteErrorMsg(code), 'error')
       await loadUsers()
     } finally {
       setPending(p => ({ ...p, [user.id]: false }))
@@ -156,7 +175,7 @@ export default function GestioneUtentiPage() {
       await loadUsers()
     } catch (err) {
       const code = err instanceof ApiError ? err.code : (err as Error).message ?? 'ERRORE'
-      showToast(`Impossibile rigenerare il QR: ${code}`, 'error')
+      showToast(qrErrorMsg(code), 'error')
     } finally {
       setPending(p => ({ ...p, [user.id]: false }))
     }

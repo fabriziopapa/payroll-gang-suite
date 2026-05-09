@@ -80,6 +80,8 @@ export default function LoginPage() {
       setError(
         code === 'AUTH_FAILED'
           ? 'Credenziali non valide. Verifica email e codice OTP.'
+          : code === 'ACCOUNT_LOCKED'
+          ? 'Account bloccato per troppi tentativi errati. Contatta l\'amministratore.'
           : code === 'RATE_LIMIT_EXCEEDED'
           ? 'Troppi tentativi. Attendi qualche minuto.'
           : `Errore di connessione (${code}).`,

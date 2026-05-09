@@ -3,7 +3,7 @@
 // Visualizzazione sola lettura di una liquidazione archiviata
 // ============================================================
 
-import { useMemo } from 'react'
+import { useMemo, useEffect } from 'react'
 import { useStore, type BozzaDati } from '../store/useStore'
 import {
   calcolaImportoCSV, calcolaTotali, buildCsvRows,
@@ -15,10 +15,11 @@ export default function ViewerPage() {
   const { viewerBozza, navigate, settings } = useStore()
 
   // Guard: nessuna bozza in viewer → torna alla dashboard
-  if (!viewerBozza) {
-    navigate('dashboard')
-    return null
-  }
+  useEffect(() => {
+    if (!viewerBozza) navigate('dashboard')
+  }, [viewerBozza, navigate])
+
+  if (!viewerBozza) return null
 
   const dati     = (viewerBozza.dati ?? {}) as Partial<BozzaDati>
   const dettagli  = dati.dettagli      ?? []

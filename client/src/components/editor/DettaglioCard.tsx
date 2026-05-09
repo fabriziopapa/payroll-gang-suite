@@ -165,7 +165,7 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
             }
           }
         } catch {
-          showToast('Errore aggiornamento ruoli — riprova', 'error')
+          showToast("Errore durante l'aggiornamento dei ruoli — riprova", 'error')
         }
       }))
     }
@@ -437,8 +437,11 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
             </svg>
           </button>
           <button
+            onClick={e => { e.stopPropagation(); setCollapsed(v => !v) }}
+            aria-expanded={!collapsed}
             className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 transition"
             title={collapsed ? 'Espandi' : 'Comprimi'}
+            aria-label={collapsed ? 'Espandi gruppo' : 'Comprimi gruppo'}
           >
             <svg
               className={`w-4 h-4 transition-transform ${collapsed ? 'rotate-180' : ''}`}
@@ -570,7 +573,7 @@ function NominativoRow({ nom, dettaglio, coefficienti, onRemove,
         importoInputRef.current?.select()
       }, 0)
     }
-  }, [isEditingImporto]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isEditingImporto, nom.importoLordo])
 
   function commitImporto() {
     const val = parseFloat(tempImporto.replace(',', '.'))

@@ -121,8 +121,25 @@ export interface BozzaInput {
   createdBy?:        string
 }
 
+/**
+ * FIX H-1: tipo bozza senza il campo `dati` JSONB — usato dalla lista.
+ * Evita di trasferire 20KB avg per riga quando la dashboard mostra solo metadati.
+ */
+export interface BozzaSummaryRow {
+  id:                string
+  nome:              string
+  stato:             'bozza' | 'archiviata'
+  protocolloDisplay: string | null
+  createdBy:         string | null
+  createdByUsername: string | null
+  createdAt:         Date
+  updatedAt:         Date
+}
+
 export interface IBozzeRepository {
   findAll(userId?: string): Promise<BozzaRow[]>
+  /** FIX H-1: lista senza dati JSONB — usata dal GET /bozze */
+  findAllSummary(userId?: string): Promise<BozzaSummaryRow[]>
   findById(id: string): Promise<BozzaRow | null>
   create(data: BozzaInput): Promise<BozzaRow>
   update(id: string, data: Partial<BozzaInput>): Promise<BozzaRow>
@@ -161,6 +178,8 @@ export interface IUsersRepository {
   findByUsername(username: string): Promise<(UserRow & {
     totpSecret:   string
     lastOtpToken: string | null
+    /** SEC-M01: timestamp fino al quale l'account è bloccato (null = non bloccato) */
+    lockedUntil:  Date | null
   }) | null>
   create(data: {
     username:   string
@@ -182,6 +201,20 @@ export interface IUsersRepository {
   clearActivationToken(userId: string): Promise<void>
   /** Imposta/rimuove il ruolo admin. */
   setAdmin(id: string, isAdmin: boolean): Promise<void>
+  // ── SEC-M01: TOTP brute-force lockout ──────────────────────
+  /**
+   * Incrementa failedOtpCount.
+   * Se raggiunge 5, imposta lockedUntil = now + 15 minuti e resetta il contatore.
+   */
+  incrementFailedOtp(userId: string): Promise<void>
+  /** Resetta failedOtpCount a 0 e cancella lockedUntil (chiamato dopo login riuscito). */
+  resetFailedOtp(userId: string): Promise<void>
+  /**
+   * SEC-M01 FIX G: sblocca manualmente un utente (admin → admin).
+   * Imposta failedOtpCount = 0, lockedUntil = NULL.
+   * Caso d'uso: account bloccato per troppi OTP falliti, nessun auto-unlock disponibile.
+   */
+  unlockUser(userId: string): Promise<void>
 }
 
 // ------------------------------------------------------------
