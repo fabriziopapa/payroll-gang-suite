@@ -149,7 +149,7 @@ export default function LoginPage() {
         loginWidgetRef.current = window.turnstile.render(loginContainerRef.current, {
           sitekey:    TURNSTILE_SITE_KEY!,
           execution:  'execute',
-          appearance: 'invisible',
+          appearance: 'interaction-only',
           callback: (cfToken: string) => {
             doLoginApiRef.current?.(cfToken)
             if (loginWidgetRef.current) window.turnstile.reset(loginWidgetRef.current)
@@ -167,7 +167,7 @@ export default function LoginPage() {
         activateWidgetRef.current = window.turnstile.render(activateContainerRef.current, {
           sitekey:    TURNSTILE_SITE_KEY!,
           execution:  'execute',
-          appearance: 'invisible',
+          appearance: 'interaction-only',
           callback: (cfToken: string) => {
             doActivateApiRef.current?.(cfToken)
             if (activateWidgetRef.current) window.turnstile.reset(activateWidgetRef.current)
