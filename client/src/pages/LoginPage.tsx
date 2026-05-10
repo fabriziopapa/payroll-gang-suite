@@ -147,7 +147,7 @@ export default function LoginPage() {
     window.onTurnstileLoad = () => {
       if (loginContainerRef.current && !loginWidgetRef.current) {
         loginWidgetRef.current = window.turnstile.render(loginContainerRef.current, {
-          sitekey:    TURNSTILE_SITE_KEY,
+          sitekey:    TURNSTILE_SITE_KEY!,
           execution:  'execute',
           appearance: 'invisible',
           callback: (cfToken: string) => {
@@ -165,7 +165,7 @@ export default function LoginPage() {
       }
       if (activateContainerRef.current && !activateWidgetRef.current) {
         activateWidgetRef.current = window.turnstile.render(activateContainerRef.current, {
-          sitekey:    TURNSTILE_SITE_KEY,
+          sitekey:    TURNSTILE_SITE_KEY!,
           execution:  'execute',
           appearance: 'invisible',
           callback: (cfToken: string) => {
