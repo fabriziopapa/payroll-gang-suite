@@ -31,36 +31,25 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
    * Il risultato viene poi ordinato per cognNome in un subquery/CTE implicito.
    */
   async findAll(): Promise<AnagraficaRow[]> {
-    // DISTINCT ON non è supportato nativamente da Drizzle — si usa sql tagged template.
-    // La query seleziona una riga per matricola (la più recente per decor_inq),
-    // poi ordina per cogn_nome a livello applicativo (costo O(n log n) solo sul result set finale).
-    const rows = await this.db.execute(sql`
-      SELECT DISTINCT ON (matricola)
-        id, matricola, cogn_nome, ruolo, druolo,
-        decor_inq, fin_rap, data_aggiornamento,
-        created_at, updated_at
-      FROM anagrafiche
-      WHERE fin_rap IS NULL
-      ORDER BY matricola, decor_inq DESC
-    `)
+    // Usa query Drizzle nativa (camelCase garantito dal driver).
+    // ORDER BY matricola + decorInq DESC → prima riga per matricola = più recente.
+    // Dedup in JS con Set: O(n) — affidabile indipendentemente dal transform del driver.
+    const rows = await this.db
+      .select()
+      .from(schema.anagrafiche)
+      .where(isNull(schema.anagrafiche.finRap))
+      .orderBy(schema.anagrafiche.matricola, desc(schema.anagrafiche.decorInq))
 
-    // Mappa i nomi snake_case restituiti da postgres.js → camelCase del tipo inferito
-    const mapped = (rows as Array<Record<string, unknown>>).map(r => ({
-      id:                r['id'] as number,
-      matricola:         r['matricola'] as string,
-      cognNome:          r['cogn_nome'] as string,
-      ruolo:             r['ruolo'] as string,
-      druolo:            r['druolo'] as string | null,
-      decorInq:          r['decor_inq'] as string,
-      finRap:            r['fin_rap'] as string | null,
-      dataAggiornamento: r['data_aggiornamento'] as string,
-      createdAt:         r['created_at'] as Date,
-      updatedAt:         r['updated_at'] as Date,
-    }))
+    // Mantieni solo la riga più recente per matricola
+    const seen    = new Set<string>()
+    const deduped = rows.filter(r => {
+      if (seen.has(r.matricola)) return false
+      seen.add(r.matricola)
+      return true
+    })
 
-    // Riordina per cognNome (PostgreSQL DISTINCT ON richiede ORDER BY matricola)
-    return mapped
-      .sort((a, b) => a.cognNome.localeCompare(b.cognNome, 'it'))
+    return deduped
+      .sort((a, b) => (a.cognNome ?? '').localeCompare(b.cognNome ?? '', 'it'))
       .map(toRow)
   }
 
