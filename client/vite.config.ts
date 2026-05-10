@@ -4,6 +4,8 @@ import path from 'path'
 
 export default defineConfig({
   plugins: [react()],
+  // Legge le variabili VITE_* dal .env nella root del monorepo
+  envDir: '../',
   resolve: {
     alias: {
       '@shared': path.resolve(__dirname, '../shared'),
