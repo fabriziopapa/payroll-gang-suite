@@ -201,7 +201,7 @@ export default function LoginPage() {
       // @ts-expect-error cleanup global callback
       delete window.onTurnstileLoad
     }
-  }, [])
+  }, [turnstileEnabled])
 
   // Auto-focus
   useEffect(() => {
