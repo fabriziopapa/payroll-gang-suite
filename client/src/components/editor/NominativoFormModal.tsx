@@ -706,6 +706,7 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
                       ? importoEffettivo.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'
                       : mImporto}
                     onChange={e => { if (confirmedBudget.length === 0) setMImporto(e.target.value) }}
+                    onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault() }}
                     placeholder="es. 1234.56"
                     className={`${inputCls} flex-1 ${confirmedBudget.length > 0 ? 'bg-slate-700/50 text-emerald-400 font-mono cursor-default' : ''}`}
                   />
@@ -1045,6 +1046,7 @@ function PasteResultRow({ row, onToggle, onChoose, onImportoChange }: {
             step="0.01"
             value={localImporto}
             onChange={e => { setLocalImporto(e.target.value); onImportoChange(e.target.value) }}
+            onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault() }}
             placeholder="€ 0"
             className="w-24 px-2 py-1 rounded-lg bg-slate-700 border border-slate-600
                        text-white text-xs text-right font-mono
