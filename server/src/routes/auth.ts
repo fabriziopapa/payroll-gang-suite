@@ -7,6 +7,22 @@ import { z } from 'zod'
 import type { AuthService } from '../auth/AuthService.js'
 import { requireAdmin } from '../middleware/authenticate.js'
 import { env, REFRESH_TOKEN_MS } from '../config/env.js'
+
+// Fail-open: se CF è irraggiungibile non blocca il login
+async function verifyTurnstile(token: string | undefined, ip: string): Promise<boolean> {
+  if (!env.TURNSTILE_SECRET_KEY || !token) return true
+  try {
+    const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ secret: env.TURNSTILE_SECRET_KEY, response: token, remoteip: ip }),
+    })
+    const data = await res.json() as { success: boolean }
+    return data.success
+  } catch {
+    return true
+  }
+}
 // MailerService è accessibile tramite app.mailer (decorato in app.ts)
 
 const REFRESH_COOKIE = 'pgs_refresh'
@@ -75,10 +91,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   // ----------------------------------------------------------
   app.post('/activate', async (request, reply) => {
     const schema = z.object({
-      activationToken: z.string().length(64).regex(/^[0-9a-f]{64}$/),
-      token:           z.string().length(6).regex(/^\d{6}$/),
+      activationToken:  z.string().length(64).regex(/^[0-9a-f]{64}$/),
+      token:            z.string().length(6).regex(/^\d{6}$/),
+      cfTurnstileToken: z.string().optional(),
     })
-    const { activationToken, token } = schema.parse(request.body)
+    const { activationToken, token, cfTurnstileToken } = schema.parse(request.body)
+
+    if (!(await verifyTurnstile(cfTurnstileToken, request.ip))) {
+      return reply.code(400).send({ error: 'CAPTCHA_FAILED' })
+    }
 
     try {
       const ok = await app.authService.activateUser(activationToken, token)
@@ -97,10 +118,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   // ----------------------------------------------------------
   app.post('/login', async (request, reply) => {
     const schema = z.object({
-      username: z.string().min(1).max(100),
-      token:    z.string().length(6).regex(/^\d{6}$/),
+      username:         z.string().min(1).max(100),
+      token:            z.string().length(6).regex(/^\d{6}$/),
+      cfTurnstileToken: z.string().optional(),
     })
-    const { username, token } = schema.parse(request.body)
+    const { username, token, cfTurnstileToken } = schema.parse(request.body)
+
+    if (!(await verifyTurnstile(cfTurnstileToken, request.ip))) {
+      return reply.code(400).send({ error: 'CAPTCHA_FAILED' })
+    }
 
     let result
     try {

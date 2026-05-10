@@ -290,6 +290,8 @@ export interface AppSettings {
   tags:                 TagCedolino[];
   rubrica:              Contatto[];
   modelliComunicazione: ModelloComunicazione[];
+  /** Protezione bot Cloudflare Turnstile — default true. Disabilitabile da admin. */
+  turnstileEnabled?:    boolean;
 }
 
 // ------------------------------------------------------------

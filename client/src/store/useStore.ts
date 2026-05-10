@@ -46,6 +46,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   tags:                 TAG_BUILTIN.map(p => ({ prefisso: p, builtin: true })),
   rubrica:              [],
   modelliComunicazione: [],
+  turnstileEnabled:     true,
 }
 
 // ── Helpers ───────────────────────────────────────────────────

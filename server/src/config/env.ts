@@ -45,6 +45,9 @@ const envSchema = z.object({
   TOTP_ISSUER: z.string().default('PayrollGangSuite'),
   TOTP_WINDOW: z.coerce.number().int().min(0).max(2).default(1),
 
+  // Cloudflare Turnstile (opzionale — se assente, verifica CAPTCHA saltata)
+  TURNSTILE_SECRET_KEY: z.string().optional(),
+
   // SMTP mailer (opzionale — il server parte senza, ma non invia email)
   SMTP_HOST:   z.string().optional(),
   SMTP_PORT:   z.coerce.number().int().default(587),

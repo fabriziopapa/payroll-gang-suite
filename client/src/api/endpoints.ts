@@ -102,10 +102,10 @@ export interface RegenQrResult {
 // ── Auth ──────────────────────────────────────────────────────
 
 export const authApi = {
-  login: (username: string, token: string) =>
+  login: (username: string, token: string, cfTurnstileToken?: string) =>
     apiFetch<{ accessToken: string; user: UserApi }>('/auth/login', {
       method: 'POST',
-      body:   JSON.stringify({ username, token }),
+      body:   JSON.stringify({ username, token, ...(cfTurnstileToken ? { cfTurnstileToken } : {}) }),
     }),
 
   logout: () =>
@@ -121,10 +121,10 @@ export const authApi = {
     }),
 
   // FIX #4: invia activationToken (token opaco da URL) + token OTP
-  activate: (activationToken: string, otpToken: string) =>
+  activate: (activationToken: string, otpToken: string, cfTurnstileToken?: string) =>
     apiFetch<{ success: boolean }>('/auth/activate', {
       method: 'POST',
-      body:   JSON.stringify({ activationToken, token: otpToken }),
+      body:   JSON.stringify({ activationToken, token: otpToken, ...(cfTurnstileToken ? { cfTurnstileToken } : {}) }),
     }),
 }
 
@@ -286,4 +286,8 @@ export const settingsApi = {
       method: 'PUT',
       body:   JSON.stringify(settings),
     }),
+
+  // Senza autenticazione — espone solo chiavi pubbliche (es. turnstileEnabled)
+  getPublic: () =>
+    apiFetch<{ turnstileEnabled: boolean }>('/settings/public'),
 }

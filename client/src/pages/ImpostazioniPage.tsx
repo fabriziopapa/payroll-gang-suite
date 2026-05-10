@@ -9,6 +9,8 @@ import { settingsApi } from '../api/endpoints'
 import { showToast } from '../components/ToastManager'
 import type { RuoloScorporabile, Contatto, ModelloComunicazione } from '../types'
 
+const TURNSTILE_CONFIGURED = Boolean(import.meta.env['VITE_TURNSTILE_SITE_KEY'])
+
 const RUOLI_SCORPORABILI: RuoloScorporabile[] = ['PA', 'PO', 'RD', 'RU', 'ND']
 
 const inputCls = `px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700
@@ -17,7 +19,7 @@ const inputCls = `px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700
 // ── Componente ────────────────────────────────────────────────
 
 export default function ImpostazioniPage() {
-  const { settings, setSettings } = useStore()
+  const { settings, setSettings, user } = useStore()
 
   // ── Tab attiva ────────────────────────────────────────────
   type Tab = 'generali' | 'rubrica' | 'modelli'
@@ -26,9 +28,10 @@ export default function ImpostazioniPage() {
   // ── Stato locale — sezione Generali ───────────────────────
   const [coefficienti, setCoefficienti] = useState({ ...settings.coefficienti })
   const [csvDefaults, setCsvDefaults]   = useState({ ...settings.csvDefaults })
-  const [saving,   setSaving]   = useState(false)
-  const [saved,    setSaved]    = useState(false)
-  const [error,    setError]    = useState<string | null>(null)
+  const [saving,         setSaving]         = useState(false)
+  const [saved,          setSaved]          = useState(false)
+  const [error,          setError]          = useState<string | null>(null)
+  const [savingTurnstile, setSavingTurnstile] = useState(false)
 
   // ── Stato locale — Rubrica ────────────────────────────────
   const [rubrica, setRubrica]         = useState<Contatto[]>(settings.rubrica ?? [])
@@ -66,6 +69,24 @@ export default function ImpostazioniPage() {
     window.addEventListener('payroll:save-modello', onSaveModello)
     return () => window.removeEventListener('payroll:save-modello', onSaveModello)
   }, [setSettings, setModelli])
+
+  // ── Actions Sicurezza ────────────────────────────────────────
+
+  async function handleToggleTurnstile(enabled: boolean) {
+    setSavingTurnstile(true)
+    try {
+      await settingsApi.update({ turnstileEnabled: enabled })
+      setSettings({ ...settings, turnstileEnabled: enabled })
+      showToast(
+        enabled ? 'Protezione Turnstile abilitata' : 'Protezione Turnstile disabilitata',
+        'success',
+      )
+    } catch {
+      showToast('Errore nel salvataggio', 'error')
+    } finally {
+      setSavingTurnstile(false)
+    }
+  }
 
   // ── Actions Generali ──────────────────────────────────────
 
@@ -219,6 +240,43 @@ export default function ImpostazioniPage() {
               ))}
             </div>
           </section>
+
+          {/* Sezione Sicurezza — visibile solo ad admin con Turnstile configurato */}
+          {user?.isAdmin && TURNSTILE_CONFIGURED && (
+            <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 mb-6">
+              <h3 className="text-sm font-semibold text-white mb-1">Sicurezza</h3>
+              <p className="text-slate-400 text-xs mb-4">
+                Impostazioni di protezione bot e accesso.
+              </p>
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-sm text-slate-300 font-medium">Protezione bot (Cloudflare Turnstile)</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Verifica invisibile anti-bot alla pagina di accesso.
+                    Disabilitare solo temporaneamente per debug.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={savingTurnstile}
+                  onClick={() => handleToggleTurnstile(!(settings.turnstileEnabled ?? true))}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full
+                    border-2 border-transparent transition-colors duration-200
+                    focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2
+                    focus:ring-offset-slate-900 disabled:opacity-50
+                    ${(settings.turnstileEnabled ?? true) ? 'bg-indigo-600' : 'bg-slate-700'}`}
+                  role="switch"
+                  aria-checked={settings.turnstileEnabled ?? true}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white
+                      shadow transform transition duration-200
+                      ${(settings.turnstileEnabled ?? true) ? 'translate-x-5' : 'translate-x-0'}`}
+                  />
+                </button>
+              </div>
+            </section>
+          )}
 
           <div className="flex items-center gap-3">
             <button

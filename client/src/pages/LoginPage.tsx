@@ -1,14 +1,39 @@
 // ============================================================
 // PAYROLL GANG SUITE — Login Page (TOTP passwordless)
 // Supporta flusso di attivazione via ?activate=UUID
+// Protezione bot: Cloudflare Turnstile invisible/managed
 // ============================================================
 
 import React, { useState, useRef, useEffect } from 'react'
 import { useStore } from '../store/useStore'
-import { authApi } from '../api/endpoints'
+import { authApi, settingsApi } from '../api/endpoints'
 import { setAccessToken } from '../api/client'
 import { APP_NAME, APP_VERSION } from '../types'
 import PrivacyCookieModal from '../components/PrivacyCookieModal'
+
+// ── Cloudflare Turnstile types ────────────────────────────────
+declare global {
+  interface Window {
+    turnstile: {
+      render:  (el: HTMLElement, opts: TurnstileRenderOpts) => string
+      execute: (widgetId: string) => void
+      reset:   (widgetId: string) => void
+      remove:  (widgetId: string) => void
+    }
+    onTurnstileLoad: () => void
+  }
+}
+
+interface TurnstileRenderOpts {
+  sitekey:            string
+  execution:          'execute' | 'render'
+  appearance:         'always' | 'execute' | 'interaction-only' | 'invisible'
+  callback:           (token: string) => void
+  'error-callback':   () => void
+  'expired-callback'?: () => void
+}
+
+const TURNSTILE_SITE_KEY = import.meta.env['VITE_TURNSTILE_SITE_KEY'] as string | undefined
 
 export default function LoginPage() {
   const { setAuth } = useStore()
@@ -30,13 +55,153 @@ export default function LoginPage() {
   const [showPrivacy, setShowPrivacy] = useState(false)
 
   // ── Activate state ────────────────────────────────────────────
-  const [activateToken, setActivateToken]   = useState('')
-  const [activateError, setActivateError]   = useState<string | null>(null)
+  const [activateToken, setActivateToken]     = useState('')
+  const [activateError, setActivateError]     = useState<string | null>(null)
   const [activateLoading, setActivateLoading] = useState(false)
   const [activateSuccess, setActivateSuccess] = useState(false)
 
   const tokenRef         = useRef<HTMLInputElement>(null)
   const activateTokenRef = useRef<HTMLInputElement>(null)
+
+  // ── Turnstile state ───────────────────────────────────────────
+  // null = ancora in fetch, true = abilitato, false = disabilitato da admin
+  const [turnstileEnabled, setTurnstileEnabled] = useState<boolean | null>(
+    TURNSTILE_SITE_KEY ? null : false,
+  )
+
+  // ── Turnstile refs ────────────────────────────────────────────
+  const loginContainerRef    = useRef<HTMLDivElement>(null)
+  const activateContainerRef = useRef<HTMLDivElement>(null)
+  const loginWidgetRef       = useRef<string | null>(null)
+  const activateWidgetRef    = useRef<string | null>(null)
+
+  // Live refs — updated every render to avoid stale closures in Turnstile callbacks
+  const doLoginApiRef    = useRef<((cfToken?: string) => Promise<void>) | null>(null)
+  const doActivateApiRef = useRef<((cfToken?: string) => Promise<void>) | null>(null)
+
+  // ── Live ref for login API call ───────────────────────────────
+  doLoginApiRef.current = async (cfToken?: string) => {
+    try {
+      const { accessToken, user } = await authApi.login(username.trim(), token, cfToken)
+      setAccessToken(accessToken)
+      setAuth(user, accessToken)
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code ?? 'ERRORE'
+      setError(
+        code === 'AUTH_FAILED'
+          ? 'Credenziali non valide. Verifica email e codice OTP.'
+          : code === 'ACCOUNT_LOCKED'
+          ? 'Account bloccato per troppi tentativi errati. Contatta l\'amministratore.'
+          : code === 'RATE_LIMIT_EXCEEDED'
+          ? 'Troppi tentativi. Attendi qualche minuto.'
+          : code === 'CAPTCHA_FAILED'
+          ? 'Verifica di sicurezza fallita. Riprova.'
+          : `Errore di connessione (${code}).`,
+      )
+      setToken('')
+      tokenRef.current?.focus()
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // ── Live ref for activate API call ────────────────────────────
+  doActivateApiRef.current = async (cfToken?: string) => {
+    if (!activateId) return
+    try {
+      await authApi.activate(activateId, activateToken, cfToken)
+      setActivateSuccess(true)
+      window.history.replaceState({}, '', window.location.pathname)
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code ?? 'ERRORE'
+      setActivateError(
+        code === 'ACTIVATION_FAILED'
+          ? 'Codice non valido o account già attivato. Verifica il codice OTP.'
+          : code === 'ACTIVATION_TOKEN_EXPIRED'
+          ? 'Il link di attivazione è scaduto (validità 24h). Contatta l\'amministratore per ricevere un nuovo link.'
+          : code === 'RATE_LIMIT_EXCEEDED'
+          ? 'Troppi tentativi. Attendi qualche minuto.'
+          : code === 'CAPTCHA_FAILED'
+          ? 'Verifica di sicurezza fallita. Riprova.'
+          : `Errore (${code}).`,
+      )
+      setActivateToken('')
+      activateTokenRef.current?.focus()
+    } finally {
+      setActivateLoading(false)
+    }
+  }
+
+  // ── Fetch setting pubblico — prima di caricare Turnstile ─────
+  useEffect(() => {
+    if (!TURNSTILE_SITE_KEY) return // già false, skip
+    settingsApi.getPublic()
+      .then(d => setTurnstileEnabled(d.turnstileEnabled !== false))
+      .catch(() => setTurnstileEnabled(true)) // fail-open
+  }, [])
+
+  // ── Carica script Turnstile — solo quando setting noto e abilitato ─
+  useEffect(() => {
+    if (!turnstileEnabled) return // null (attesa) o false (disabilitato)
+
+    window.onTurnstileLoad = () => {
+      if (loginContainerRef.current && !loginWidgetRef.current) {
+        loginWidgetRef.current = window.turnstile.render(loginContainerRef.current, {
+          sitekey:    TURNSTILE_SITE_KEY,
+          execution:  'execute',
+          appearance: 'invisible',
+          callback: (cfToken: string) => {
+            doLoginApiRef.current?.(cfToken)
+            if (loginWidgetRef.current) window.turnstile.reset(loginWidgetRef.current)
+          },
+          'error-callback': () => {
+            setError('Verifica di sicurezza fallita. Riprova.')
+            setLoading(false)
+          },
+          'expired-callback': () => {
+            if (loginWidgetRef.current) window.turnstile.reset(loginWidgetRef.current)
+          },
+        })
+      }
+      if (activateContainerRef.current && !activateWidgetRef.current) {
+        activateWidgetRef.current = window.turnstile.render(activateContainerRef.current, {
+          sitekey:    TURNSTILE_SITE_KEY,
+          execution:  'execute',
+          appearance: 'invisible',
+          callback: (cfToken: string) => {
+            doActivateApiRef.current?.(cfToken)
+            if (activateWidgetRef.current) window.turnstile.reset(activateWidgetRef.current)
+          },
+          'error-callback': () => {
+            setActivateError('Verifica di sicurezza fallita. Riprova.')
+            setActivateLoading(false)
+          },
+          'expired-callback': () => {
+            if (activateWidgetRef.current) window.turnstile.reset(activateWidgetRef.current)
+          },
+        })
+      }
+    }
+
+    const script = document.createElement('script')
+    script.src   = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad'
+    script.async = true
+    document.head.appendChild(script)
+
+    return () => {
+      if (loginWidgetRef.current) {
+        window.turnstile?.remove(loginWidgetRef.current)
+        loginWidgetRef.current = null
+      }
+      if (activateWidgetRef.current) {
+        window.turnstile?.remove(activateWidgetRef.current)
+        activateWidgetRef.current = null
+      }
+      if (document.head.contains(script)) document.head.removeChild(script)
+      // @ts-expect-error cleanup global callback
+      delete window.onTurnstileLoad
+    }
+  }, [])
 
   // Auto-focus
   useEffect(() => {
@@ -71,25 +236,11 @@ export default function LoginPage() {
     setLoading(true)
     setError(null)
 
-    try {
-      const { accessToken, user } = await authApi.login(username.trim(), token)
-      setAccessToken(accessToken)
-      setAuth(user, accessToken)
-    } catch (err: unknown) {
-      const code = (err as { code?: string }).code ?? 'ERRORE'
-      setError(
-        code === 'AUTH_FAILED'
-          ? 'Credenziali non valide. Verifica email e codice OTP.'
-          : code === 'ACCOUNT_LOCKED'
-          ? 'Account bloccato per troppi tentativi errati. Contatta l\'amministratore.'
-          : code === 'RATE_LIMIT_EXCEEDED'
-          ? 'Troppi tentativi. Attendi qualche minuto.'
-          : `Errore di connessione (${code}).`,
-      )
-      setToken('')
-      tokenRef.current?.focus()
-    } finally {
-      setLoading(false)
+    if (turnstileEnabled && loginWidgetRef.current) {
+      // Turnstile callback chiamerà doLoginApiRef.current quando pronto
+      window.turnstile.execute(loginWidgetRef.current)
+    } else {
+      await doLoginApiRef.current?.()
     }
   }
 
@@ -101,26 +252,10 @@ export default function LoginPage() {
     setActivateLoading(true)
     setActivateError(null)
 
-    try {
-      await authApi.activate(activateId, activateToken)
-      setActivateSuccess(true)
-      // Rimuovi il parametro dall'URL senza ricaricare la pagina
-      window.history.replaceState({}, '', window.location.pathname)
-    } catch (err: unknown) {
-      const code = (err as { code?: string }).code ?? 'ERRORE'
-      setActivateError(
-        code === 'ACTIVATION_FAILED'
-          ? 'Codice non valido o account già attivato. Verifica il codice OTP.'
-          : code === 'ACTIVATION_TOKEN_EXPIRED'
-          ? 'Il link di attivazione è scaduto (validità 24h). Contatta l\'amministratore per ricevere un nuovo link.'
-          : code === 'RATE_LIMIT_EXCEEDED'
-          ? 'Troppi tentativi. Attendi qualche minuto.'
-          : `Errore (${code}).`,
-      )
-      setActivateToken('')
-      activateTokenRef.current?.focus()
-    } finally {
-      setActivateLoading(false)
+    if (turnstileEnabled && activateWidgetRef.current) {
+      window.turnstile.execute(activateWidgetRef.current)
+    } else {
+      await doActivateApiRef.current?.()
     }
   }
 
@@ -346,6 +481,14 @@ export default function LoginPage() {
 
             </form>
           </div>
+        )}
+
+        {/* Turnstile invisible containers — sempre nel DOM, fuori dai blocchi condizionali */}
+        {TURNSTILE_SITE_KEY && (
+          <>
+            <div ref={loginContainerRef}    aria-hidden="true" className="hidden" />
+            <div ref={activateContainerRef} aria-hidden="true" className="hidden" />
+          </>
         )}
 
         <p className="text-center text-slate-600 text-xs mt-6">

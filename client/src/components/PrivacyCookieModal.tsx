@@ -141,11 +141,59 @@ export default function PrivacyCookieModal({ onClose }: Props) {
             </div>
           </div>
 
+          {/* Servizio 3 — Cloudflare Turnstile (protezione bot) */}
+          <div className="bg-slate-800/50 border border-slate-700/80 rounded-xl overflow-hidden">
+            <div className="flex items-center justify-between gap-2 px-4 py-2.5
+                            bg-slate-800 border-b border-slate-700/80 flex-wrap">
+              <span className="font-mono text-xs text-slate-300 font-medium break-all">
+                Cloudflare Turnstile
+              </span>
+              <span className="text-xs px-2 py-0.5 rounded-full whitespace-nowrap
+                               bg-slate-700 text-slate-400 border border-slate-600">
+                Servizio terza parte
+              </span>
+            </div>
+            <div className="px-4 py-1">
+              <CookieRow
+                label="Scopo"
+                value="Protezione bot invisibile alla pagina di accesso — nessuna interazione richiesta agli utenti legittimi"
+              />
+              <CookieRow
+                label="Dati elaborati"
+                value="Segnali browser (timing, canvas, WebGL, navigator), indirizzo IP — inviati a Cloudflare per analisi anti-bot"
+              />
+              <CookieRow label="Gestore"         value="Cloudflare Inc., 101 Townsend St., San Francisco, CA 94107, USA" />
+              <CookieRow label="Trasferimento"   value="USA — EU‑US Data Privacy Framework (decisione di adeguatezza CE 10 luglio 2023)" />
+              <CookieRow label="Base giuridica"  value="Art. 6(1)(f) GDPR — legittimo interesse alla sicurezza del sistema" />
+            </div>
+            <div className="px-4 pb-3 pt-1">
+              <a
+                href="https://www.cloudflare.com/privacypolicy/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-indigo-400
+                           hover:text-indigo-300 transition"
+              >
+                Privacy Policy Cloudflare
+                <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24"
+                     stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4
+                       M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </a>
+            </div>
+          </div>
+
           {/* Note legali */}
           <div className="space-y-1.5 text-xs text-slate-500 pt-1">
             <p>
-              <span className="text-slate-400">Base giuridica: </span>
+              <span className="text-slate-400">Base giuridica cookie tecnici: </span>
               Art. 6(1)(b) GDPR — esecuzione del servizio richiesto.
+            </p>
+            <p>
+              <span className="text-slate-400">Base giuridica Turnstile: </span>
+              Art. 6(1)(f) GDPR — legittimo interesse alla protezione del sistema da accessi automatizzati.
             </p>
             <p>
               <span className="text-slate-400">Normativa: </span>
@@ -154,7 +202,7 @@ export default function PrivacyCookieModal({ onClose }: Props) {
             </p>
             <p>
               <span className="text-slate-400">Aggiornamento: </span>
-              Aprile 2026.
+              Maggio 2026.
             </p>
           </div>
 
