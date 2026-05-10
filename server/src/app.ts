@@ -55,10 +55,11 @@ await app.register(helmet, {
   contentSecurityPolicy: {
     directives: {
       defaultSrc:     ["'self'"],
-      scriptSrc:      ["'self'"],
+      scriptSrc:      ["'self'", 'https://challenges.cloudflare.com'],
       styleSrc:       ["'self'", "'unsafe-inline'"],  // Tailwind CSS
       imgSrc:         ["'self'", 'data:'],             // QR code data URL
-      connectSrc:     ["'self'"],
+      frameSrc:       ['https://challenges.cloudflare.com'],  // Turnstile iframe
+      connectSrc:     ["'self'", 'https://challenges.cloudflare.com'],
       fontSrc:        ["'self'"],
       objectSrc:      ["'none'"],
       upgradeInsecureRequests: env.NODE_ENV === 'production' ? [] : null,
