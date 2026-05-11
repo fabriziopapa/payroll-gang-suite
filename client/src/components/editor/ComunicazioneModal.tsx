@@ -62,7 +62,8 @@ export default function ComunicazioneModal({ dettaglio, noms, existing, onSave, 
   const { settings, voci, capitoliAnag, currentBozzaNome } = useStore()
   const rubrica       = settings.rubrica              ?? []
   const modelli       = settings.modelliComunicazione ?? []
-  const coefficienti  = settings.coefficienti
+  const coefficienti           = settings.coefficienti
+  const coefficientiContoTerzi = settings.coefficientiContoTerzi
 
   // Lookup descrizioni voce dalla tabella voci HR
   const voceItem = voci.find(v => v.codice === dettaglio.voce)
@@ -77,7 +78,7 @@ export default function ComunicazioneModal({ dettaglio, noms, existing, onSave, 
 
   /** Costruisce il PdfContext con i campi correnti del form */
   function makePdfCtx(campi: string[]): PdfContext {
-    return { det: dettaglio, noms, campi, descVoce, descCapitolo, coefficienti, bozzaNome: currentBozzaNome }
+    return { det: dettaglio, noms, campi, descVoce, descCapitolo, coefficienti, coefficientiContoTerzi, bozzaNome: currentBozzaNome }
   }
 
   // ── Stato form ────────────────────────────────────────────

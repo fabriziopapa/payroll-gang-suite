@@ -31,7 +31,7 @@ type ReportMode = 'matricola' | 'voce' | 'periodo'
 
 // ── Helper: flat join bozze → SearchRow[] ────────────────────
 
-function buildSearchRows(bozze: BozzaApi[], coefficienti: Record<string, number>): SearchRow[] {
+function buildSearchRows(bozze: BozzaApi[], coefficienti: Record<string, number>, coefficientiContoTerzi?: Record<string, number>): SearchRow[] {
   const rows: SearchRow[] = []
   for (const bozza of bozze) {
     const dati      = (bozza.dati ?? {}) as Partial<BozzaDati>
@@ -41,7 +41,9 @@ function buildSearchRows(bozze: BozzaApi[], coefficienti: Record<string, number>
       const noms = nominativi.filter(n => n.dettaglioId === det.id)
       for (const nom of noms) {
         const importoCSV = calcolaImportoCSV(
-          nom, det, coefficienti as Parameters<typeof calcolaImportoCSV>[2],
+          nom, det,
+          coefficienti as Parameters<typeof calcolaImportoCSV>[2],
+          coefficientiContoTerzi as Parameters<typeof calcolaImportoCSV>[3],
         )
         rows.push({
           bozzaId:      bozza.id,
@@ -112,8 +114,8 @@ export default function RicercaPage() {
 
   // Flat join di tutte le bozze
   const allRows = useMemo(
-    () => buildSearchRows(bozze, settings.coefficienti as Record<string, number>),
-    [bozze, settings.coefficienti],
+    () => buildSearchRows(bozze, settings.coefficienti as Record<string, number>, settings.coefficientiContoTerzi as Record<string, number> | undefined),
+    [bozze, settings.coefficienti, settings.coefficientiContoTerzi],
   )
 
   // ── Anni disponibili per filtro ──────────────────────────────

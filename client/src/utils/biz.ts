@@ -7,7 +7,7 @@ import type {
   Nominativo,
   DettaglioLiquidazione,
   CsvExportRow,
-  CoefficienteScorporo,
+  ScorporoMap,
 } from '../types'
 import { CSV_FIXED } from '../constants/csvDefaults'
 import { isRuoloScorporabile } from '../constants/scorporoCoefficients'
@@ -17,17 +17,26 @@ import { isRuoloScorporabile } from '../constants/scorporoCoefficients'
 /**
  * Calcola l'importo da inserire nel CSV.
  * Se flagScorporo && ruolo scorporabile → applica formula netto.
+ * tipoScorporo 'contoterzi' → usa coefficientiContoTerzi se disponibile.
  * Altrimenti → importo lordo invariato.
+ *
+ * Formula: lordo ÷ (1 + coeff/100)
  */
 export function calcolaImportoCSV(
-  nominativo: Nominativo,
-  dettaglio:  DettaglioLiquidazione,
-  coefficienti: CoefficienteScorporo,
+  nominativo:              Nominativo,
+  dettaglio:               DettaglioLiquidazione,
+  coefficienti:            ScorporoMap,
+  coefficientiContoTerzi?: ScorporoMap,
 ): number {
-  if (!dettaglio.flagScorporo || !isRuoloScorporabile(nominativo.ruolo)) {
-    return nominativo.importoLordo
-  }
-  const coeff = coefficienti[nominativo.ruolo as keyof CoefficienteScorporo]
+  if (!dettaglio.flagScorporo) return nominativo.importoLordo
+
+  // Scegli la mappa in base al tipo di scorporo
+  const useContoTerzi = dettaglio.tipoScorporo === 'contoterzi' && !!coefficientiContoTerzi
+  const map = useContoTerzi ? coefficientiContoTerzi! : coefficienti
+
+  if (!isRuoloScorporabile(nominativo.ruolo, map)) return nominativo.importoLordo
+
+  const coeff = map[nominativo.ruolo]
   if (coeff === undefined) return nominativo.importoLordo
   return Math.round((nominativo.importoLordo / (1 + coeff / 100)) * 100) / 100
 }
@@ -39,9 +48,10 @@ export function calcolaImportoCSV(
  * Per ogni DettaglioLiquidazione genera una riga per ogni Nominativo associato.
  */
 export function buildCsvRows(
-  dettagli:     DettaglioLiquidazione[],
-  nominativi:   Nominativo[],
-  coefficienti: CoefficienteScorporo,
+  dettagli:                DettaglioLiquidazione[],
+  nominativi:              Nominativo[],
+  coefficienti:            ScorporoMap,
+  coefficientiContoTerzi?: ScorporoMap,
 ): CsvExportRow[] {
   const rows: CsvExportRow[] = []
 
@@ -65,7 +75,7 @@ export function buildCsvRows(
         codiceStatoVoce:             CSV_FIXED.codiceStatoVoce,
         aliquota:                    det.aliquota,
         parti:                       det.parti,
-        importo:                     calcolaImportoCSV(nom, det, coefficienti),
+        importo:                     calcolaImportoCSV(nom, det, coefficienti, coefficientiContoTerzi),
         codiceDivisa:                CSV_FIXED.codiceDivisa,
         codiceEnte:                  CSV_FIXED.codiceEnte,
         codiceCapitolo:              det.capitolo,
@@ -230,14 +240,15 @@ export interface TotaliLiquidazione {
 }
 
 export function calcolaTotali(
-  dettagli:     DettaglioLiquidazione[],
-  nominativi:   Nominativo[],
-  coefficienti: CoefficienteScorporo,
+  dettagli:                DettaglioLiquidazione[],
+  nominativi:              Nominativo[],
+  coefficienti:            ScorporoMap,
+  coefficientiContoTerzi?: ScorporoMap,
 ): TotaliLiquidazione {
   const perDettaglio = dettagli.map(det => {
     const noms       = nominativi.filter(n => n.dettaglioId === det.id)
     const totaleLordo = noms.reduce((s, n) => s + n.importoLordo, 0)
-    const totaleCSV   = noms.reduce((s, n) => s + calcolaImportoCSV(n, det, coefficienti), 0)
+    const totaleCSV   = noms.reduce((s, n) => s + calcolaImportoCSV(n, det, coefficienti, coefficientiContoTerzi), 0)
     return {
       id:          det.id,
       nome:        det.nomeDescrittivo,

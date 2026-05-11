@@ -7,11 +7,9 @@ import { useState, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { settingsApi } from '../api/endpoints'
 import { showToast } from '../components/ToastManager'
-import type { RuoloScorporabile, Contatto, ModelloComunicazione } from '../types'
+import type { Contatto, ModelloComunicazione, ScorporoMap } from '../types'
 
 const TURNSTILE_CONFIGURED = Boolean(import.meta.env['VITE_TURNSTILE_SITE_KEY'])
-
-const RUOLI_SCORPORABILI: RuoloScorporabile[] = ['PA', 'PO', 'RD', 'RU', 'ND']
 
 const inputCls = `px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700
   text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500`
@@ -26,12 +24,20 @@ export default function ImpostazioniPage() {
   const [tab, setTab] = useState<Tab>('generali')
 
   // ── Stato locale — sezione Generali ───────────────────────
-  const [coefficienti, setCoefficienti] = useState({ ...settings.coefficienti })
-  const [csvDefaults, setCsvDefaults]   = useState({ ...settings.csvDefaults })
+  const [coefficienti,    setCoefficienti]    = useState<ScorporoMap>({ ...settings.coefficienti })
+  const [coefficientiCT,  setCoefficientiCT]  = useState<ScorporoMap>({ ...(settings.coefficientiContoTerzi ?? {}) })
+  const [csvDefaults,     setCsvDefaults]     = useState({ ...settings.csvDefaults })
   const [saving,         setSaving]         = useState(false)
   const [saved,          setSaved]          = useState(false)
   const [error,          setError]          = useState<string | null>(null)
   const [savingTurnstile, setSavingTurnstile] = useState(false)
+
+  // form aggiunta riga scorporo standard
+  const [newRuolo,    setNewRuolo]    = useState('')
+  const [newCoeff,    setNewCoeff]    = useState('')
+  // form aggiunta riga scorporo conto terzi
+  const [newRuoloCT,  setNewRuoloCT]  = useState('')
+  const [newCoeffCT,  setNewCoeffCT]  = useState('')
 
   // ── Stato locale — Rubrica ────────────────────────────────
   const [rubrica, setRubrica]         = useState<Contatto[]>(settings.rubrica ?? [])
@@ -93,14 +99,46 @@ export default function ImpostazioniPage() {
   async function handleSave() {
     setSaving(true); setError(null); setSaved(false)
     try {
-      await settingsApi.update({ coefficienti, csvDefaults })
+      await settingsApi.update({ coefficienti, coefficientiContoTerzi: coefficientiCT, csvDefaults })
       // Aggiorna solo i campi che questo form gestisce — non toccare rubrica/modelliComunicazione
-      setSettings({ ...settings, coefficienti, csvDefaults })
+      setSettings({ ...settings, coefficienti, coefficientiContoTerzi: coefficientiCT, csvDefaults })
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
     } catch (e: unknown) {
       setError((e as Error).message ?? 'Errore durante il salvataggio')
     } finally { setSaving(false) }
+  }
+
+  // ── Helpers scorporo standard ─────────────────────────────
+  function addRuoloScorporo() {
+    const r = newRuolo.trim().toUpperCase()
+    const c = parseFloat(newCoeff.replace(',', '.'))
+    if (!r || isNaN(c) || c < 0) return
+    setCoefficienti(prev => ({ ...prev, [r]: c }))
+    setNewRuolo(''); setNewCoeff('')
+  }
+  function removeRuoloScorporo(ruolo: string) {
+    setCoefficienti(prev => { const n = { ...prev }; delete n[ruolo]; return n })
+  }
+  function updateCoeff(ruolo: string, val: string) {
+    const n = parseFloat(val.replace(',', '.'))
+    setCoefficienti(prev => ({ ...prev, [ruolo]: isNaN(n) ? 0 : n }))
+  }
+
+  // ── Helpers scorporo conto terzi ──────────────────────────
+  function addRuoloCT() {
+    const r = newRuoloCT.trim().toUpperCase()
+    const c = parseFloat(newCoeffCT.replace(',', '.'))
+    if (!r || isNaN(c) || c < 0) return
+    setCoefficientiCT(prev => ({ ...prev, [r]: c }))
+    setNewRuoloCT(''); setNewCoeffCT('')
+  }
+  function removeRuoloCT(ruolo: string) {
+    setCoefficientiCT(prev => { const n = { ...prev }; delete n[ruolo]; return n })
+  }
+  function updateCoeffCT(ruolo: string, val: string) {
+    const n = parseFloat(val.replace(',', '.'))
+    setCoefficientiCT(prev => ({ ...prev, [ruolo]: isNaN(n) ? 0 : n }))
   }
 
   // ── Actions Rubrica ───────────────────────────────────────
@@ -191,24 +229,128 @@ export default function ImpostazioniPage() {
       {/* ── TAB GENERALI ──────────────────────────────────────── */}
       {tab === 'generali' && (
         <>
+          {/* ── Scorporo Standard ────────────────────────────── */}
           <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 mb-4">
             <h3 className="text-sm font-semibold text-white mb-1">Coefficienti di scorporo</h3>
             <p className="text-slate-400 text-xs mb-4">
               Formula: importo netto = importo lordo ÷ (1 + coeff / 100)
             </p>
-            <div className="space-y-2">
-              {RUOLI_SCORPORABILI.map(ruolo => (
+            <div className="space-y-2 mb-4">
+              {Object.entries(coefficienti).map(([ruolo, coeff]) => (
                 <div key={ruolo} className="flex items-center gap-3">
-                  <span className="font-mono text-sm text-white w-8">{ruolo}</span>
+                  <span className="font-mono text-sm text-white w-10 shrink-0">{ruolo}</span>
                   <input
-                    type="number" step="0.01" min="0" max="100"
-                    value={coefficienti[ruolo]}
-                    onChange={e => setCoefficienti(prev => ({ ...prev, [ruolo]: parseFloat(e.target.value) || 0 }))}
+                    type="number" step="0.01" min="0" max="200"
+                    value={coeff}
+                    onChange={e => updateCoeff(ruolo, e.target.value)}
                     className={`${inputCls} w-28`}
                   />
                   <span className="text-slate-500 text-sm">%</span>
+                  <button
+                    type="button"
+                    onClick={() => removeRuoloScorporo(ruolo)}
+                    className="ml-auto p-1 rounded text-slate-600 hover:text-red-400
+                               hover:bg-red-950/30 transition"
+                    title="Rimuovi ruolo"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                  </button>
                 </div>
               ))}
+              {Object.keys(coefficienti).length === 0 && (
+                <p className="text-slate-600 text-xs italic">Nessun ruolo configurato</p>
+              )}
+            </div>
+            {/* Aggiunta nuovo ruolo */}
+            <div className="flex items-center gap-2 border-t border-slate-800 pt-4">
+              <input
+                type="text" placeholder="Ruolo (es. PA)" value={newRuolo}
+                onChange={e => setNewRuolo(e.target.value.toUpperCase())}
+                onKeyDown={e => e.key === 'Enter' && addRuoloScorporo()}
+                maxLength={10}
+                className={`${inputCls} w-24 font-mono`}
+              />
+              <input
+                type="number" step="0.01" min="0" placeholder="%" value={newCoeff}
+                onChange={e => setNewCoeff(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addRuoloScorporo()}
+                className={`${inputCls} w-24`}
+              />
+              <span className="text-slate-500 text-sm">%</span>
+              <button
+                type="button"
+                onClick={addRuoloScorporo}
+                disabled={!newRuolo.trim() || !newCoeff}
+                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500
+                           text-white text-sm font-medium transition disabled:opacity-40"
+              >
+                + Aggiungi
+              </button>
+            </div>
+          </section>
+
+          {/* ── Scorporo Conto Terzi ──────────────────────────── */}
+          <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 mb-4">
+            <h3 className="text-sm font-semibold text-white mb-1">Scorporo Conto Terzi</h3>
+            <p className="text-slate-400 text-xs mb-4">
+              Coefficienti separati per liquidazioni con tipo scorporo "Conto Terzi".
+              Stessa formula: netto = lordo ÷ (1 + coeff / 100)
+            </p>
+            <div className="space-y-2 mb-4">
+              {Object.entries(coefficientiCT).map(([ruolo, coeff]) => (
+                <div key={ruolo} className="flex items-center gap-3">
+                  <span className="font-mono text-sm text-white w-10 shrink-0">{ruolo}</span>
+                  <input
+                    type="number" step="0.01" min="0" max="200"
+                    value={coeff}
+                    onChange={e => updateCoeffCT(ruolo, e.target.value)}
+                    className={`${inputCls} w-28`}
+                  />
+                  <span className="text-slate-500 text-sm">%</span>
+                  <button
+                    type="button"
+                    onClick={() => removeRuoloCT(ruolo)}
+                    className="ml-auto p-1 rounded text-slate-600 hover:text-red-400
+                               hover:bg-red-950/30 transition"
+                    title="Rimuovi ruolo"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                  </button>
+                </div>
+              ))}
+              {Object.keys(coefficientiCT).length === 0 && (
+                <p className="text-slate-600 text-xs italic">Nessun ruolo configurato — usa gli stessi del blocco Standard</p>
+              )}
+            </div>
+            {/* Aggiunta nuovo ruolo CT */}
+            <div className="flex items-center gap-2 border-t border-slate-800 pt-4">
+              <input
+                type="text" placeholder="Ruolo (es. PA)" value={newRuoloCT}
+                onChange={e => setNewRuoloCT(e.target.value.toUpperCase())}
+                onKeyDown={e => e.key === 'Enter' && addRuoloCT()}
+                maxLength={10}
+                className={`${inputCls} w-24 font-mono`}
+              />
+              <input
+                type="number" step="0.01" min="0" placeholder="%" value={newCoeffCT}
+                onChange={e => setNewCoeffCT(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addRuoloCT()}
+                className={`${inputCls} w-24`}
+              />
+              <span className="text-slate-500 text-sm">%</span>
+              <button
+                type="button"
+                onClick={addRuoloCT}
+                disabled={!newRuoloCT.trim() || !newCoeffCT}
+                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500
+                           text-white text-sm font-medium transition disabled:opacity-40"
+              >
+                + Aggiungi
+              </button>
             </div>
           </section>
 

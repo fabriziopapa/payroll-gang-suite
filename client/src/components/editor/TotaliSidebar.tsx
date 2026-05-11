@@ -9,7 +9,7 @@ import { calcolaTotali, calcolaImportoCSV, formatEur } from '../../utils/biz'
 export default function TotaliSidebar() {
   const { dettagli, nominativi, settings } = useStore()
 
-  const totali     = calcolaTotali(dettagli, nominativi, settings.coefficienti)
+  const totali     = calcolaTotali(dettagli, nominativi, settings.coefficienti, settings.coefficientiContoTerzi)
   const hasScorporo = dettagli.some(d => d.flagScorporo)
 
   return (
@@ -52,7 +52,7 @@ export default function TotaliSidebar() {
               for (const nom of noms) {
                 const key  = nom.ruolo || '—'
                 const prev = perRuolo.get(key) ?? { lordo: 0, csv: 0, count: 0 }
-                const csv  = det ? calcolaImportoCSV(nom, det, settings.coefficienti) : nom.importoLordo
+                const csv  = det ? calcolaImportoCSV(nom, det, settings.coefficienti, settings.coefficientiContoTerzi) : nom.importoLordo
                 perRuolo.set(key, {
                   lordo: prev.lordo + nom.importoLordo,
                   csv:   prev.csv  + csv,

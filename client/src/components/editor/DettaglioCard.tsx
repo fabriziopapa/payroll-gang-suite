@@ -487,6 +487,7 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
                     nom={nom}
                     dettaglio={dettaglio}
                     coefficienti={settings.coefficienti}
+                    coefficientiContoTerzi={settings.coefficientiContoTerzi}
                     onRemove={() => setRemoveConfirmId(nom.id)}
                     isEditingImporto={editingImportoNomId === nom.id}
                     onStartEditImporto={() => setEditingImportoNomId(nom.id)}
@@ -504,6 +505,7 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
                     noms={noms}
                     dettaglio={dettaglio}
                     coefficienti={settings.coefficienti}
+                    coefficientiContoTerzi={settings.coefficientiContoTerzi}
                   />
                 </tfoot>
               )}
@@ -541,20 +543,21 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
 
 // ── Riga nominativo ───────────────────────────────────────────
 
-function NominativoRow({ nom, dettaglio, coefficienti, onRemove,
+function NominativoRow({ nom, dettaglio, coefficienti, coefficientiContoTerzi, onRemove,
   isEditingImporto, onStartEditImporto, onStopEditImporto, onCommitAndNext,
 }: {
-  nom:                  Nominativo
-  dettaglio:            DettaglioLiquidazione
-  coefficienti:         ReturnType<typeof useStore.getState>['settings']['coefficienti']
-  onRemove:             () => void
-  isEditingImporto:     boolean
+  nom:                       Nominativo
+  dettaglio:                 DettaglioLiquidazione
+  coefficienti:              ReturnType<typeof useStore.getState>['settings']['coefficienti']
+  coefficientiContoTerzi?:   ReturnType<typeof useStore.getState>['settings']['coefficientiContoTerzi']
+  onRemove:                  () => void
+  isEditingImporto:          boolean
   onStartEditImporto:   () => void
   onStopEditImporto:    () => void
   onCommitAndNext:      () => void
 }) {
   const { updateNominativo } = useStore()
-  const importoCSV = calcolaImportoCSV(nom, dettaglio, coefficienti)
+  const importoCSV = calcolaImportoCSV(nom, dettaglio, coefficienti, coefficientiContoTerzi)
   const scorporato = dettaglio.flagScorporo && importoCSV !== nom.importoLordo
 
   const [tempImporto, setTempImporto] = useState(String(nom.importoLordo))
@@ -708,13 +711,14 @@ function NominativoRow({ nom, dettaglio, coefficienti, onRemove,
 
 // ── Riga totale ───────────────────────────────────────────────
 
-function TotaleRow({ noms, dettaglio, coefficienti }: {
-  noms:         Nominativo[]
-  dettaglio:    DettaglioLiquidazione
-  coefficienti: ReturnType<typeof useStore.getState>['settings']['coefficienti']
+function TotaleRow({ noms, dettaglio, coefficienti, coefficientiContoTerzi }: {
+  noms:                      Nominativo[]
+  dettaglio:                 DettaglioLiquidazione
+  coefficienti:              ReturnType<typeof useStore.getState>['settings']['coefficienti']
+  coefficientiContoTerzi?:   ReturnType<typeof useStore.getState>['settings']['coefficientiContoTerzi']
 }) {
   const totaleLordo = noms.reduce((s, n) => s + n.importoLordo, 0)
-  const totaleCSV   = noms.reduce((s, n) => s + calcolaImportoCSV(n, dettaglio, coefficienti), 0)
+  const totaleCSV   = noms.reduce((s, n) => s + calcolaImportoCSV(n, dettaglio, coefficienti, coefficientiContoTerzi), 0)
 
   return (
     <tr className="border-t border-slate-700 bg-slate-800/30">

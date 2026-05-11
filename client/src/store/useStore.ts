@@ -41,12 +41,13 @@ export interface BozzaDati {
 // ── Impostazioni default ──────────────────────────────────────
 
 const DEFAULT_SETTINGS: AppSettings = {
-  coefficienti:         DEFAULT_COEFFICIENTI_SCORPORO,
-  csvDefaults:          DEFAULT_CSV_PARAMS,
-  tags:                 TAG_BUILTIN.map(p => ({ prefisso: p, builtin: true })),
-  rubrica:              [],
-  modelliComunicazione: [],
-  turnstileEnabled:     true,
+  coefficienti:            DEFAULT_COEFFICIENTI_SCORPORO,
+  coefficientiContoTerzi:  {},
+  csvDefaults:             DEFAULT_CSV_PARAMS,
+  tags:                    TAG_BUILTIN.map(p => ({ prefisso: p, builtin: true })),
+  rubrica:                 [],
+  modelliComunicazione:    [],
+  turnstileEnabled:        true,
 }
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -249,6 +250,7 @@ export const useStore = create<AppStore>()(
           competenzaLiquidazione:      partial?.competenzaLiquidazione      ?? '',
           dataCompetenzaVoce:          partial?.dataCompetenzaVoce          ?? '',
           flagScorporo:                partial?.flagScorporo                ?? false,
+          tipoScorporo:                partial?.tipoScorporo                ?? undefined,
           riferimentoCedolino:         partial?.riferimentoCedolino         ?? '',
           identificativoProvvedimento: partial?.identificativoProvvedimento ?? '000000000',
           tipoProvvedimento:           partial?.tipoProvvedimento           ?? csv.tipoProvvedimento,

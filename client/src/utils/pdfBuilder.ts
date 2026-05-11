@@ -3,7 +3,7 @@
 // Estratto da ComunicazioneModal — logica pura, nessun hook React
 // ============================================================
 
-import type { DettaglioLiquidazione, Nominativo, CoefficienteScorporo } from '../types'
+import type { DettaglioLiquidazione, Nominativo, ScorporoMap } from '../types'
 import { formatEur, calcolaImportoCSV } from './biz'
 
 // ── Tipi esportati ────────────────────────────────────────────
@@ -14,7 +14,8 @@ export interface PdfContext {
   campi:        string[]
   descVoce:     string
   descCapitolo: string
-  coefficienti: CoefficienteScorporo
+  coefficienti: ScorporoMap
+  coefficientiContoTerzi?: ScorporoMap
   /** Nome della bozza/liquidazione padre (top-level) */
   bozzaNome?:   string
 }
@@ -57,7 +58,7 @@ export function esc(value: string | undefined | null): string {
 // ── Frammento HTML per il PDF ─────────────────────────────────
 
 export function buildPdfFragment(ctx: PdfContext): string {
-  const { det, noms, campi, descVoce, descCapitolo, coefficienti } = ctx
+  const { det, noms, campi, descVoce, descCapitolo, coefficienti, coefficientiContoTerzi } = ctx
 
   const rows: string[] = []
   const addRow = (label: string, value: string) =>
@@ -112,7 +113,7 @@ export function buildPdfFragment(ctx: PdfContext): string {
   let nomSection = ''
   if (campi.includes('nominativi') && noms.length > 0) {
     const nomRows = noms.map(n => {
-      const importoCSV = calcolaImportoCSV(n, det, coefficienti)
+      const importoCSV = calcolaImportoCSV(n, det, coefficienti, coefficientiContoTerzi)
       const scorporato = showScorporo && importoCSV !== n.importoLordo
       return `
       <tr style="border-bottom:1px solid #e5e7eb">
@@ -145,7 +146,7 @@ export function buildPdfFragment(ctx: PdfContext): string {
 
     const totLordo = noms.reduce((s, n) => s + n.importoLordo, 0)
     const totCSV   = showScorporo
-      ? noms.reduce((s, n) => s + calcolaImportoCSV(n, det, coefficienti), 0)
+      ? noms.reduce((s, n) => s + calcolaImportoCSV(n, det, coefficienti, coefficientiContoTerzi), 0)
       : 0
 
     const totRow = noms.length > 1 ? `

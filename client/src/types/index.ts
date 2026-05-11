@@ -148,6 +148,13 @@ export interface DettaglioLiquidazione {
 
   // --- Scorporo ---
   flagScorporo: boolean;
+  /**
+   * Modalità di scorporo attiva.
+   * - 'standard'   : usa coefficienti normali (default)
+   * - 'contoterzi' : usa coefficientiContoTerzi
+   * undefined = 'standard' per backward compat con bozze esistenti
+   */
+  tipoScorporo?: 'standard' | 'contoterzi';
 
   // --- Riferimento cedolino ---
   /** Es. "TL@TFA SOSTEGNO 2023 2024@" */
@@ -265,11 +272,16 @@ export interface Comunicazione {
 // ------------------------------------------------------------
 
 /**
- * Coefficienti di scorporo per ruolo.
- * Solo i ruoli in RuoloScorporabile hanno una voce qui.
- * Se il ruolo del nominativo non è presente, il flag scorporo è disabilitato.
+ * Mappa aperta ruolo → coefficiente di scorporo.
+ * Supporta qualsiasi codice ruolo (non solo i 5 predefiniti).
  */
-export type CoefficienteScorporo = Record<RuoloScorporabile, number>;
+export type ScorporoMap = Record<string, number>
+
+/**
+ * Alias mantenuto per backward compatibility.
+ * Ora è semplicemente un alias di ScorporoMap.
+ */
+export type CoefficienteScorporo = ScorporoMap;
 
 /**
  * Parametri CSV avanzati — configurabili in Impostazioni.
@@ -285,13 +297,15 @@ export interface CsvDefaults {
 
 /** Stato globale delle impostazioni dell'applicazione */
 export interface AppSettings {
-  coefficienti:         CoefficienteScorporo;
-  csvDefaults:          CsvDefaults;
-  tags:                 TagCedolino[];
-  rubrica:              Contatto[];
-  modelliComunicazione: ModelloComunicazione[];
+  coefficienti:             ScorporoMap;
+  /** Coefficienti per scorporo conto terzi (mappa aperta ruolo→coeff). */
+  coefficientiContoTerzi?:  ScorporoMap;
+  csvDefaults:              CsvDefaults;
+  tags:                     TagCedolino[];
+  rubrica:                  Contatto[];
+  modelliComunicazione:     ModelloComunicazione[];
   /** Protezione bot Cloudflare Turnstile — default true. Disabilitabile da admin. */
-  turnstileEnabled?:    boolean;
+  turnstileEnabled?:        boolean;
 }
 
 // ------------------------------------------------------------

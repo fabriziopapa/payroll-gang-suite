@@ -41,7 +41,13 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
   const [capitolo, setCapitolo]                     = useState(existing?.capitolo ?? '')
   const [competenza, setCompetenza]                 = useState(existing?.competenzaLiquidazione ?? '')
   const [dataCompetenzaVoce, setDataCompetenzaVoce] = useState(existing?.dataCompetenzaVoce ?? '')
-  const [flagScorporo, setFlagScorporo]             = useState(existing?.flagScorporo ?? false)
+  // Radio scorporo: 'none' | 'standard' | 'contoterzi'
+  type ScorporoMode = 'none' | 'standard' | 'contoterzi'
+  function initScorporoMode(): ScorporoMode {
+    if (!existing?.flagScorporo) return 'none'
+    return existing.tipoScorporo === 'contoterzi' ? 'contoterzi' : 'standard'
+  }
+  const [scorporoMode, setScorporoMode] = useState<ScorporoMode>(initScorporoMode)
   const [riferimento, setRiferimento]               = useState(existing?.riferimentoCedolino ?? '')
   const [idProv, setIdProv]                         = useState(existing?.identificativoProvvedimento ?? '000000000')
   const [tipoProv, setTipoProv]                     = useState(existing?.tipoProvvedimento ?? csv.tipoProvvedimento)
@@ -110,7 +116,8 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
       capitolo,
       competenzaLiquidazione:      competenza,
       dataCompetenzaVoce,
-      flagScorporo,
+      flagScorporo:                scorporoMode !== 'none',
+      tipoScorporo:                scorporoMode === 'contoterzi' ? 'contoterzi' : scorporoMode === 'standard' ? 'standard' : undefined,
       riferimentoCedolino:         riferimento,
       identificativoProvvedimento: idProv,
       tipoProvvedimento:           tipoProv,
@@ -330,15 +337,59 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
                   </Field>
                 </div>
 
-                {/* Scorporo */}
-                <div className="flex items-center gap-3 p-3 rounded-lg bg-slate-800/50 border border-slate-700">
-                  <input type="checkbox" id="flagScorporo" checked={flagScorporo}
-                    onChange={e => setFlagScorporo(e.target.checked)}
-                    className="w-4 h-4 rounded border-slate-600 text-indigo-600" />
-                  <label htmlFor="flagScorporo" className="text-sm text-slate-200 cursor-pointer">
-                    Applica scorporo
-                    <span className="text-slate-400 text-xs block">
-                      Calcola importo netto per ruoli PA/PO/RD/RU/ND
+                {/* Scorporo — radio group */}
+                <div className="p-3 rounded-lg bg-slate-800/50 border border-slate-700 space-y-2">
+                  <p className="text-sm font-medium text-slate-300 mb-1">Scorporo</p>
+
+                  {/* Nessuno */}
+                  <label className="flex items-start gap-3 cursor-pointer group">
+                    <input
+                      type="radio" name="scorporo" value="none"
+                      checked={scorporoMode === 'none'}
+                      onChange={() => setScorporoMode('none')}
+                      className="mt-0.5 w-4 h-4 border-slate-600 text-indigo-600"
+                    />
+                    <span className="text-sm text-slate-200">
+                      Nessuno
+                      <span className="text-slate-500 text-xs block">Importo lordo invariato nel CSV</span>
+                    </span>
+                  </label>
+
+                  {/* Scorporo Standard */}
+                  <label className="flex items-start gap-3 cursor-pointer group">
+                    <input
+                      type="radio" name="scorporo" value="standard"
+                      checked={scorporoMode === 'standard'}
+                      onChange={() => setScorporoMode('standard')}
+                      className="mt-0.5 w-4 h-4 border-slate-600 text-indigo-600"
+                    />
+                    <span className="text-sm text-slate-200">
+                      Scorporo standard
+                      <span className="text-slate-500 text-xs block">
+                        Ruoli configurati:{' '}
+                        {Object.keys(settings.coefficienti).length > 0
+                          ? Object.keys(settings.coefficienti).join(', ')
+                          : <em>nessuno</em>}
+                      </span>
+                    </span>
+                  </label>
+
+                  {/* Scorporo Conto Terzi */}
+                  <label className={`flex items-start gap-3 ${Object.keys(settings.coefficientiContoTerzi ?? {}).length === 0 ? 'opacity-40' : 'cursor-pointer'}`}>
+                    <input
+                      type="radio" name="scorporo" value="contoterzi"
+                      checked={scorporoMode === 'contoterzi'}
+                      onChange={() => setScorporoMode('contoterzi')}
+                      disabled={Object.keys(settings.coefficientiContoTerzi ?? {}).length === 0}
+                      className="mt-0.5 w-4 h-4 border-slate-600 text-indigo-600"
+                    />
+                    <span className="text-sm text-slate-200">
+                      Scorporo conto terzi
+                      <span className="text-slate-500 text-xs block">
+                        {Object.keys(settings.coefficientiContoTerzi ?? {}).length === 0
+                          ? 'Configura i coefficienti CT in Impostazioni'
+                          : `Ruoli CT: ${Object.keys(settings.coefficientiContoTerzi!).join(', ')}`}
+                      </span>
                     </span>
                   </label>
                 </div>

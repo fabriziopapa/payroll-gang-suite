@@ -77,7 +77,7 @@ export default function EditorPage() {
 
   // ── Export CSV ────────────────────────────────────────────
   function handleExportCsv() {
-    const rows     = buildCsvRows(dettagli, nominativi, settings.coefficienti)
+    const rows     = buildCsvRows(dettagli, nominativi, settings.coefficienti, settings.coefficientiContoTerzi)
     const csv      = serializeCsv(rows)
     const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '')
     const nomePart = currentBozzaNome.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30)
@@ -116,8 +116,8 @@ export default function EditorPage() {
   const totalNoms = nominativi.length
   const canExport = dettagli.length > 0 && totalNoms > 0
   const csvRows   = useMemo(
-    () => canExport ? buildCsvRows(dettagli, nominativi, settings.coefficienti) : [],
-    [dettagli, nominativi, settings.coefficienti, canExport],
+    () => canExport ? buildCsvRows(dettagli, nominativi, settings.coefficienti, settings.coefficientiContoTerzi) : [],
+    [dettagli, nominativi, settings.coefficienti, settings.coefficientiContoTerzi, canExport],
   )
 
   return (

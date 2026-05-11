@@ -32,7 +32,7 @@ export default function ViewerPage() {
 
   // ── Export CSV HR ────────────────────────────────────────────
   function handleExportCsv() {
-    const rows    = buildCsvRows(dettagli, nominativi, settings.coefficienti)
+    const rows    = buildCsvRows(dettagli, nominativi, settings.coefficienti, settings.coefficientiContoTerzi)
     const csv     = serializeCsv(rows)
     const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '')
     const nomePart = viewerBozza!.nome.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30)
@@ -149,6 +149,7 @@ export default function ViewerPage() {
                 idx={idx}
                 nominativi={nominativi.filter(n => n.dettaglioId === det.id)}
                 coefficienti={settings.coefficienti}
+                coefficientiContoTerzi={settings.coefficientiContoTerzi}
               />
             ))}
           </div>
@@ -160,6 +161,7 @@ export default function ViewerPage() {
         dettagli={dettagli}
         nominativi={nominativi}
         coefficienti={settings.coefficienti}
+        coefficientiContoTerzi={settings.coefficientiContoTerzi}
       />
     </div>
   )
@@ -167,11 +169,12 @@ export default function ViewerPage() {
 
 // ── ViewerDettaglioCard ───────────────────────────────────────
 
-function ViewerDettaglioCard({ det, idx, nominativi, coefficienti }: {
-  det:          DettaglioLiquidazione
-  idx:          number
-  nominativi:   Nominativo[]
-  coefficienti: Record<string, number>
+function ViewerDettaglioCard({ det, idx, nominativi, coefficienti, coefficientiContoTerzi }: {
+  det:                     DettaglioLiquidazione
+  idx:                     number
+  nominativi:              Nominativo[]
+  coefficienti:            Record<string, number>
+  coefficientiContoTerzi?: Record<string, number>
 }) {
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
@@ -214,7 +217,7 @@ function ViewerDettaglioCard({ det, idx, nominativi, coefficienti }: {
             </thead>
             <tbody>
               {nominativi.map(nom => {
-                const csv = calcolaImportoCSV(nom, det, coefficienti as Parameters<typeof calcolaImportoCSV>[2])
+                const csv = calcolaImportoCSV(nom, det, coefficienti as Parameters<typeof calcolaImportoCSV>[2], coefficientiContoTerzi as Parameters<typeof calcolaImportoCSV>[3])
                 return (
                   <tr key={nom.id} className="border-b border-slate-800/50 hover:bg-slate-800/20 transition">
                     <td className="px-4 py-2 font-mono text-slate-300">{nom.matricola}</td>
@@ -247,14 +250,15 @@ function ViewerDettaglioCard({ det, idx, nominativi, coefficienti }: {
 
 import type { CoefficienteScorporo } from '../types'
 
-function ViewerSidebar({ dettagli, nominativi, coefficienti }: {
-  dettagli:     DettaglioLiquidazione[]
-  nominativi:   Nominativo[]
-  coefficienti: CoefficienteScorporo
+function ViewerSidebar({ dettagli, nominativi, coefficienti, coefficientiContoTerzi }: {
+  dettagli:                DettaglioLiquidazione[]
+  nominativi:              Nominativo[]
+  coefficienti:            CoefficienteScorporo
+  coefficientiContoTerzi?: CoefficienteScorporo
 }) {
   const totali     = useMemo(
-    () => calcolaTotali(dettagli, nominativi, coefficienti),
-    [dettagli, nominativi, coefficienti],
+    () => calcolaTotali(dettagli, nominativi, coefficienti, coefficientiContoTerzi),
+    [dettagli, nominativi, coefficienti, coefficientiContoTerzi],
   )
   const hasScorporo = dettagli.some(d => d.flagScorporo)
 
@@ -286,7 +290,7 @@ function ViewerSidebar({ dettagli, nominativi, coefficienti }: {
               for (const nom of noms) {
                 const key  = nom.ruolo || '—'
                 const prev = perRuolo.get(key) ?? { lordo: 0, csv: 0, count: 0 }
-                const csv  = det ? calcolaImportoCSV(nom, det, coefficienti) : nom.importoLordo
+                const csv  = det ? calcolaImportoCSV(nom, det, coefficienti, coefficientiContoTerzi) : nom.importoLordo
                 perRuolo.set(key, { lordo: prev.lordo + nom.importoLordo, csv: prev.csv + csv, count: prev.count + 1 })
               }
               const ruoliEntries = Array.from(perRuolo.entries()).sort((a, b) => b[1].lordo - a[1].lordo)
