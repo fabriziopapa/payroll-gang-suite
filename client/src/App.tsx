@@ -73,13 +73,17 @@ export default function App() {
         // Il server restituisce Record<string,unknown> — cast e deep merge
         const raw = s as unknown as Record<string, unknown>
         setSettings({
-          coefficienti:         { ...DEFAULT_COEFFICIENTI_SCORPORO, ...((raw?.coefficienti ?? {}) as object) },
-          csvDefaults:          { ...DEFAULT_CSV_PARAMS,             ...((raw?.csvDefaults  ?? {}) as object) },
-          tags:                 Array.isArray(raw?.tags) && (raw.tags as unknown[]).length
+          coefficienti:            { ...DEFAULT_COEFFICIENTI_SCORPORO, ...((raw?.coefficienti ?? {}) as object) },
+          coefficientiContoTerzi:  (raw?.coefficientiContoTerzi && typeof raw.coefficientiContoTerzi === 'object')
+            ? (raw.coefficientiContoTerzi as AppSettings['coefficientiContoTerzi'])
+            : {},
+          csvDefaults:             { ...DEFAULT_CSV_PARAMS, ...((raw?.csvDefaults ?? {}) as object) },
+          tags:                    Array.isArray(raw?.tags) && (raw.tags as unknown[]).length
             ? (raw.tags as AppSettings['tags'])
             : TAG_BUILTIN.map(p => ({ prefisso: p, builtin: true })),
           rubrica:              Array.isArray(raw?.rubrica)              ? (raw.rubrica              as AppSettings['rubrica'])              : [],
           modelliComunicazione: Array.isArray(raw?.modelliComunicazione) ? (raw.modelliComunicazione as AppSettings['modelliComunicazione']) : [],
+          turnstileEnabled:     typeof raw?.turnstileEnabled === 'boolean' ? raw.turnstileEnabled : true,
         })
       })
       .catch(() => { /* usa defaults locali già nello store */ })
