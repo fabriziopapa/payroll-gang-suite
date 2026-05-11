@@ -4,12 +4,15 @@
 // Protezione bot: Cloudflare Turnstile invisible/managed
 // ============================================================
 
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useStore } from '../store/useStore'
 import { authApi, settingsApi } from '../api/endpoints'
 import { setAccessToken } from '../api/client'
 import { APP_NAME, APP_VERSION } from '../types'
 import PrivacyCookieModal from '../components/PrivacyCookieModal'
+import EasterEggCredits from '../components/easter-egg/EasterEggCredits'
+
+const EE_HOLD_MS = 3000
 
 // ── Cloudflare Turnstile types ────────────────────────────────
 declare global {
@@ -52,7 +55,16 @@ export default function LoginPage() {
   const [token, setToken]             = useState('')
   const [error, setError]             = useState<string | null>(null)
   const [loading, setLoading]         = useState(false)
-  const [showPrivacy, setShowPrivacy] = useState(false)
+  const [showPrivacy,   setShowPrivacy]   = useState(false)
+  const [showEasterEgg, setShowEasterEgg] = useState(false)
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const onVersionPointerDown = useCallback(() => {
+    holdTimer.current = setTimeout(() => setShowEasterEgg(true), EE_HOLD_MS)
+  }, [])
+  const onVersionPointerUp = useCallback(() => {
+    if (holdTimer.current) clearTimeout(holdTimer.current)
+  }, [])
 
   // ── Activate state ────────────────────────────────────────────
   const [activateToken, setActivateToken]     = useState('')
@@ -274,7 +286,12 @@ export default function LoginPage() {
             </svg>
           </div>
           <h1 className="text-2xl font-bold text-white">{APP_NAME}</h1>
-          <p className="text-slate-400 text-sm mt-1">v{APP_VERSION}</p>
+          <p
+            className="text-slate-400 text-sm mt-1 cursor-default select-none"
+            onPointerDown={onVersionPointerDown}
+            onPointerUp={onVersionPointerUp}
+            onPointerLeave={onVersionPointerUp}
+          >v{APP_VERSION}</p>
         </div>
 
         {/* Tab switcher */}
@@ -505,7 +522,8 @@ export default function LoginPage() {
         </p>
       </div>
 
-      {showPrivacy && <PrivacyCookieModal onClose={() => setShowPrivacy(false)} />}
+      {showPrivacy   && <PrivacyCookieModal onClose={() => setShowPrivacy(false)} />}
+      {showEasterEgg && <EasterEggCredits  onClose={() => setShowEasterEgg(false)} />}
     </div>
   )
 }

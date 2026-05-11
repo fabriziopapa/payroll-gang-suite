@@ -76,10 +76,13 @@ interface Props {
 
 export default function EasterEggCredits({ onClose }: Props) {
   const { isPlaying, bands, start, stop } = useAudioAnalyzer(AUDIO_SRC)
-  const [visible, setVisible]             = useState(false)   // fade-in overlay
-  const [closing, setClosing]             = useState(false)   // fade-out overlay
+  const [visible, setVisible]             = useState(false)
+  const [closing, setClosing]             = useState(false)
   const [visibleParas, setVisibleParas]   = useState<Set<number>>(new Set())
-  const timerRefs = useRef<ReturnType<typeof setTimeout>[]>([])
+  const timerRefs  = useRef<ReturnType<typeof setTimeout>[]>([])
+  const scrollRef  = useRef<HTMLDivElement>(null)
+  const rafRef     = useRef<number | null>(null)
+  const scrollDone = useRef(false)
 
   // ── Avvio effetti all'mount ───────────────────────────────
 
@@ -102,8 +105,39 @@ export default function EasterEggCredits({ onClose }: Props) {
     })
 
     timerRefs.current.push(t0, t1)
-    return () => timerRefs.current.forEach(clearTimeout)
+    return () => {
+      timerRefs.current.forEach(clearTimeout)
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    }
   }, [start])
+
+  // ── Auto-scroll cinematografico ───────────────────────────
+  // Parte subito, velocità costante 22 px/s — si ferma al fondo
+  useEffect(() => {
+    if (visibleParas.size < 1 || scrollDone.current) return
+    scrollDone.current = true
+
+    const PX_PER_SEC = 22
+    let last: number | null = null
+
+    function tick(now: number) {
+      const el = scrollRef.current
+      if (!el) return
+      if (last !== null) {
+        const delta = (now - last) / 1000
+        el.scrollTop += PX_PER_SEC * delta
+      }
+      last = now
+      // ferma quando raggiunge il fondo
+      if (scrollRef.current &&
+          scrollRef.current.scrollTop + scrollRef.current.clientHeight
+            < scrollRef.current.scrollHeight - 2) {
+        rafRef.current = requestAnimationFrame(tick)
+      }
+    }
+    rafRef.current = requestAnimationFrame(tick)
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }
+  }, [visibleParas])
 
   // ── Chiusura con fade-out ─────────────────────────────────
 
@@ -198,10 +232,15 @@ export default function EasterEggCredits({ onClose }: Props) {
         <div className="relative z-10 flex flex-col items-center w-full h-full px-6 py-12"
              onClick={e => e.stopPropagation()}>
 
-          {/* Testo credits — scrollabile su mobile */}
+          {/* Testo credits — scroll cinematografico */}
           <div
-            className="flex-1 w-full max-w-lg overflow-y-auto"
-            style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}
+            ref={scrollRef}
+            className="ee-scroll flex-1 w-full max-w-lg overflow-y-scroll"
+            style={{
+              WebkitOverflowScrolling: 'touch',
+              maskImage:       'linear-gradient(to bottom, transparent 0%, black 12%, black 82%, transparent 100%)',
+              WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 12%, black 82%, transparent 100%)',
+            } as React.CSSProperties}
           >
             <div className="py-6 space-y-0">
               {PARAGRAPHS.map((para, i) => (
@@ -285,6 +324,8 @@ export default function EasterEggCredits({ onClose }: Props) {
 
       {/* ── CSS keyframes (iniettati inline via style tag) ─────── */}
       <style>{`
+        .ee-scroll::-webkit-scrollbar { display: none; }
+        .ee-scroll { -ms-overflow-style: none; scrollbar-width: none; }
         @keyframes ee-float {
           from { transform: translate(0, 0) scale(1); }
           to   { transform: translate(var(--drift, 20px), -35px) scale(1.4); }
