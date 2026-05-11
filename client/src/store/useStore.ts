@@ -325,7 +325,9 @@ export const useStore = create<AppStore>()(
     setAnagrafiche:  (items)  => set(s => { s.anagrafiche = items }),
     setVoci:         (items)  => set(s => { s.voci = items }),
     setCapitoliAnag: (items)  => set(s => { s.capitoliAnag = items }),
-    setSettings:     (cfg)    => set(s => { s.settings = cfg }),
+    setSettings:     (cfg)    => set(s => {
+      s.settings = { ...cfg, coefficientiContoTerzi: cfg.coefficientiContoTerzi ?? {} }
+    }),
 
     upsertBozza: (bozza) =>
       set(s => {

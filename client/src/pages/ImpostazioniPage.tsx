@@ -163,7 +163,7 @@ export default function ImpostazioniPage() {
     setSavingRub(true)
     try {
       await settingsApi.update({ rubrica: data })
-      setSettings({ ...settings, rubrica: data })
+      setSettings({ ...useStore.getState().settings, rubrica: data })
     } catch { showToast('Errore nel salvataggio della rubrica', 'error') } finally { setSavingRub(false) }
   }
 
@@ -199,7 +199,7 @@ export default function ImpostazioniPage() {
     setSavingMod(true)
     try {
       await settingsApi.update({ modelliComunicazione: data })
-      setSettings({ ...settings, modelliComunicazione: data })
+      setSettings({ ...useStore.getState().settings, modelliComunicazione: data })
     } catch { showToast('Errore nel salvataggio del modello', 'error') } finally { setSavingMod(false) }
   }
 

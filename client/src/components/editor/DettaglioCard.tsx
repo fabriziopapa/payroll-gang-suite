@@ -60,6 +60,7 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
       competenzaLiquidazione:      dettaglio.competenzaLiquidazione,
       dataCompetenzaVoce:          dettaglio.dataCompetenzaVoce,
       flagScorporo:                dettaglio.flagScorporo,
+      tipoScorporo:                dettaglio.tipoScorporo,
       riferimentoCedolino:         dettaglio.riferimentoCedolino,
       identificativoProvvedimento: dettaglio.identificativoProvvedimento,
       tipoProvvedimento:           dettaglio.tipoProvvedimento,

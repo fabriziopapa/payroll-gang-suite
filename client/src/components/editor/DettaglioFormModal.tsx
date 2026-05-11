@@ -45,7 +45,12 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
   type ScorporoMode = 'none' | 'standard' | 'contoterzi'
   function initScorporoMode(): ScorporoMode {
     if (!existing?.flagScorporo) return 'none'
-    return existing.tipoScorporo === 'contoterzi' ? 'contoterzi' : 'standard'
+    if (existing.tipoScorporo === 'contoterzi') {
+      // downgrade a standard se i coefficienti CT sono stati rimossi dalle impostazioni
+      const hasCT = Object.keys(settings.coefficientiContoTerzi ?? {}).length > 0
+      return hasCT ? 'contoterzi' : 'standard'
+    }
+    return 'standard'
   }
   const [scorporoMode, setScorporoMode] = useState<ScorporoMode>(initScorporoMode)
   const [riferimento, setRiferimento]               = useState(existing?.riferimentoCedolino ?? '')
