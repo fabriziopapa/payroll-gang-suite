@@ -19,6 +19,7 @@ const ALLOWED_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   'last_import_capitoli_locali',
   // Scritte dal client (impostazioni applicazione)
   'coefficienti',
+  'coefficientiContoTerzi',
   'csvDefaults',
   'tags',
   'rubrica',
