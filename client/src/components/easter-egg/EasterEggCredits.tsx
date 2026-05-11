@@ -198,31 +198,37 @@ export default function EasterEggCredits({ onClose }: Props) {
         <div className="relative z-10 flex flex-col items-center w-full h-full px-6 py-12"
              onClick={e => e.stopPropagation()}>
 
-          {/* Testo credits */}
-          <div className="flex-1 flex flex-col items-center justify-center max-w-lg w-full">
-            <div className="text-center space-y-0">
+          {/* Testo credits — scrollabile su mobile */}
+          <div
+            className="flex-1 w-full max-w-lg overflow-y-auto"
+            style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}
+          >
+            <div className="py-6 space-y-0">
               {PARAGRAPHS.map((para, i) => (
                 <p
                   key={i}
-                  className="whitespace-pre-line leading-relaxed"
+                  className="whitespace-pre-line leading-relaxed w-full"
                   style={{
-                    fontSize:   i === 0 ? '1.5rem'  : '1.0rem',
-                    fontWeight: i === 0 ? 300        : 300,
-                    color:      i === 0 ? 'rgba(255,255,255,0.95)'
-                               : i === PARAGRAPHS.length - 1 ? 'rgba(255,255,255,0.5)'
-                               : para === '' ? undefined
-                               : 'rgba(255,255,255,0.70)',
+                    fontSize:      i === 0 ? '1.5rem' : '1.0rem',
+                    fontWeight:    300,
+                    color:         i === 0 ? 'rgba(255,255,255,0.95)'
+                                 : i === PARAGRAPHS.length - 1 ? 'rgba(255,255,255,0.5)'
+                                 : para === '' ? undefined
+                                 : 'rgba(255,255,255,0.70)',
                     letterSpacing: i === 0 ? '0.12em' : '0.04em',
-                    marginBottom: para === '' ? '1.4rem' : '0',
-                    opacity:     visibleParas.has(i) ? 1 : 0,
-                    transform:   visibleParas.has(i) ? 'translateY(0)' : 'translateY(12px)',
-                    transition:  `opacity 2.0s cubic-bezier(0.4,0,0.2,1),
-                                  transform 2.0s cubic-bezier(0.4,0,0.2,1)`,
-                    fontFamily:  '"Georgia", "Times New Roman", serif',
-                    minHeight:   para === '' ? undefined : undefined,
+                    marginBottom:  para === '' ? '1.4rem' : '0',
+                    textAlign:     (i === 0 || i === PARAGRAPHS.length - 1)
+                                   ? 'center'
+                                   : para === '' ? undefined
+                                   : 'justify',
+                    opacity:       visibleParas.has(i) ? 1 : 0,
+                    transform:     visibleParas.has(i) ? 'translateY(0)' : 'translateY(12px)',
+                    transition:    `opacity 2.0s cubic-bezier(0.4,0,0.2,1),
+                                    transform 2.0s cubic-bezier(0.4,0,0.2,1)`,
+                    fontFamily:    '"Georgia", "Times New Roman", serif',
                   }}
                 >
-                  {para || ' '}
+                  {para || ' '}
                 </p>
               ))}
             </div>
