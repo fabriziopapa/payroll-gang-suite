@@ -8,7 +8,10 @@ import { z } from 'zod'
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().min(1024).max(65535).default(3001),
-  CLIENT_ORIGIN: z.string().url(),
+  // Supporta lista separata da virgole: "https://example.com,https://www.example.com"
+  CLIENT_ORIGIN: z.string().transform(s =>
+    s.split(',').map(u => u.trim()).filter(Boolean)
+  ).pipe(z.array(z.string().url())),
 
   // Database
   DB_DRIVER: z.enum(['postgres']).default('postgres'),

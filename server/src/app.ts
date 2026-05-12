@@ -71,7 +71,8 @@ await app.register(helmet, {
 })
 
 await app.register(cors, {
-  origin:      env.CLIENT_ORIGIN,
+  // Accetta array di origini (singola o multipla, configurata in CLIENT_ORIGIN)
+  origin:      env.CLIENT_ORIGIN.length === 1 ? env.CLIENT_ORIGIN[0] : env.CLIENT_ORIGIN,
   credentials: true,
   methods:     ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 })
