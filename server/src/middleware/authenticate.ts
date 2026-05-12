@@ -39,7 +39,7 @@ export function makeAuthMiddleware(authService: AuthService) {
       // I browser NON inviano Origin per richieste same-origin → passano.
       // CLI/Postman senza Origin → passano (stesso comportamento).
       // Richieste cross-origin con Origin sbagliato → bloccate.
-      if (origin !== undefined && origin !== env.CLIENT_ORIGIN) {
+      if (origin !== undefined && !(env.CLIENT_ORIGIN as string[]).includes(origin)) {
         return reply.code(403).send({ error: 'ORIGIN_NOT_ALLOWED' })
       }
     }
