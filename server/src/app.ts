@@ -71,8 +71,13 @@ await app.register(helmet, {
 })
 
 await app.register(cors, {
-  // Accetta array di origini (singola o multipla, configurata in CLIENT_ORIGIN)
-  origin:      env.CLIENT_ORIGIN.length === 1 ? env.CLIENT_ORIGIN[0] : env.CLIENT_ORIGIN,
+  // Callback esplicita — supporta lista CLIENT_ORIGIN separata da virgole
+  origin: (origin, cb) => {
+    // Richieste senza Origin (es. curl, server-to-server) sempre consentite
+    if (!origin) return cb(null, true)
+    if ((env.CLIENT_ORIGIN as string[]).includes(origin)) return cb(null, true)
+    cb(new Error('ORIGIN_NOT_ALLOWED'), false)
+  },
   credentials: true,
   methods:     ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 })
