@@ -3,7 +3,7 @@
 // Upsert su (MATRICOLA, DECOR_INQ) — supporta storico ruoli v2
 // ============================================================
 
-import { eq, lte, or, isNull, and, desc, sql } from 'drizzle-orm'
+import { eq, lte, gte, or, isNull, and, desc, sql } from 'drizzle-orm'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import * as schema from '../schema.js'
 import type {
@@ -31,23 +31,30 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
    * Il risultato viene poi ordinato per cognNome in un subquery/CTE implicito.
    */
   async findAll(): Promise<AnagraficaRow[]> {
-    // Raw SQL — DISTINCT ON deduplica server-side (1 record per matricola, più recente).
-    // Include: fin_rap IS NULL (attivi indefiniti) + fin_rap futura (contratti a termine attivi).
+    // Include: fin_rap IS NULL (attivi) + fin_rap >= oggi (contratti a termine attivi).
     const today = new Date().toISOString().slice(0, 10)
-    const rows = await this.db.execute(sql`
-      SELECT DISTINCT ON (matricola)
-        id, matricola, cogn_nome, ruolo, druolo,
-        decor_inq, fin_rap, data_aggiornamento,
-        created_at, updated_at,
-        id_ab, cognome, nome, dt_nascita, genere, cod_fis, hash_record
-      FROM anagrafiche
-      WHERE fin_rap IS NULL OR fin_rap >= ${today}::date
-      ORDER BY matricola, decor_inq DESC
-    `)
+    const rows = await this.db
+      .select()
+      .from(schema.anagrafiche)
+      .where(
+        or(
+          isNull(schema.anagrafiche.finRap),
+          gte(schema.anagrafiche.finRap, today),
+        ),
+      )
+      .orderBy(schema.anagrafiche.matricola, desc(schema.anagrafiche.decorInq))
 
-    return (rows as unknown[])
-      .map(toRowRaw)
+    // Dedup JS: tieni solo la riga con decorInq più recente per matricola
+    const seen    = new Set<string>()
+    const deduped = rows.filter(r => {
+      if (seen.has(r.matricola)) return false
+      seen.add(r.matricola)
+      return true
+    })
+
+    return deduped
       .sort((a, b) => (a.cognNome ?? '').localeCompare(b.cognNome ?? '', 'it'))
+      .map(toRow)
   }
 
   // Ritorna tutta la storia di una matricola (più record)
