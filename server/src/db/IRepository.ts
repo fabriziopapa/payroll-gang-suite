@@ -27,6 +27,13 @@ export interface AnagraficaInput {
   decorInq:          string   // YYYY-MM-DD — inizio periodo ruolo
   finRap?:           string   // YYYY-MM-DD — fine rapporto (undefined = attivo)
   dataAggiornamento: Date
+  // Campi SGE (opzionali — presenti solo da import xlsx)
+  idAb?:     number
+  cognome?:  string
+  nome?:     string
+  dtNascita?: string  // YYYY-MM-DD
+  genere?:   string
+  codFis?:   string
 }
 
 /**
@@ -44,6 +51,7 @@ export interface RuoloAtResult {
 
 export interface IAnagraficheRepository {
   findAll(): Promise<AnagraficaRow[]>
+  findAllAtDate(data: string): Promise<AnagraficaRow[]>
   findByMatricola(matricola: string): Promise<AnagraficaRow[]>  // array: storia completa
   findByRuolo(ruolo: string): Promise<AnagraficaRow[]>
   findRuoloAt(matricola: string, data?: string): Promise<RuoloAtResult[]>
@@ -61,6 +69,13 @@ export interface AnagraficaRow {
   finRap:            string | null // YYYY-MM-DD o null
   dataAggiornamento: string
   updatedAt:         Date
+  // Campi SGE (null se record importato da XML)
+  idAb:      number | null
+  cognome:   string | null
+  nome:      string | null
+  dtNascita: string | null
+  genere:    string | null
+  codFis:    string | null
 }
 
 // ------------------------------------------------------------

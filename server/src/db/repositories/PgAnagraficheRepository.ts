@@ -128,12 +128,13 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
         .orderBy(desc(schema.anagrafiche.decorInq))
     }
 
-    return rows.map(r => ({
-      ruolo:    r.ruolo,
-      druolo:   r.druolo ?? null,
-      decorInq: r.decorInq,
-      finRap:   r.finRap ?? null,
-    }))
+    // Se più periodi sovrapposti ma stesso ruolo → prendi il più recente (overlap tecnico SGE)
+    if (rows.length > 1) {
+      const ruoliDistinti = new Set(rows.map(r => r.ruolo))
+      if (ruoliDistinti.size === 1) return [rows[0]!].map(toRuoloAtResult)
+    }
+
+    return rows.map(toRuoloAtResult)
   }
 
   async upsertMany(items: AnagraficaInput[]): Promise<ImportResult> {
@@ -170,6 +171,12 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
           .toISOString()
           .slice(0, 10),
         updatedAt:         new Date(),
+        idAb:              item.idAb               ?? null,
+        cognome:           item.cognome             ?? null,
+        nome:              item.nome               ?? null,
+        dtNascita:         item.dtNascita           ?? null,
+        genere:            item.genere             ?? null,
+        codFis:            item.codFis             ?? null,
       }))
 
       const rows = await this.db
@@ -184,6 +191,12 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
             finRap:            sql`EXCLUDED.fin_rap`,
             dataAggiornamento: sql`EXCLUDED.data_aggiornamento`,
             updatedAt:         sql`now()`,
+            idAb:              sql`EXCLUDED.id_ab`,
+            cognome:           sql`EXCLUDED.cognome`,
+            nome:              sql`EXCLUDED.nome`,
+            dtNascita:         sql`EXCLUDED.dt_nascita`,
+            genere:            sql`EXCLUDED.genere`,
+            codFis:            sql`EXCLUDED.cod_fis`,
           },
           // Aggiorna solo se almeno un campo è effettivamente cambiato
           where: sql`
@@ -192,6 +205,7 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
             OR ${schema.anagrafiche.druolo}         IS DISTINCT FROM EXCLUDED.druolo
             OR ${schema.anagrafiche.finRap}         IS DISTINCT FROM EXCLUDED.fin_rap
             OR ${schema.anagrafiche.dataAggiornamento} IS DISTINCT FROM EXCLUDED.data_aggiornamento
+            OR ${schema.anagrafiche.codFis}         IS DISTINCT FROM EXCLUDED.cod_fis
           `,
         })
         .returning({ id: schema.anagrafiche.id, createdAt: schema.anagrafiche.createdAt })
@@ -235,6 +249,21 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
     if (!row || row.valore === null || row.valore === 'null') return null
     return new Date(row.valore as string)
   }
+
+  async findAllAtDate(data: string): Promise<AnagraficaRow[]> {
+    const rows = await this.db.execute(sql`
+      SELECT DISTINCT ON (matricola)
+        id, matricola, cogn_nome, ruolo, druolo,
+        decor_inq, fin_rap, data_aggiornamento,
+        created_at, updated_at,
+        id_ab, cognome, nome, dt_nascita, genere, cod_fis
+      FROM anagrafiche
+      WHERE decor_inq <= ${data}
+        AND (fin_rap IS NULL OR fin_rap >= ${data})
+      ORDER BY matricola, decor_inq DESC
+    `)
+    return (rows as unknown[]).map(toRowRaw)
+  }
 }
 
 // ------------------------------------------------------------
@@ -250,5 +279,42 @@ function toRow(r: typeof schema.anagrafiche.$inferSelect): AnagraficaRow {
     finRap:            r.finRap           ?? null,
     dataAggiornamento: r.dataAggiornamento,
     updatedAt:         r.updatedAt,
+    idAb:              r.idAb             ?? null,
+    cognome:           r.cognome          ?? null,
+    nome:              r.nome             ?? null,
+    dtNascita:         r.dtNascita        ?? null,
+    genere:            r.genere           ?? null,
+    codFis:            r.codFis           ?? null,
+  }
+}
+
+// Mappa risultato raw SQL (usato da findAllAtDate con DISTINCT ON)
+function toRowRaw(r: unknown): AnagraficaRow {
+  const row = r as Record<string, unknown>
+  return {
+    id:                row['id'] as number,
+    matricola:         row['matricola'] as string,
+    cognNome:          row['cogn_nome'] as string,
+    ruolo:             row['ruolo'] as string,
+    druolo:            (row['druolo'] as string | null) ?? null,
+    decorInq:          row['decor_inq'] as string,
+    finRap:            (row['fin_rap'] as string | null) ?? null,
+    dataAggiornamento: row['data_aggiornamento'] as string,
+    updatedAt:         new Date(row['updated_at'] as string),
+    idAb:              (row['id_ab'] as number | null) ?? null,
+    cognome:           (row['cognome'] as string | null) ?? null,
+    nome:              (row['nome'] as string | null) ?? null,
+    dtNascita:         (row['dt_nascita'] as string | null) ?? null,
+    genere:            (row['genere'] as string | null) ?? null,
+    codFis:            (row['cod_fis'] as string | null) ?? null,
+  }
+}
+
+function toRuoloAtResult(r: typeof schema.anagrafiche.$inferSelect) {
+  return {
+    ruolo:    r.ruolo,
+    druolo:   r.druolo ?? null,
+    decorInq: r.decorInq,
+    finRap:   r.finRap ?? null,
   }
 }
