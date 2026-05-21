@@ -316,12 +316,24 @@ export async function importAnagraficheXlsx(
   repo:              IAnagraficheRepository,
   dataAggiornamento: Date = new Date(),
 ): Promise<ImportResult> {
+  // SEC-1: verifica magic bytes — XLSX è un archivio ZIP (PK header 0x50 0x4B)
+  if (fileBuffer[0] !== 0x50 || fileBuffer[1] !== 0x4B) {
+    throw new Error('XLSX_INVALID_FORMAT: il file non è un XLSX valido')
+  }
+
   const workbook  = XLSX.read(fileBuffer, { type: 'buffer', cellDates: false })
   const sheetName = workbook.SheetNames[0]
   if (!sheetName) throw new Error('XLSX_EMPTY: nessun foglio trovato')
 
   const sheet = workbook.Sheets[sheetName]!
-  const rows  = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' })
+  const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' })
+
+  // SEC-3: sanitizzazione post-parsing — rimuove righe con chiavi prototype-polluting
+  const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+  const rows = rawRows.filter(row => {
+    const keys = Object.keys(row)
+    return !keys.some(k => DANGEROUS_KEYS.has(k))
+  })
 
   if (rows.length > MAX_IMPORT_ROWS) {
     throw new Error(`FILE_TOO_MANY_ROWS: il file contiene ${rows.length} righe (max ${MAX_IMPORT_ROWS})`)
