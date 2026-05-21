@@ -31,32 +31,23 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
    * Il risultato viene poi ordinato per cognNome in un subquery/CTE implicito.
    */
   async findAll(): Promise<AnagraficaRow[]> {
-    // Usa query Drizzle nativa (camelCase garantito dal driver).
-    // ORDER BY matricola + decorInq DESC → prima riga per matricola = più recente.
-    // Dedup in JS con Set: O(n) — affidabile indipendentemente dal transform del driver.
+    // Raw SQL — DISTINCT ON deduplica server-side (1 record per matricola, più recente).
+    // Include: fin_rap IS NULL (attivi indefiniti) + fin_rap futura (contratti a termine attivi).
     const today = new Date().toISOString().slice(0, 10)
-    const rows = await this.db
-      .select()
-      .from(schema.anagrafiche)
-      .where(
-        or(
-          isNull(schema.anagrafiche.finRap),
-          sql`${schema.anagrafiche.finRap} >= ${today}`,
-        ),
-      )
-      .orderBy(schema.anagrafiche.matricola, desc(schema.anagrafiche.decorInq))
+    const rows = await this.db.execute(sql`
+      SELECT DISTINCT ON (matricola)
+        id, matricola, cogn_nome, ruolo, druolo,
+        decor_inq, fin_rap, data_aggiornamento,
+        created_at, updated_at,
+        id_ab, cognome, nome, dt_nascita, genere, cod_fis, hash_record
+      FROM anagrafiche
+      WHERE fin_rap IS NULL OR fin_rap >= ${today}::date
+      ORDER BY matricola, decor_inq DESC
+    `)
 
-    // Mantieni solo la riga più recente per matricola
-    const seen    = new Set<string>()
-    const deduped = rows.filter(r => {
-      if (seen.has(r.matricola)) return false
-      seen.add(r.matricola)
-      return true
-    })
-
-    return deduped
+    return (rows as unknown[])
+      .map(toRowRaw)
       .sort((a, b) => (a.cognNome ?? '').localeCompare(b.cognNome ?? '', 'it'))
-      .map(toRow)
   }
 
   // Ritorna tutta la storia di una matricola (più record)
