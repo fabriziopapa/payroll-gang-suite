@@ -81,9 +81,10 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-fill dataCompetenzaVoce quando competenza è completa
+  // Ricalcola dataCompetenzaVoce ogni volta che competenza cambia
+  // L'utente può comunque sovrascrivere manualmente il campo data
   useEffect(() => {
-    if (/^\d{2}\/\d{4}$/.test(competenza) && !dataCompetenzaVoce) {
+    if (/^\d{2}\/\d{4}$/.test(competenza)) {
       setDataCompetenzaVoce(lastDayOfMonth(competenza))
     }
   }, [competenza]) // eslint-disable-line react-hooks/exhaustive-deps
