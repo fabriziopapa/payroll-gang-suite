@@ -248,7 +248,7 @@ function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onView, onArchive,
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-4
-                    flex items-center gap-4 group hover:border-slate-700 transition">
+                    flex items-center gap-4 hover:border-slate-700 transition">
 
       {/* Icona stato */}
       <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0
@@ -299,18 +299,12 @@ function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onView, onArchive,
         {isArchiviata ? 'Archiviata' : 'Bozza'}
       </span>
 
-      {/* Azioni
-          - Mouse:  visibili su hover (group-hover)
-          - Touch:  sempre visibili [@media(hover:none)]
-          - Archiviata: sempre visibili */}
-      <div className={`flex items-center gap-1 transition-opacity
-                       ${isArchiviata
-                         ? ''
-                         : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100'}`}>
+      {/* Azioni — sempre visibili, touch target ≥ 44px su mobile */}
+      <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
         {!isArchiviata ? (
           <button
             onClick={onOpen}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+            className="p-2 sm:p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
             title="Apri editor"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -321,7 +315,7 @@ function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onView, onArchive,
         ) : (
           <button
             onClick={onView}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-sky-400 hover:bg-sky-950/30 transition"
+            className="p-2 sm:p-1.5 rounded-lg text-slate-400 hover:text-sky-400 hover:bg-sky-950/30 transition"
             title="Visualizza (sola lettura)"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -336,7 +330,7 @@ function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onView, onArchive,
         <button
           onClick={onArchive}
           disabled={isArchiving}
-          className="p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-amber-950/30 transition disabled:opacity-50"
+          className="p-2 sm:p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-amber-950/30 transition disabled:opacity-50"
           title={isArchiviata ? 'Ripristina' : 'Archivia'}
         >
           {isArchiving ? (
@@ -361,7 +355,7 @@ function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onView, onArchive,
           <button
             onClick={onDelete}
             disabled={isDeleting}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-950/30 transition disabled:opacity-50"
+            className="p-2 sm:p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-950/30 transition disabled:opacity-50"
             title="Elimina definitivamente"
           >
             {isDeleting ? (
