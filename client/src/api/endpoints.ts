@@ -23,6 +23,17 @@ export interface AnagraficaApi {
   finRap:            string | null // YYYY-MM-DD o null
   dataAggiornamento: string
   updatedAt:         string
+  // Campi SGE (null per record importati da XML)
+  idAb?:      number | null
+  cognome?:   string | null
+  nome?:      string | null
+  dtNascita?: string | null
+  genere?:    string | null
+  codFis?:    string | null
+}
+
+export interface ImportXlsxResult extends ImportResult {
+  importId: number
 }
 
 /**
@@ -201,13 +212,19 @@ export const bozzeApi = {
 // ── Anagrafiche ───────────────────────────────────────────────
 
 export const anagraficheApi = {
-  list: () =>
-    apiFetch<AnagraficaApi[]>('/anagrafiche'),
+  list: (data?: string) =>
+    apiFetch<AnagraficaApi[]>(data ? `/anagrafiche?data=${data}` : '/anagrafiche'),
 
   importXml: (xml: string, dataAggiornamento?: string) =>
     apiFetch<ImportResult>('/anagrafiche/import', {
       method: 'POST',
       body:   JSON.stringify({ xml, ...(dataAggiornamento ? { dataAggiornamento } : {}) }),
+    }),
+
+  importXlsx: (xlsx: string, nomeFile?: string) =>
+    apiFetch<ImportXlsxResult>('/anagrafiche/import-xlsx', {
+      method: 'POST',
+      body:   JSON.stringify({ xlsx, ...(nomeFile ? { nomeFile } : {}) }),
     }),
 
   lastImport: () =>

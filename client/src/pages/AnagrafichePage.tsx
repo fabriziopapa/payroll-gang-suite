@@ -5,7 +5,6 @@
 import React, { useState, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { anagraficheApi } from '../api/endpoints'
-import { sendXmlInChunks, type ChunkProgress } from '../utils/xmlChunker'
 import Pagination from '../components/Pagination'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { usePageLoad } from '../hooks/usePageLoad'
@@ -13,10 +12,9 @@ import { usePageLoad } from '../hooks/usePageLoad'
 export default function AnagrafichePage() {
   const { anagrafiche, setAnagrafiche } = useStore()
   const [lastImport, setLastImport] = useState<string | null>(null)
-  const [importing, setImporting]       = useState(false)
-  const [progress, setProgress]         = useState<ChunkProgress | null>(null)
-  const [importResult, setImportResult] = useState<string | null>(null)
-  const [confirmImportFile, setConfirmImportFile] = useState<File | null>(null)
+  const [importingXlsx, setImportingXlsx]         = useState(false)
+  const [importResult, setImportResult]           = useState<string | null>(null)
+  const [confirmImportXlsx, setConfirmImportXlsx] = useState<File | null>(null)
   const [search, setSearch]     = useState('')
   const [page, setPage]         = useState(1)
   const [pageSize, setPageSize] = useState(20)
@@ -31,38 +29,41 @@ export default function AnagrafichePage() {
     'Impossibile caricare le anagrafiche. Controlla la connessione e riprova.',
   )
 
-  function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleImportXlsx(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     e.target.value = ''
-    setConfirmImportFile(file)
+    setConfirmImportXlsx(file)
   }
 
-  async function doImport(file: File) {
-    setConfirmImportFile(null)
-    setImporting(true)
+  /** Legge un File come stringa base64 via FileReader — safe su file di qualsiasi dimensione */
+  function readFileAsBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload  = () => resolve((reader.result as string).split(',')[1] ?? '')
+      reader.onerror = () => reject(new Error('Lettura file fallita'))
+      reader.readAsDataURL(file)
+    })
+  }
+
+  async function doImportXlsx(file: File) {
+    setConfirmImportXlsx(null)
+    setImportingXlsx(true)
     setImportResult(null)
-    setProgress(null)
     try {
-      const xml    = await file.text()
-      const result = await sendXmlInChunks(
-        xml,
-        150,                                         // 150 righe per batch
-        chunk => anagraficheApi.importXml(chunk),
-        p => setProgress(p),
-      )
+      const base64  = await readFileAsBase64(file)
+      const result  = await anagraficheApi.importXlsx(base64, file.name)
       setImportResult(
-        `✓ Import completato: ${result.inserted} inseriti, ${result.updated} aggiornati` +
-        (result.errors.length ? `, ${result.errors.length} errori` : '') + '.',
+        `✓ Import SGE: ${result.inserted} inseriti, ${result.updated} aggiornati, ${result.skipped} invariati` +
+        (result.errors.length ? `, ${result.errors.length} errori` : '') + `.`,
       )
       const [data, li] = await Promise.all([anagraficheApi.list(), anagraficheApi.lastImport()])
       setAnagrafiche(data)
       setLastImport(li.lastImport)
     } catch (err: unknown) {
-      setImportResult(`Errore import: ${(err as Error).message}`)
+      setImportResult(`Errore import XLSX: ${(err as Error).message}`)
     } finally {
-      setImporting(false)
-      setProgress(null)
+      setImportingXlsx(false)
     }
   }
 
@@ -99,43 +100,31 @@ export default function AnagrafichePage() {
         <div>
           <h2 className="text-xl font-bold text-white">Anagrafiche</h2>
           <p className="text-slate-400 text-sm mt-0.5">
-            Personale importato da XML HR
+            Personale importato da XLSX SGE
             {lastImport && ` · Ultimo import: ${new Date(lastImport).toLocaleDateString('it-IT')}`}
           </p>
         </div>
-        <label className={`flex items-center gap-2 px-4 py-2 rounded-lg cursor-pointer
-          ${importing ? 'bg-slate-700 text-slate-400' : 'bg-indigo-600 hover:bg-indigo-500 text-white'}
-          text-sm font-medium transition shrink-0`}>
-          {importing ? (
-            <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-            </svg>{progress ? `Batch ${progress.current}/${progress.total}…` : 'Lettura file…'}</>
-          ) : (
-            <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
-            </svg>Importa XML</>
-          )}
-          <input type="file" accept=".xml" className="hidden" onChange={handleImport} disabled={importing}/>
-        </label>
-      </div>
-
-      {/* Progress bar chunked upload */}
-      {progress && (
-        <div className="mb-4 p-3 rounded-lg bg-slate-800 border border-slate-700">
-          <div className="flex justify-between text-xs text-slate-400 mb-1.5">
-            <span>Batch {progress.current} di {progress.total}</span>
-            <span>{progress.rowsDone} / {progress.rowsTotal} righe</span>
-          </div>
-          <div className="w-full bg-slate-700 rounded-full h-1.5">
-            <div
-              className="bg-indigo-500 h-1.5 rounded-full transition-all duration-300"
-              style={{ width: `${Math.round((progress.rowsDone / progress.rowsTotal) * 100)}%` }}
-            />
-          </div>
+        <div className="flex gap-2 shrink-0">
+          {/* Import XLSX SGE */}
+          <label className={`flex items-center gap-2 px-4 py-2 rounded-lg cursor-pointer
+            ${importingXlsx ? 'bg-slate-700 text-slate-400' : 'bg-emerald-700 hover:bg-emerald-600 text-white'}
+            text-sm font-medium transition`}>
+            {importingXlsx ? (
+              <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>Caricamento…</>
+            ) : (
+              <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+              </svg>Importa XLSX SGE</>
+            )}
+            <input type="file" accept=".xlsx" className="hidden" onChange={handleImportXlsx} disabled={importingXlsx}/>
+          </label>
+          {/* Import XML HR — rimosso: SGE XLSX è fonte autoritativa */}
         </div>
-      )}
+      </div>
 
       {importResult && (
         <div className="mb-4 p-3 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-300">
@@ -174,7 +163,7 @@ export default function AnagrafichePage() {
           {grouped.length === 0 ? (
             <div className="py-12 text-center text-slate-500 text-sm">
               {anagrafiche.length === 0
-                ? 'Nessuna anagrafica. Importa un file XML HR.'
+                ? 'Nessuna anagrafica. Importa un file XLSX SGE.'
                 : 'Nessun risultato per la ricerca.'}
             </div>
           ) : (
@@ -230,13 +219,13 @@ export default function AnagrafichePage() {
       )}
 
       <ConfirmDialog
-        open={!!confirmImportFile}
-        title="Importa XML anagrafiche"
-        message={`Il file "${confirmImportFile?.name}" aggiornerà i dati nel database. Continuare?`}
+        open={!!confirmImportXlsx}
+        title="Importa XLSX SGE"
+        message={`Il file "${confirmImportXlsx?.name}" verrà importato nel database (import differenziale). I record invariati saranno saltati. Continuare?`}
         danger
-        confirmLabel="Importa"
-        onConfirm={() => { if (confirmImportFile) doImport(confirmImportFile) }}
-        onCancel={() => setConfirmImportFile(null)}
+        confirmLabel="Importa XLSX"
+        onConfirm={() => { if (confirmImportXlsx) doImportXlsx(confirmImportXlsx) }}
+        onCancel={() => setConfirmImportXlsx(null)}
       />
     </div>
   )
