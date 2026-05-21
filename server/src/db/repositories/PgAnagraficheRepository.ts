@@ -177,6 +177,7 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
         dtNascita:         item.dtNascita           ?? null,
         genere:            item.genere             ?? null,
         codFis:            item.codFis             ?? null,
+        hashRecord:        item.hashRecord          ?? null,
       }))
 
       const rows = await this.db
@@ -197,15 +198,11 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
             dtNascita:         sql`EXCLUDED.dt_nascita`,
             genere:            sql`EXCLUDED.genere`,
             codFis:            sql`EXCLUDED.cod_fis`,
+            hashRecord:        sql`EXCLUDED.hash_record`,
           },
-          // Aggiorna solo se almeno un campo è effettivamente cambiato
+          // Aggiorna solo se hash cambiato — confronto O(1) su stringa fissa
           where: sql`
-            ${schema.anagrafiche.cognNome}          IS DISTINCT FROM EXCLUDED.cogn_nome
-            OR ${schema.anagrafiche.ruolo}          IS DISTINCT FROM EXCLUDED.ruolo
-            OR ${schema.anagrafiche.druolo}         IS DISTINCT FROM EXCLUDED.druolo
-            OR ${schema.anagrafiche.finRap}         IS DISTINCT FROM EXCLUDED.fin_rap
-            OR ${schema.anagrafiche.dataAggiornamento} IS DISTINCT FROM EXCLUDED.data_aggiornamento
-            OR ${schema.anagrafiche.codFis}         IS DISTINCT FROM EXCLUDED.cod_fis
+            ${schema.anagrafiche.hashRecord} IS DISTINCT FROM EXCLUDED.hash_record
           `,
         })
         .returning({ id: schema.anagrafiche.id, createdAt: schema.anagrafiche.createdAt })
@@ -285,6 +282,7 @@ function toRow(r: typeof schema.anagrafiche.$inferSelect): AnagraficaRow {
     dtNascita:         r.dtNascita        ?? null,
     genere:            r.genere           ?? null,
     codFis:            r.codFis           ?? null,
+    hashRecord:        r.hashRecord       ?? null,
   }
 }
 
@@ -307,6 +305,7 @@ function toRowRaw(r: unknown): AnagraficaRow {
     dtNascita:         (row['dt_nascita'] as string | null) ?? null,
     genere:            (row['genere'] as string | null) ?? null,
     codFis:            (row['cod_fis'] as string | null) ?? null,
+    hashRecord:        (row['hash_record'] as string | null) ?? null,
   }
 }
 

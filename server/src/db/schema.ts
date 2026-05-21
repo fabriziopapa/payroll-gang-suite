@@ -118,6 +118,8 @@ export const anagrafiche = pgTable('anagrafiche', {
   dtNascita:         date('dt_nascita'),
   genere:            varchar('genere', { length: 1 }),
   codFis:            varchar('cod_fis', { length: 16 }),
+  // SHA-256 sui campi funzionali — confronto O(1) per import differenziale
+  hashRecord:        varchar('hash_record', { length: 64 }),
 }, (t) => [
   uniqueIndex('anagrafiche_matricola_decor_inq_key').on(t.matricola, t.decorInq),
   index('idx_anag_matricola').on(t.matricola),

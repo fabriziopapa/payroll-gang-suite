@@ -28,12 +28,13 @@ export interface AnagraficaInput {
   finRap?:           string   // YYYY-MM-DD — fine rapporto (undefined = attivo)
   dataAggiornamento: Date
   // Campi SGE (opzionali — presenti solo da import xlsx)
-  idAb?:     number
-  cognome?:  string
-  nome?:     string
-  dtNascita?: string  // YYYY-MM-DD
-  genere?:   string
-  codFis?:   string
+  idAb?:       number
+  cognome?:    string
+  nome?:       string
+  dtNascita?:  string  // YYYY-MM-DD
+  genere?:     string
+  codFis?:     string
+  hashRecord?: string  // SHA-256 campi funzionali
 }
 
 /**
@@ -70,12 +71,13 @@ export interface AnagraficaRow {
   dataAggiornamento: string
   updatedAt:         Date
   // Campi SGE (null se record importato da XML)
-  idAb:      number | null
-  cognome:   string | null
-  nome:      string | null
-  dtNascita: string | null
-  genere:    string | null
-  codFis:    string | null
+  idAb:       number | null
+  cognome:    string | null
+  nome:       string | null
+  dtNascita:  string | null
+  genere:     string | null
+  codFis:     string | null
+  hashRecord: string | null
 }
 
 // ------------------------------------------------------------

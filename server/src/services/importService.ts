@@ -1,9 +1,11 @@
 // ============================================================
 // PAYROLL GANG SUITE — ImportService
 // Parsing XML DATAPACKET HR 2.0 → upsert su DB
-// Formato supportato: Elenchi_del_personale_v2.xml (campo INQUADR)
+// Parsing XLSX SGE (ru_tab_def) → upsert differenziale con hash
 // ============================================================
 
+import { createHash } from 'crypto'
+import * as XLSX from 'xlsx'
 import type {
   IAnagraficheRepository,
   IVociRepository,
@@ -268,6 +270,111 @@ export async function importCapitoli(
   })
 
   if (items.length === 0) {
+    return { inserted: 0, updated: 0, skipped: 0, errors, processedAt: new Date() }
+  }
+
+  const result = await repo.upsertMany(items)
+  return { ...result, errors: [...result.errors, ...errors] }
+}
+
+// ------------------------------------------------------------
+// Import Anagrafiche SGE — formato XLSX (ru_tab_def.xlsx)
+// Colonne: ID_AB, MATRICOLA, COGNOME, NOME, DT_NASCITA, GENERE,
+//          COD_FIS, RUOLO, DT_INIZIO, DT_FINE
+// ------------------------------------------------------------
+
+/** Converte data Excel DD/MM/YYYY o serial number → YYYY-MM-DD */
+function parseXlsxDate(val: unknown): string | undefined {
+  if (val === null || val === undefined || val === '') return undefined
+
+  if (typeof val === 'string') {
+    const m = val.match(/^(\d{2})\/(\d{2})\/(\d{4})/)
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`
+    return undefined
+  }
+
+  if (typeof val === 'number') {
+    const date = XLSX.SSF.parse_date_code(val)
+    if (!date) return undefined
+    const mm = String(date.m).padStart(2, '0')
+    const dd = String(date.d).padStart(2, '0')
+    return `${date.y}-${mm}-${dd}`
+  }
+
+  if (val instanceof Date) return val.toISOString().slice(0, 10)
+
+  return undefined
+}
+
+/** SHA-256 sui campi funzionali — usato per import differenziale */
+function calcHash(fields: string[]): string {
+  return createHash('sha256').update(fields.join('|')).digest('hex')
+}
+
+export async function importAnagraficheXlsx(
+  fileBuffer:        Buffer,
+  repo:              IAnagraficheRepository,
+  dataAggiornamento: Date = new Date(),
+): Promise<ImportResult> {
+  const workbook  = XLSX.read(fileBuffer, { type: 'buffer', cellDates: false })
+  const sheetName = workbook.SheetNames[0]
+  if (!sheetName) throw new Error('XLSX_EMPTY: nessun foglio trovato')
+
+  const sheet = workbook.Sheets[sheetName]!
+  const rows  = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' })
+
+  if (rows.length > MAX_IMPORT_ROWS) {
+    throw new Error(`FILE_TOO_MANY_ROWS: il file contiene ${rows.length} righe (max ${MAX_IMPORT_ROWS})`)
+  }
+
+  const items:  AnagraficaInput[]      = []
+  const errors: ImportResult['errors'] = []
+  const dataAgg = dataAggiornamento.toISOString().slice(0, 10)
+
+  rows.forEach((row, index) => {
+    const matricolaRaw = row['MATRICOLA']
+    const cognome      = String(row['COGNOME'] ?? '').trim()
+    const nome         = String(row['NOME']    ?? '').trim()
+    const ruolo        = String(row['RUOLO']   ?? '').trim()
+
+    if (!matricolaRaw || !cognome || !ruolo) {
+      errors.push({ row: index + 1, message: 'Campi obbligatori mancanti: MATRICOLA, COGNOME, RUOLO' })
+      return
+    }
+
+    const matricola = String(Number(matricolaRaw)).padStart(6, '0')
+    const decorInq  = parseXlsxDate(row['DT_INIZIO']) ?? dataAgg
+    const finRap    = parseXlsxDate(row['DT_FINE'])
+    const dtNascita = parseXlsxDate(row['DT_NASCITA'])
+    const cognNome  = `${cognome} ${nome}`.trim()
+    const codFis    = String(row['COD_FIS'] ?? '').trim() || undefined
+    const genere    = String(row['GENERE']  ?? '').trim() || undefined
+    const idAb      = row['ID_AB'] ? Number(row['ID_AB']) : undefined
+
+    const hashRecord = calcHash([
+      matricola, ruolo, cognNome, decorInq,
+      finRap ?? '', codFis ?? '', genere ?? '',
+    ])
+
+    items.push({
+      matricola,
+      cognNome,
+      ruolo,
+      druolo:           undefined,
+      decorInq,
+      finRap,
+      dataAggiornamento,
+      idAb,
+      cognome,
+      nome,
+      dtNascita,
+      genere,
+      codFis,
+      hashRecord,
+    })
+  })
+
+  if (items.length === 0 && errors.length === rows.length) {
     return { inserted: 0, updated: 0, skipped: 0, errors, processedAt: new Date() }
   }
 
