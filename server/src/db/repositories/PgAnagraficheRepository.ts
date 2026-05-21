@@ -32,14 +32,13 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
    */
   async findAll(): Promise<AnagraficaRow[]> {
     // Include: fin_rap IS NULL (attivi) + fin_rap >= oggi (contratti a termine attivi).
-    const today = new Date().toISOString().slice(0, 10)
     const rows = await this.db
       .select()
       .from(schema.anagrafiche)
       .where(
         or(
           isNull(schema.anagrafiche.finRap),
-          gte(schema.anagrafiche.finRap, today),
+          sql`${schema.anagrafiche.finRap} >= (CURRENT_DATE - INTERVAL '3 years')`,
         ),
       )
       .orderBy(schema.anagrafiche.matricola, desc(schema.anagrafiche.decorInq))

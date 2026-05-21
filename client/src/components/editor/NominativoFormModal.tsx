@@ -128,18 +128,18 @@ function normStr(s: string) {
 }
 
 // ── Filtro rilevanza: esclude cessati da più di 2 anni ────────
-const _today       = new Date().toISOString().slice(0, 10)
-const _twoYearsAgo = (() => {
+const _today         = new Date().toISOString().slice(0, 10)
+const _threeYearsAgo = (() => {
   const d = new Date()
-  d.setFullYear(d.getFullYear() - 2)
+  d.setFullYear(d.getFullYear() - 3)
   return d.toISOString().slice(0, 10)
 })()
 
 function isAnagraficaRelevante(a: AnagraficaApi): boolean {
   const fin = a.finRap || null
-  if (!fin) return true          // nessuna fine → attivo
-  if (fin > _today) return true  // fine futura → ancora attivo
-  return fin >= _twoYearsAgo    // cessato da meno di 2 anni
+  if (!fin) return true            // nessuna fine → attivo
+  if (fin > _today) return true    // fine futura → ancora attivo
+  return fin >= _threeYearsAgo    // cessato da meno di 3 anni
 }
 
 function searchAnagGrouped(query: string, anagrafiche: AnagraficaApi[]): GroupedAnag[] {
