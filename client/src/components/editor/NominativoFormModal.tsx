@@ -127,10 +127,26 @@ function normStr(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
 }
 
+// ── Filtro rilevanza: esclude cessati da più di 2 anni ────────
+const _today       = new Date().toISOString().slice(0, 10)
+const _twoYearsAgo = (() => {
+  const d = new Date()
+  d.setFullYear(d.getFullYear() - 2)
+  return d.toISOString().slice(0, 10)
+})()
+
+function isAnagraficaRelevante(a: AnagraficaApi): boolean {
+  const fin = a.finRap || null
+  if (!fin) return true          // nessuna fine → attivo
+  if (fin > _today) return true  // fine futura → ancora attivo
+  return fin >= _twoYearsAgo    // cessato da meno di 2 anni
+}
+
 function searchAnagGrouped(query: string, anagrafiche: AnagraficaApi[]): GroupedAnag[] {
   const words = normStr(query).trim().split(/\s+/).filter(Boolean)
   if (words.length === 0) return []
   const matches = anagrafiche.filter(a => {
+    if (!isAnagraficaRelevante(a)) return false
     const hay = normStr(`${a.cognNome} ${a.matricola}`)
     return words.every(w => hay.includes(w))
   })
@@ -196,12 +212,14 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
     const tokens = normStr(query).trim().split(/\s+/).filter(Boolean)
     if (tokens.length === 0) return []
     const strict = anagrafiche.filter(a => {
+      if (!isAnagraficaRelevante(a)) return false
       const hay = normStr(`${a.cognNome} ${a.matricola}`)
       return tokens.every(t => hay.includes(t))
     })
     if (strict.length > 0) return strict
     // Fallback fuzzy: almeno un token significativo (≥3 car) trovato
     return anagrafiche.filter(a => {
+      if (!isAnagraficaRelevante(a)) return false
       const hay = normStr(`${a.cognNome} ${a.matricola}`)
       return tokens.some(t => t.length >= 3 && hay.includes(t))
     })
