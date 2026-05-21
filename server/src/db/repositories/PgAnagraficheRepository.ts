@@ -34,10 +34,16 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
     // Usa query Drizzle nativa (camelCase garantito dal driver).
     // ORDER BY matricola + decorInq DESC → prima riga per matricola = più recente.
     // Dedup in JS con Set: O(n) — affidabile indipendentemente dal transform del driver.
+    const today = new Date().toISOString().slice(0, 10)
     const rows = await this.db
       .select()
       .from(schema.anagrafiche)
-      .where(isNull(schema.anagrafiche.finRap))
+      .where(
+        or(
+          isNull(schema.anagrafiche.finRap),
+          sql`${schema.anagrafiche.finRap} >= ${today}`,
+        ),
+      )
       .orderBy(schema.anagrafiche.matricola, desc(schema.anagrafiche.decorInq))
 
     // Mantieni solo la riga più recente per matricola
