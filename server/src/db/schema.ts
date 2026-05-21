@@ -103,14 +103,21 @@ export const anagrafiche = pgTable('anagrafiche', {
   cognNome:          varchar('cogn_nome', { length: 100 }).notNull(),
   ruolo:             varchar('ruolo', { length: 10 }).notNull(),
   druolo:            varchar('druolo', { length: 100 }),
-  /** Data inizio periodo ruolo/inquadramento (da DECOR_INQ del file v2) */
+  /** Data inizio periodo ruolo/inquadramento (da DECOR_INQ del file v2 o DT_INIZIO SGE) */
   decorInq:          date('decor_inq').notNull(),
   /** Fine rapporto di lavoro — NULL = ancora attivo */
   finRap:            date('fin_rap'),
-  /** Data del file XML da cui è stata importata la riga */
+  /** Data del file da cui è stata importata la riga */
   dataAggiornamento: date('data_aggiornamento').notNull(),
   createdAt:         timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:         timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  // Campi SGE (xlsx ru_tab_def) — nullable per retrocompatibilità con import XML
+  idAb:              integer('id_ab'),
+  cognome:           varchar('cognome', { length: 100 }),
+  nome:              varchar('nome', { length: 100 }),
+  dtNascita:         date('dt_nascita'),
+  genere:            varchar('genere', { length: 1 }),
+  codFis:            varchar('cod_fis', { length: 16 }),
 }, (t) => [
   uniqueIndex('anagrafiche_matricola_decor_inq_key').on(t.matricola, t.decorInq),
   index('idx_anag_matricola').on(t.matricola),
@@ -229,6 +236,28 @@ export const auditLog = pgTable('audit_log', {
 ])
 
 // ------------------------------------------------------------
+// IMPORT LOG ANAGRAFICHE SGE
+// ------------------------------------------------------------
+
+export const anagImportLog = pgTable('anag_import_log', {
+  id:                   serial('id').primaryKey(),
+  nomeFile:             varchar('nome_file', { length: 255 }),
+  dataImportazione:     timestamp('data_importazione', { withTimezone: true }).notNull().defaultNow(),
+  utenteImportazione:   uuid('utente_importazione').references(() => users.id, { onDelete: 'set null' }),
+  numRecordFile:        integer('num_record_file').notNull().default(0),
+  numRecordInseriti:    integer('num_record_inseriti').notNull().default(0),
+  numRecordAggiornati:  integer('num_record_aggiornati').notNull().default(0),
+  numRecordInvariati:   integer('num_record_invariati').notNull().default(0),
+  numRecordNonPresenti: integer('num_record_non_presenti').notNull().default(0),
+  numErrori:            integer('num_errori').notNull().default(0),
+  esito:                varchar('esito', { length: 10 }).notNull().default('OK'),
+  messaggioErrore:      text('messaggio_errore'),
+  createdAt:            timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('idx_import_log_data').on(t.dataImportazione),
+])
+
+// ------------------------------------------------------------
 // TIPI INFERITI (usati nelle repository)
 // ------------------------------------------------------------
 
@@ -236,8 +265,10 @@ export type User              = typeof users.$inferSelect
 export type NewUser           = typeof users.$inferInsert
 export type RefreshToken      = typeof refreshTokens.$inferSelect
 export type JwtBlocklistEntry = typeof jwtBlocklist.$inferSelect
-export type Anagrafica        = typeof anagrafiche.$inferSelect   // ha decorInq, finRap; no codFisc/ruoloCorr
+export type Anagrafica        = typeof anagrafiche.$inferSelect
 export type NewAnagrafica     = typeof anagrafiche.$inferInsert
+export type AnagImportLog     = typeof anagImportLog.$inferSelect
+export type NewAnagImportLog  = typeof anagImportLog.$inferInsert
 export type Voce              = typeof voci.$inferSelect
 export type Capitolo          = typeof capitoli.$inferSelect
 export type CapitoloAnag      = typeof capitoliAnag.$inferSelect
