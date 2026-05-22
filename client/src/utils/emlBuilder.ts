@@ -33,7 +33,7 @@ export function buildEml(com: Comunicazione, pdfB64: string, pdfFilename = 'alle
     `Content-Type: text/plain; charset=UTF-8`,
     `Content-Transfer-Encoding: 8bit`,
     ``,
-    com.corpo,
+    com.corpo.replace(/\r/g, ''),
     ``,
     `--${boundary}`,
     `Content-Type: application/pdf; name="${safeFilename}"`,

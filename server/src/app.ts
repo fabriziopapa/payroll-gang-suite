@@ -2,9 +2,6 @@
 // PAYROLL GANG SUITE — Server Entry Point (Fastify v5)
 // ============================================================
 
-// SEC: previene prototype pollution globale (mitiga CVE SheetJS e simili)
-Object.freeze(Object.prototype)
-
 import Fastify, { type FastifyRequest, type FastifyReply } from 'fastify'
 import cookie from '@fastify/cookie'
 import helmet from '@fastify/helmet'

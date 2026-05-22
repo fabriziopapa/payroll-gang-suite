@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireAdmin } from '../middleware/authenticate.js'
 import { PgSettingsRepository } from '../db/repositories/PgSettingsRepository.js'
+import { PgAuditRepository } from '../db/repositories/PgAuditRepository.js'
 
 // SEC-H04: whitelist delle chiavi consentite in app_settings.
 // Chiavi scritte dal server (import): last_import_*
@@ -34,7 +35,8 @@ const PUBLIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
 
 export async function settingsRoutes(app: FastifyInstance): Promise<void> {
 
-  const repo = new PgSettingsRepository(app.db)
+  const repo      = new PgSettingsRepository(app.db)
+  const auditRepo = new PgAuditRepository(app.db)
 
   // GET /settings/public — senza autenticazione
   // Espone solo le chiavi in PUBLIC_SETTINGS_KEYS (valori non sensibili)
@@ -67,6 +69,13 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       }
       await repo.set(chiave, valore)
     }
+    await auditRepo.log({
+      userId:   req.user!.id,
+      azione:   'SETTINGS_UPDATED',
+      entita:   'app_settings',
+      dettagli: { chiavi: Object.keys(body) },
+      ip:       req.ip,
+    })
     return reply.send(await repo.getAll())
   })
 
@@ -79,6 +88,13 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     }
     const { valore } = z.object({ valore: z.unknown() }).parse(req.body)
     await repo.set(chiave, valore)
+    await auditRepo.log({
+      userId:   req.user!.id,
+      azione:   'SETTINGS_UPDATED',
+      entita:   'app_settings',
+      entitaId: chiave,
+      ip:       req.ip,
+    })
     return reply.send({ success: true })
   })
 }

@@ -208,12 +208,13 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
             ${schema.anagrafiche.hashRecord} IS DISTINCT FROM EXCLUDED.hash_record
           `,
         })
-        .returning({ id: schema.anagrafiche.id, createdAt: schema.anagrafiche.createdAt })
+        .returning({
+          id:         schema.anagrafiche.id,
+          wasInserted: sql<boolean>`(created_at = updated_at)`,
+        })
 
-      const now = Date.now()
       rows.forEach(r => {
-        const age = now - r.createdAt.getTime()
-        if (age < 2000) result.inserted++
+        if (r.wasInserted) result.inserted++
         else result.updated++
       })
       // Righe non restituite = già presenti e invariate

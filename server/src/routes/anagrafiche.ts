@@ -17,7 +17,7 @@ export async function anagraficheRoutes(app: FastifyInstance): Promise<void> {
   // Con ?data= restituisce solo i record attivi alla data indicata (1 per matricola)
   app.get('/', { preHandler: [app.authenticate] }, async (req, reply) => {
     const { data } = z.object({
-      data: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      data: z.string().date().optional(),
     }).parse(req.query)
 
     const rows = data

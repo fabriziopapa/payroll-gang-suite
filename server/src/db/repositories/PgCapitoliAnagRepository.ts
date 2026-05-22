@@ -124,11 +124,13 @@ export class PgCapitoliAnagRepository implements ICapitoliAnagRepository {
             OR ${schema.capitoliAnag.operatore} IS DISTINCT FROM EXCLUDED.operatore
           `,
         })
-        .returning({ id: schema.capitoliAnag.id, createdAt: schema.capitoliAnag.createdAt })
+        .returning({
+          id:          schema.capitoliAnag.id,
+          wasInserted: sql<boolean>`(created_at = updated_at)`,
+        })
 
       for (const row of returned) {
-        const age = Date.now() - row.createdAt.getTime()
-        if (age < 2000) result.inserted++
+        if (row.wasInserted) result.inserted++
         else result.updated++
       }
       result.skipped += batch.length - returned.length

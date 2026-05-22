@@ -65,7 +65,7 @@ export class PgVociRepository implements IVociRepository {
     // poi un bulk upsert per tutti i capitoli. Riduce N transazioni a 2 query.
     await this.db.transaction(async tx => {
       // ── Fase 1: bulk upsert di tutte le voci in batch ──────────────────────
-      const allVoceRows: Array<{ id: number; createdAt: Date; codice: string; dataIn: string }> = []
+      const allVoceRows: Array<{ id: number; wasInserted: boolean; codice: string; dataIn: string }> = []
 
       for (let i = 0; i < items.length; i += BATCH_SIZE) {
         const batch = items.slice(i, i + BATCH_SIZE)
@@ -103,12 +103,15 @@ export class PgVociRepository implements IVociRepository {
               OR ${schema.voci.conguaglio} IS DISTINCT FROM EXCLUDED.conguaglio
             `,
           })
-          .returning({ id: schema.voci.id, createdAt: schema.voci.createdAt, codice: schema.voci.codice, dataIn: schema.voci.dataIn })
+          .returning({
+            id:          schema.voci.id,
+            codice:      schema.voci.codice,
+            dataIn:      schema.voci.dataIn,
+            wasInserted: sql<boolean>`(created_at = updated_at)`,
+          })
 
-        const now = Date.now()
         rows.forEach(r => {
-          const age = now - r.createdAt.getTime()
-          if (age < 2000) result.inserted++
+          if (r.wasInserted) result.inserted++
           else result.updated++
         })
         // Righe non restituite = già presenti e invariate
