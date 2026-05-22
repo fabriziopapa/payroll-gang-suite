@@ -65,11 +65,6 @@ export async function anagraficheRoutes(app: FastifyInstance): Promise<void> {
     })
     const { xml, dataAggiornamento } = schema.parse(request.body)
 
-    // FIX M-3: check esplicito sulla dimensione del payload XML in bytes
-    if (Buffer.byteLength(xml, 'utf8') > 5_000_000) {
-      return reply.status(413).send({ error: 'File troppo grande (max 5 MB)' })
-    }
-
     let result
     try {
       result = await importAnagrafiche(

@@ -172,14 +172,23 @@ export const useStore = create<AppStore>()(
 
     clearAuth: () => {
       set(s => {
-        s.user            = null
-        s.accessToken     = null
-        s.currentPage     = 'login'
-        s.currentBozzaId  = null
-        s.nominativi      = []
-        s.dettagli        = []
-        s.bozze           = []
-        s.bootstrapDone   = true
+        s.user              = null
+        s.accessToken       = null
+        s.currentPage       = 'login'
+        s.currentBozzaId    = null
+        s.currentBozzaNome  = ''
+        s.nominativi        = []
+        s.dettagli          = []
+        s.comunicazioni     = []
+        s.protocolloDisplay = ''
+        s.isDirty           = false
+        s.viewerBozza       = null
+        s.bozze             = []
+        s.anagrafiche       = []
+        s.voci              = []
+        s.capitoliAnag      = []
+        s.settings          = DEFAULT_SETTINGS
+        s.bootstrapDone     = true
       })
       setAccessToken(null)
     },

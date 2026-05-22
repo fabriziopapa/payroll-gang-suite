@@ -46,11 +46,6 @@ export async function capitoliRoutes(app: FastifyInstance): Promise<void> {
     })
     const { xml, sorgente } = schema.parse(request.body)
 
-    // FIX M-3: check esplicito sulla dimensione del payload XML in bytes
-    if (Buffer.byteLength(xml, 'utf8') > 5_000_000) {
-      return reply.status(413).send({ error: 'File troppo grande (max 5 MB)' })
-    }
-
     let result
     try {
       result = await importCapitoli(xml, sorgente as CapitoloSorgente, repo)

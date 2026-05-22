@@ -157,12 +157,21 @@ export default function RicercaPage() {
   const pagedRows = filtered.slice((page - 1) * pageSize, page * pageSize)
 
   // ── Export ricerca ───────────────────────────────────────────
+  function escapeCsvCell(value: string | number): string {
+    const s = String(value)
+    const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s
+    if (safe.includes(';') || safe.includes('\n') || safe.includes('\r') || safe.includes('"')) {
+      return `"${safe.replace(/"/g, '""')}"`
+    }
+    return safe
+  }
+
   function handleExportRicerca() {
     const header = 'Liquidazione;Stato;Gruppo;Matricola;Cognome Nome;Ruolo;Voce;Competenza;Importo Lordo;Importo CSV\r\n'
     const body   = filtered.map(r =>
       [r.bozzaNome, r.bozzaStato, r.detNome, r.matricola, r.cognomeNome,
        r.ruolo, r.voce, r.competenza,
-       r.importoLordo.toFixed(2), r.importoCSV.toFixed(2)].join(';'),
+       r.importoLordo.toFixed(2), r.importoCSV.toFixed(2)].map(escapeCsvCell).join(';'),
     ).join('\r\n')
     downloadPlainCsv(header + body, `ricerca_${new Date().toISOString().slice(0,10)}.csv`)
   }
