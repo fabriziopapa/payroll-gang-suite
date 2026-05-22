@@ -31,29 +31,27 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
    * Il risultato viene poi ordinato per cognNome in un subquery/CTE implicito.
    */
   async findAll(): Promise<AnagraficaRow[]> {
-    // Include: fin_rap IS NULL (attivi) + fin_rap >= oggi (contratti a termine attivi).
-    const rows = await this.db
-      .select()
-      .from(schema.anagrafiche)
-      .where(
-        or(
-          isNull(schema.anagrafiche.finRap),
-          sql`${schema.anagrafiche.finRap} >= (CURRENT_DATE - INTERVAL '3 years')`,
-        ),
-      )
-      .orderBy(schema.anagrafiche.matricola, desc(schema.anagrafiche.decorInq))
+    // DISTINCT ON (matricola) esegue la dedup lato PostgreSQL — nessun oggetto
+    // superfluo allocato in Node.js, trasferimento ridotto al solo record più recente
+    // per matricola. Allineato con findAllAtDate() che usa lo stesso pattern.
+    // idx_anag_storico (matricola, decor_inq, fin_rap) supporta questo ORDER BY.
+    const rows = await this.db.execute(sql`
+      SELECT DISTINCT ON (matricola)
+        id, matricola, cogn_nome, ruolo, druolo,
+        decor_inq, fin_rap, data_aggiornamento,
+        created_at, updated_at,
+        id_ab, cognome, nome, dt_nascita, genere, cod_fis, hash_record
+      FROM anagrafiche
+      WHERE fin_rap IS NULL
+         OR fin_rap >= (CURRENT_DATE - INTERVAL '3 years')
+      ORDER BY matricola, decor_inq DESC
+    `)
 
-    // Dedup JS: tieni solo la riga con decorInq più recente per matricola
-    const seen    = new Set<string>()
-    const deduped = rows.filter(r => {
-      if (seen.has(r.matricola)) return false
-      seen.add(r.matricola)
-      return true
-    })
-
-    return deduped
+    // Sort finale per cognNome in JS: PostgreSQL non consente ORDER BY su colonne
+    // non incluse nel DISTINCT ON senza una subquery/CTE aggiuntiva.
+    return (rows as unknown[])
+      .map(toRowRaw)
       .sort((a, b) => (a.cognNome ?? '').localeCompare(b.cognNome ?? '', 'it'))
-      .map(toRow)
   }
 
   // Ritorna tutta la storia di una matricola (più record)

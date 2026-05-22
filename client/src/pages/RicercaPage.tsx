@@ -8,6 +8,7 @@ import { useStore, type BozzaDati } from '../store/useStore'
 import { bozzeApi, type BozzaApi } from '../api/endpoints'
 import { calcolaImportoCSV, formatEur } from '../utils/biz'
 import Pagination from '../components/Pagination'
+import { useDebounce } from '../hooks/useDebounce'
 
 // ── Tipi interni ──────────────────────────────────────────────
 
@@ -84,6 +85,10 @@ export default function RicercaPage() {
   const [tab, setTab]             = useState<TabId>('ricerca')
   const [loading, setLoading]     = useState(false)
   const [query, setQuery]         = useState('')
+  // debouncedQuery segue query con 200ms di ritardo:
+  // il campo input risponde immediatamente (usa query), il filtro costoso
+  // viene ricalcolato solo quando l'utente smette di digitare.
+  const debouncedQuery            = useDebounce(query, 200)
   const [modoFulltext, setModoFulltext] = useState(false)
   const [filtroStato, setFiltroStato]   = useState<'tutte' | 'bozza' | 'archiviata'>('tutte')
   const [filtroAnno, setFiltroAnno]     = useState('')
@@ -91,21 +96,17 @@ export default function RicercaPage() {
   const [pageSize, setPageSize]   = useState(20)
   const [reportMode, setReportMode] = useState<ReportMode>('matricola')
 
-  // Carica bozze con dati completi ad ogni mount della pagina.
-  // FIX H-1: GET /bozze (lista) non include `dati` JSONB.
-  // Recuperiamo prima la lista summary, poi fetchamo ogni bozza individualmente
-  // tramite GET /bozze/:id per ottenere il campo `dati` necessario a ricerca/report.
+  // Carica tutte le bozze con dati JSONB in una sola richiesta.
+  // GET /bozze/all-with-data restituisce l'intera collezione con `dati` incluso:
+  // 1 query DB invece del pattern precedente (1 lista + N GET /bozze/:id).
   useEffect(() => {
     let cancelled = false
     async function load() {
       setLoading(true)
       try {
-        const summaries = await bozzeApi.list()
-        if (cancelled) return
-        // Fetch parallelo delle bozze complete (con dati)
-        const full = await Promise.all(summaries.map(s => bozzeApi.getById(s.id)))
+        const full = await bozzeApi.listWithData()
         if (!cancelled) setBozze(full)
-      } catch { /* usa dati già in store */ }
+      } catch { /* usa dati già in store se disponibili */ }
       finally { if (!cancelled) setLoading(false) }
     }
     load()
@@ -129,8 +130,10 @@ export default function RicercaPage() {
   }, [allRows])
 
   // ── Filtro risultati ─────────────────────────────────────────
+  // Dipende da debouncedQuery (non da query): ricalcolo O(n) solo 200ms
+  // dopo l'ultimo keystroke — evita iterazioni inutili durante la digitazione.
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
+    const q = debouncedQuery.trim().toLowerCase()
     return allRows.filter(r => {
       if (filtroStato !== 'tutte' && r.bozzaStato !== filtroStato) return false
       if (filtroAnno && !r.competenza.endsWith(`/${filtroAnno}`)) return false
@@ -149,10 +152,10 @@ export default function RicercaPage() {
         r.ruolo.toLowerCase().includes(q)
       )
     })
-  }, [allRows, query, modoFulltext, filtroStato, filtroAnno])
+  }, [allRows, debouncedQuery, modoFulltext, filtroStato, filtroAnno])
 
   // Reset pagina su cambio filtri
-  useEffect(() => { setPage(1) }, [query, modoFulltext, filtroStato, filtroAnno, tab, reportMode])
+  useEffect(() => { setPage(1) }, [debouncedQuery, modoFulltext, filtroStato, filtroAnno, tab, reportMode])
 
   const pagedRows = filtered.slice((page - 1) * pageSize, page * pageSize)
 
