@@ -178,8 +178,16 @@ export const bozzeApi = {
     apiFetch<BozzaApi[]>('/bozze'),
 
   /**
+   * GET /bozze/all-with-data — tutte le bozze con `dati` JSONB incluso.
+   * Usata da RicercaPage: sostituisce il pattern 1+N (lista + N getById).
+   * Una sola query DB invece di N query parallele.
+   */
+  listWithData: () =>
+    apiFetch<BozzaApi[]>('/bozze/all-with-data'),
+
+  /**
    * FIX H-1: recupera una bozza completa (con campo `dati`) via GET /bozze/:id.
-   * Usata da RicercaPage dopo la lista summary, e dall'editor/viewer per caricare i dati.
+   * Usata dall'editor/viewer per caricare i dati di una singola bozza.
    */
   getById: (id: string) =>
     apiFetch<BozzaApi>(`/bozze/${id}`),

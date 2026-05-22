@@ -30,6 +30,15 @@ export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(await repo.findAllSummary(userId))
   })
 
+  // GET /all-with-data — tutte le bozze con JSONB dati incluso.
+  // Usata da RicercaPage per caricare tutto in una sola query invece di N GET /:id.
+  // DEVE essere registrata prima di GET /:id: le route statiche battono quelle
+  // parametriche solo se registrate per prime in Fastify.
+  app.get('/all-with-data', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const userId = req.user!.isAdmin ? undefined : req.user!.id
+    return reply.send(await repo.findAll(userId))
+  })
+
   // GET /:id — admin può accedere a qualsiasi bozza; utente solo la propria
   app.get('/:id', { preHandler: [app.authenticate] }, async (req, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params)
