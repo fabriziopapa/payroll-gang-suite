@@ -5,6 +5,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { PgBozzeRepository } from '../db/repositories/PgBozzeRepository.js'
+import { BozzaDatiSchema } from '../schemas/bozzaDati.js'
 // BozzaSummaryRow is used by the list endpoint — no dati JSONB (FIX H-1)
 
 export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
@@ -41,10 +42,10 @@ export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
     const schema = z.object({
       nome:              z.string().min(1).max(200),
       protocolloDisplay: z.string().optional(),
-      dati:              z.unknown(),
+      dati:              BozzaDatiSchema,
     })
     const body  = schema.parse(req.body)
-    const bozza = await repo.create({ nome: body.nome, protocolloDisplay: body.protocolloDisplay, dati: body.dati ?? {}, createdBy: req.user!.id })
+    const bozza = await repo.create({ nome: body.nome, protocolloDisplay: body.protocolloDisplay, dati: body.dati, createdBy: req.user!.id })
     return reply.code(201).send(bozza)
   })
 
@@ -54,7 +55,7 @@ export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
     const schema = z.object({
       nome:              z.string().min(1).max(200).optional(),
       protocolloDisplay: z.string().optional(),
-      dati:              z.unknown().optional(),
+      dati:              BozzaDatiSchema.optional(),
     })
     const existing = await requireOwner(id, req.user!.id, req.user!.isAdmin, reply)
     if (!existing) return
