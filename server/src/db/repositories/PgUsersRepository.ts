@@ -2,7 +2,7 @@
 // PAYROLL GANG SUITE — PgUsersRepository
 // ============================================================
 
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import * as schema from '../schema.js'
 import type { IUsersRepository, UserRow, ActivationUserRow } from '../IRepository.js'
@@ -180,30 +180,28 @@ export class PgUsersRepository implements IUsersRepository {
   // ── SEC-M01: TOTP brute-force lockout ──────────────────────
 
   async incrementFailedOtp(userId: string): Promise<void> {
-    // Legge il contatore corrente, poi decide se bloccare
-    const [row] = await this.db
-      .select({ failedOtpCount: schema.users.failedOtpCount })
-      .from(schema.users)
-      .where(eq(schema.users.id, userId))
-      .limit(1)
+    // Atomic single-statement: no SELECT+UPDATE race under concurrent requests
+    await this.db.execute(sql`
+      UPDATE users
+      SET
+        failed_otp_count = CASE WHEN failed_otp_count + 1 >= 5 THEN 0
+                                ELSE failed_otp_count + 1 END,
+        locked_until     = CASE WHEN failed_otp_count + 1 >= 5
+                                THEN now() + interval '15 minutes'
+                                ELSE locked_until END
+      WHERE id = ${userId}
+    `)
+  }
 
-    if (!row) return
-
-    const newCount = (row.failedOtpCount ?? 0) + 1
-
-    if (newCount >= 5) {
-      // Blocca per 15 minuti e resetta il contatore
-      const lockedUntil = new Date(Date.now() + 15 * 60 * 1000)
-      await this.db
-        .update(schema.users)
-        .set({ failedOtpCount: 0, lockedUntil })
-        .where(eq(schema.users.id, userId))
-    } else {
-      await this.db
-        .update(schema.users)
-        .set({ failedOtpCount: newCount })
-        .where(eq(schema.users.id, userId))
-    }
+  async claimOtpToken(userId: string, token: string): Promise<boolean> {
+    const rows = await this.db.execute<{ id: string }>(sql`
+      UPDATE users
+      SET last_otp_token = ${token}
+      WHERE id = ${userId}
+        AND (last_otp_token IS NULL OR last_otp_token != ${token})
+      RETURNING id
+    `)
+    return rows.length > 0
   }
 
   async resetFailedOtp(userId: string): Promise<void> {

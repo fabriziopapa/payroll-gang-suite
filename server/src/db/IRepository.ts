@@ -206,6 +206,12 @@ export interface IUsersRepository {
   setTotpVerified(id: string): Promise<void>
   updateLastLogin(id: string): Promise<void>
   updateLastOtpToken(id: string, token: string): Promise<void>
+  /**
+   * Atomic check-and-set: imposta last_otp_token = token SOLO SE il valore corrente
+   * è NULL o diverso da token. Previene replay anche sotto carico concorrente.
+   * Restituisce true se il claim è avvenuto, false se era già presente (replay).
+   */
+  claimOtpToken(id: string, token: string): Promise<boolean>
   setActive(id: string, active: boolean): Promise<void>
   updateTotpSecret(id: string, totpSecret: string): Promise<void>
   delete(id: string): Promise<void>

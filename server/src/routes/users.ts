@@ -129,7 +129,7 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
       if (app.mailer.isConfigured()) {
         try {
           // FIX #4: URL contiene il token opaco (non l'UUID utente)
-          const activateUrl = `${env.CLIENT_ORIGIN}?activate=${result.activationToken}`
+          const activateUrl = `${env.CLIENT_ORIGIN[0]}?activate=${result.activationToken}`
           await app.mailer.sendQrCode({
             to:          result.username,
             username:    result.username,

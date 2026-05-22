@@ -104,8 +104,11 @@ export class AuthService {
     )
     if (!result.valid) return false
 
+    // Atomic claim: prevents concurrent replay between verify() and token persistence
+    const claimed = await this.usersRepo.claimOtpToken(user.id, otpToken)
+    if (!claimed) return false
+
     await this.usersRepo.setTotpVerified(user.id)
-    await this.usersRepo.updateLastOtpToken(user.id, otpToken)
     await this.usersRepo.clearActivationToken(user.id)
     await this.auditRepo.log({ userId: user.id, azione: 'USER_ACTIVATED', entita: 'users', entitaId: user.id })
     return true
@@ -145,10 +148,15 @@ export class AuthService {
       throw new Error('AUTH_FAILED')
     }
 
+    // Atomic claim: prevents concurrent replay between verify() and token persistence
+    const claimed = await this.usersRepo.claimOtpToken(user.id, otpToken)
+    if (!claimed) {
+      await this.#logFailedLogin(username, ip, 'replay')
+      throw new Error('AUTH_FAILED')
+    }
+
     // SEC-M01: reset contatore dopo login riuscito
     await this.usersRepo.resetFailedOtp(user.id)
-    // Aggiorna last token usato (replay prevention)
-    await this.usersRepo.updateLastOtpToken(user.id, otpToken)
     await this.usersRepo.updateLastLogin(user.id)
 
     const accessToken  = this.#issueAccessToken(user.id, user.username, user.isAdmin)

@@ -72,7 +72,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     // Invia QR via email dopo aver già risposto al client (truly fire-and-forget)
     if (app.mailer.isConfigured()) {
       // FIX #4: URL contiene il token opaco (non l'UUID utente)
-      const activateUrl = `${env.CLIENT_ORIGIN}?activate=${result.activationToken}`
+      const activateUrl = `${env.CLIENT_ORIGIN[0]}?activate=${result.activationToken}`
       app.mailer.sendQrCode({
         to:          body.username,
         username:    body.username,
