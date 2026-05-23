@@ -127,6 +127,21 @@ function normStr(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
 }
 
+/**
+ * Ritorna la data fine rapporto formattata DD/MM/YYYY se è precedente
+ * alla data di competenza voce, null altrimenti.
+ * Confronto lexicografico su ISO date (YYYY-MM-DD) — sicuro e O(1).
+ */
+function finRapWarn(
+  finRap:         string | null | undefined,
+  dataCompetenza: string | undefined,
+): string | null {
+  if (!finRap || !dataCompetenza) return null
+  if (finRap >= dataCompetenza) return null
+  const [y, m, d] = finRap.split('-')
+  return `${d ?? '??'}/${m ?? '??'}/${y ?? '??'}`
+}
+
 // ── Filtro rilevanza: esclude cessati da più di 2 anni ────────
 const _today         = new Date().toISOString().slice(0, 10)
 const _threeYearsAgo = (() => {
@@ -238,6 +253,7 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
   const [mImporto, setMImporto]       = useState('')
   const [filled, setFilled]           = useState(false)
   const [fillLoading, setFillLoading] = useState(false)
+  const [selectedAnag, setSelectedAnag] = useState<AnagraficaApi | null>(null)
   const [addedFlash, setAddedFlash]         = useState(false)
   const [confirmedBudget, setConfirmedBudget] = useState<ImportoBudgetItem[]>([])
   const [budgetAnchorEl, setBudgetAnchorEl]   = useState<HTMLElement | null>(null)
@@ -260,6 +276,7 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
 
   async function fillFromAnagrafica(a: AnagraficaApi) {
     const myRef = ++fillRef.current
+    setSelectedAnag(a)
     setMMatricola(a.matricola)
     setMCognNome(a.cognNome)
     setMSearch(a.cognNome)
@@ -335,6 +352,7 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
     setConfirmedBudget([])
     setBudgetAnchorEl(null)
     setFilled(false)
+    setSelectedAnag(null)
     setAddedFlash(true)
     setTimeout(() => setAddedFlash(false), 2000)
     searchInputRef.current?.focus()
@@ -627,6 +645,29 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
                   Nominativo aggiunto — inserisci il prossimo
                 </div>
               )}
+              {(() => {
+                const warn = filled
+                  ? finRapWarn(selectedAnag?.finRap, dettaglio.dataCompetenzaVoce || undefined)
+                  : null
+                return warn ? (
+                  <div
+                    role="alert"
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg
+                               bg-amber-900/30 border border-amber-800/60 text-amber-400 text-sm"
+                  >
+                    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24"
+                         stroke="currentColor" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667
+                           1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464
+                           0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                    Fine rapporto:{' '}
+                    <span className="font-mono font-semibold">{warn}</span>
+                    {' '}— precedente alla data di competenza voce
+                  </div>
+                ) : null
+              })()}
               <div ref={searchRef} className="relative">
                 <label className="block text-sm font-medium text-slate-300 mb-1.5">
                   Cerca nominativo, matricola o codice fiscale
@@ -637,7 +678,7 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
                 </label>
                 <div className="relative">
                   <input ref={searchInputRef} autoFocus value={mSearch} disabled={loading}
-                    onChange={e => { setMSearch(e.target.value); setShowDrop(true); setFilled(false) }}
+                    onChange={e => { setMSearch(e.target.value); setShowDrop(true); setFilled(false); setSelectedAnag(null) }}
                     onFocus={() => mSearch.length >= 2 && setShowDrop(true)}
                     placeholder="es. Papa Fabrizio  oppure  000123  oppure  PPAFBR…"
                     className={inputCls} />
@@ -791,7 +832,8 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
                       <PasteResultRow key={idx} row={row}
                         onToggle={() => toggleInclude(idx)}
                         onChoose={m => chooseMatch(idx, m)}
-                        onImportoChange={v => updatePasteImporto(idx, v)} />
+                        onImportoChange={v => updatePasteImporto(idx, v)}
+                        dataCompetenza={dettaglio.dataCompetenzaVoce || undefined} />
                     ))}
                   </div>
                 </div>
@@ -916,6 +958,11 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
                                       const isAlready = alreadyIn.has(nom.matricola)
                                       const isSel     = copySel.has(key)
 
+                                      const anagRecord = anagrafiche.find(x => x.matricola === nom.matricola)
+                                      const copyFinRapWarn = finRapWarn(
+                                        anagRecord?.finRap,
+                                        dettaglio.dataCompetenzaVoce || undefined,
+                                      )
                                       return (
                                         <label key={nom.id}
                                           className={`flex items-center gap-3 px-6 py-2 cursor-pointer
@@ -930,6 +977,15 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
                                           <span className="text-slate-300 text-xs flex-1 truncate">
                                             {nom.cognomeNome}
                                           </span>
+                                          {copyFinRapWarn && (
+                                            <span
+                                              className="text-xs text-amber-400 font-mono shrink-0"
+                                              title={`Fine rapporto: ${copyFinRapWarn}`}
+                                              aria-label={`Fine rapporto: ${copyFinRapWarn}`}
+                                            >
+                                              ⚠ {copyFinRapWarn}
+                                            </span>
+                                          )}
                                           <span className="font-mono text-xs text-slate-500 shrink-0">
                                             {nom.matricola}
                                           </span>
@@ -998,11 +1054,12 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
 
 // ── Riga risultato incolla ────────────────────────────────────
 
-function PasteResultRow({ row, onToggle, onChoose, onImportoChange }: {
+function PasteResultRow({ row, onToggle, onChoose, onImportoChange, dataCompetenza }: {
   row:             PasteRow
   onToggle:        () => void
   onChoose:        (matricola: string) => void
   onImportoChange: (value: string) => void
+  dataCompetenza?: string
 }) {
   const statusIcon: Record<PasteStatus, React.ReactNode> = {
     found:      <span className="text-emerald-400 text-xs font-bold shrink-0">✓</span>,
@@ -1029,9 +1086,26 @@ function PasteResultRow({ row, onToggle, onChoose, onImportoChange }: {
       <div className="flex-1 min-w-0">
         <p className="text-slate-300 text-sm font-mono truncate">{row.input}</p>
         {row.status === 'found' && row.match && (
-          <p className="text-slate-500 text-xs mt-0.5">
-            {row.match.cognNome} · <span className="font-mono">{row.match.matricola}</span> · {row.match.ruolo}
-          </p>
+          <>
+            <p className="text-slate-500 text-xs mt-0.5">
+              {row.match.cognNome} · <span className="font-mono">{row.match.matricola}</span> · {row.match.ruolo}
+            </p>
+            {finRapWarn(row.match.finRap, dataCompetenza) && (
+              <p className="flex items-center gap-1 text-amber-400 text-xs mt-0.5" role="alert">
+                <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24"
+                     stroke="currentColor" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667
+                       1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464
+                       0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                </svg>
+                Fine rapporto:{' '}
+                <span className="font-mono font-semibold">
+                  {finRapWarn(row.match.finRap, dataCompetenza)}
+                </span>
+              </p>
+            )}
+          </>
         )}
         {row.status === 'not_found' && (
           <p className="text-red-400 text-xs mt-0.5">Non trovato nell&apos;anagrafica</p>
