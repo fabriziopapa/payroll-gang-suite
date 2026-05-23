@@ -288,26 +288,29 @@ function toRow(r: typeof schema.anagrafiche.$inferSelect): AnagraficaRow {
   }
 }
 
-// Mappa risultato raw SQL (usato da findAllAtDate con DISTINCT ON)
+// Mappa risultato raw SQL (usato da findAll e findAllAtDate con DISTINCT ON).
+// IMPORTANTE: postgres.js è configurato con postgres.camel (connection.ts) →
+// tutti i nomi colonna snake_case vengono convertiti in camelCase PRIMA di
+// arrivare qui. Usare le chiavi camelCase, non snake_case.
 function toRowRaw(r: unknown): AnagraficaRow {
   const row = r as Record<string, unknown>
   return {
     id:                row['id'] as number,
     matricola:         row['matricola'] as string,
-    cognNome:          row['cogn_nome'] as string,
+    cognNome:          row['cognNome'] as string,           // cogn_nome → cognNome
     ruolo:             row['ruolo'] as string,
     druolo:            (row['druolo'] as string | null) ?? null,
-    decorInq:          row['decor_inq'] as string,
-    finRap:            (row['fin_rap'] as string | null) ?? null,
-    dataAggiornamento: row['data_aggiornamento'] as string,
-    updatedAt:         new Date(row['updated_at'] as string),
-    idAb:              (row['id_ab'] as number | null) ?? null,
+    decorInq:          row['decorInq'] as string,           // decor_inq → decorInq
+    finRap:            (row['finRap'] as string | null) ?? null,   // fin_rap → finRap
+    dataAggiornamento: row['dataAggiornamento'] as string,  // data_aggiornamento → dataAggiornamento
+    updatedAt:         new Date(row['updatedAt'] as string), // updated_at → updatedAt
+    idAb:              (row['idAb'] as number | null) ?? null,     // id_ab → idAb
     cognome:           (row['cognome'] as string | null) ?? null,
     nome:              (row['nome'] as string | null) ?? null,
-    dtNascita:         (row['dt_nascita'] as string | null) ?? null,
+    dtNascita:         (row['dtNascita'] as string | null) ?? null, // dt_nascita → dtNascita
     genere:            (row['genere'] as string | null) ?? null,
-    codFis:            (row['cod_fis'] as string | null) ?? null,
-    hashRecord:        (row['hash_record'] as string | null) ?? null,
+    codFis:            (row['codFis'] as string | null) ?? null,    // cod_fis → codFis
+    hashRecord:        (row['hashRecord'] as string | null) ?? null, // hash_record → hashRecord
   }
 }
 
