@@ -73,9 +73,9 @@ export default function AnagrafichePage() {
     for (const a of anagrafiche) {
       const q = search.toLowerCase()
       const match = !search ||
-        a.matricola.includes(search) ||
-        a.cognNome.toLowerCase().includes(q) ||
-        a.ruolo.toLowerCase().includes(q) ||
+        (a.matricola ?? '').includes(search) ||
+        (a.cognNome ?? '').toLowerCase().includes(q) ||
+        (a.ruolo ?? '').toLowerCase().includes(q) ||
         (a.druolo ?? '').toLowerCase().includes(q)
       if (!match) continue
 
