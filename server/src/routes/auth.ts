@@ -38,7 +38,16 @@ const COOKIE_OPTS = {
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
 
-  // Rate limit stretto su tutti gli endpoint auth
+  // ----------------------------------------------------------
+  // GET /api/v1/auth/me — identità utente corrente
+  // NOTA: fuori dal rate limit auth stretto — ha già un JWT valido,
+  // non è un tentativo di autenticazione. Coperto solo dal global RL (100/60s).
+  // ----------------------------------------------------------
+  app.get('/me', { preHandler: [app.authenticate] }, async (request, reply) => {
+    return reply.send({ user: request.user })
+  })
+
+  // Rate limit stretto sugli endpoint di autenticazione critica
   await app.register(import('@fastify/rate-limit'), {
     max:        env.AUTH_RATE_LIMIT_MAX,
     timeWindow: env.AUTH_RATE_LIMIT_WINDOW_MS,
@@ -173,7 +182,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
 
     reply.setCookie(REFRESH_COOKIE, tokens.newRefreshToken, COOKIE_OPTS)
-    return reply.send({ accessToken: tokens.accessToken })
+    return reply.send({ accessToken: tokens.accessToken, user: tokens.user })
   })
 
   // ----------------------------------------------------------
@@ -197,10 +206,4 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ success: true })
   })
 
-  // ----------------------------------------------------------
-  // GET /api/v1/auth/me — identità utente corrente
-  // ----------------------------------------------------------
-  app.get('/me', { preHandler: [app.authenticate] }, async (request, reply) => {
-    return reply.send({ user: request.user })
-  })
 }

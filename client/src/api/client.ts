@@ -77,6 +77,12 @@ export async function apiFetch<T = unknown>(
     }
   }
 
+  if (res.status === 429) {
+    const raw          = res.headers.get('Retry-After')
+    const retryAfterSec = raw ? parseInt(raw, 10) : 60
+    throw new ApiError('RATE_LIMIT_EXCEEDED', 429, retryAfterSec)
+  }
+
   if (!res.ok) {
     let code = `HTTP_${res.status}`
     try { code = ((await res.json()) as { error?: string }).error ?? code } catch { /* ignore */ }
@@ -93,8 +99,9 @@ export async function apiFetch<T = unknown>(
 // ── Errore tipizzato ─────────────────────────────────────────
 export class ApiError extends Error {
   constructor(
-    public readonly code: string,
-    public readonly status: number,
+    public readonly code:           string,
+    public readonly status:         number,
+    public readonly retryAfterSec:  number = 0,
   ) {
     super(code)
     this.name = 'ApiError'

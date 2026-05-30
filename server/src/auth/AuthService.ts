@@ -182,7 +182,7 @@ export class AuthService {
     rawToken:  string,
     userAgent: string,
     ip:        string,
-  ): Promise<{ accessToken: string; newRefreshToken: string }> {
+  ): Promise<{ accessToken: string; newRefreshToken: string; user: { id: string; username: string; isAdmin: boolean } }> {
     const { db } = await import('../db/connection.js')
     const { refreshTokens, users } = await import('../db/schema.js')
     const { eq, and, gt, isNull } = await import('drizzle-orm')
@@ -258,7 +258,11 @@ export class AuthService {
     const accessToken     = this.#issueAccessToken(user.id, user.username, user.isAdmin)
     const newRefreshToken = await this.#issueRefreshToken(user.id, userAgent, ip)
 
-    return { accessToken, newRefreshToken }
+    return {
+      accessToken,
+      newRefreshToken,
+      user: { id: user.id, username: user.username, isAdmin: user.isAdmin },
+    }
   }
 
   // ----------------------------------------------------------

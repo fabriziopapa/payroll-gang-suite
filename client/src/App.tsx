@@ -3,10 +3,15 @@
 // Auth gate + routing basato su stato Zustand
 // ============================================================
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useStore } from './store/useStore'
 import { setAccessToken, setOnUnauthorized } from './api/client'
-import { authApi, settingsApi } from './api/endpoints'
+import { settingsApi } from './api/endpoints'
+import { showToast } from './components/ToastManager'
+import type { UserApi } from './api/endpoints'
+
+// Bootstrap: numero massimo di retry automatici su 429 prima di arrendersi
+const MAX_BOOTSTRAP_RETRIES = 5
 import { DEFAULT_CSV_PARAMS, TAG_BUILTIN } from './constants/csvDefaults'
 import { DEFAULT_COEFFICIENTI_SCORPORO } from './constants/scorporoCoefficients'
 import type { AppSettings } from './types'
@@ -25,6 +30,9 @@ import ViewerPage         from './pages/ViewerPage'
 import RicercaPage        from './pages/RicercaPage'
 
 export default function App() {
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const retryCountRef = useRef(0)
+
   const {
     currentPage,
     bootstrapDone,
@@ -41,28 +49,74 @@ export default function App() {
 
   // ── 2. Tenta ripristino sessione via refresh cookie ───────
   useEffect(() => {
-    async function tryRestore() {
+    // Pianifica un nuovo tentativo dopo un throttling 429 (NON è sessione scaduta)
+    function scheduleThrottleRetry(retryAfterRaw: string | null): void {
+      setBootstrap(true)  // sblocca la UI — l'utente non resta sullo splash
+      if (retryCountRef.current >= MAX_BOOTSTRAP_RETRIES) {
+        showToast('Server sovraccarico. Riprova manualmente tra qualche minuto.', 'error')
+        return
+      }
+      retryCountRef.current += 1
+      const parsed = retryAfterRaw ? parseInt(retryAfterRaw, 10) : NaN
+      const wait   = Number.isFinite(parsed) && parsed > 0 ? parsed : 60
+      showToast(`Troppe richieste al server. Nuovo tentativo tra ${wait}s.`, 'warning')
+      retryTimerRef.current = setTimeout(() => {
+        retryTimerRef.current = null
+        void tryRestore()
+      }, wait * 1000)
+    }
+
+    async function tryRestore(): Promise<void> {
+      // Annulla eventuale retry pendente (StrictMode double-invoke / retry concorrente)
+      if (retryTimerRef.current !== null) {
+        clearTimeout(retryTimerRef.current)
+        retryTimerRef.current = null
+      }
       try {
-        // Chiama /auth/refresh — usa l'HttpOnly cookie automaticamente
         const res = await fetch('/api/v1/auth/refresh', {
           method:      'POST',
           credentials: 'include',
         })
+
+        // 429: rate limit — sessione probabilmente ancora valida → retry, NON logout.
+        // fetch raw NON lancia su 429: va intercettato sullo status, non in catch.
+        if (res.status === 429) {
+          scheduleThrottleRetry(res.headers.get('Retry-After'))
+          return
+        }
+        // 5xx: problema server transitorio → non buttare fuori l'utente
+        if (res.status >= 500) {
+          setBootstrap(true)
+          showToast('Errore server temporaneo. Ricarica la pagina.', 'error')
+          return
+        }
+        // 401/altro non-ok: nessuna sessione valida → login (comportamento corretto)
         if (!res.ok) {
           setBootstrap(true)
           return
         }
-        const { accessToken } = await res.json() as { accessToken: string }
-        setAccessToken(accessToken)
 
-        const { user } = await authApi.me()
+        // /refresh restituisce anche user — nessuna chiamata extra a /auth/me
+        const { accessToken, user } = await res.json() as { accessToken: string; user: UserApi }
+        retryCountRef.current = 0
+        setAccessToken(accessToken)
         setAuth(user, accessToken)
       } catch (err) {
+        // fetch raw lancia solo su errore di rete (TypeError) o abort
         if (err instanceof TypeError) console.warn('Bootstrap: network unavailable', err)
         setBootstrap(true)
       }
     }
-    tryRestore()
+
+    void tryRestore()
+
+    // Cleanup: evita retry e setState dopo unmount
+    return () => {
+      if (retryTimerRef.current !== null) {
+        clearTimeout(retryTimerRef.current)
+        retryTimerRef.current = null
+      }
+    }
   }, [setBootstrap, setAuth])
 
   // ── 3. Carica settings quando l'utente è autenticato ─────
