@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.05.23-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.05.30-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -207,6 +207,19 @@ CREATE INDEX IF NOT EXISTS idx_voci_illimitata
 ---
 
 ## Changelog
+
+### 26.05.30
+**Auth / UX resiliente**
+- Fix HTTP 429 su bootstrap: il rate limit non causa più redirect alla login (la sessione resta valida)
+- `/auth/refresh` restituisce anche `user` — eliminata la chiamata extra a `/auth/me` nel bootstrap (1 richiesta invece di 2)
+- `/auth/me` spostato fuori dal rate limit auth stretto (resta sotto il solo global RL 100/60s — ha già un JWT valido)
+- Bootstrap classificato per status: 429 → toast + retry automatico con cap (5 tentativi), 5xx → toast errore; nessun logout silenzioso
+- `fetch` raw del bootstrap: 429/5xx intercettati su `res.status` (raw fetch non lancia su 4xx/5xx) + cleanup timer su unmount
+- `ApiError`: nuovo campo `retryAfterSec` da header `Retry-After` per le chiamate `apiFetch`
+
+**Security**
+- Patch dipendenze non-breaking: `fastify` 5.8.4 → 5.8.5 (Content-Type body schema validation bypass, HIGH), `fast-uri` 3.1.1 → 3.1.2 (path traversal via percent-encoded dot segments, HIGH)
+- Audit produzione (`npm audit --omit=dev`): 7 → 5 vulnerabilità, 2 HIGH eliminate
 
 ### 26.05.23
 **Security**
