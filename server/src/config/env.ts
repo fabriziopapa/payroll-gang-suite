@@ -43,6 +43,10 @@ const envSchema = z.object({
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().default(60000),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().default(5),
   AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().default(300000),
+  // /refresh è chiamato a ogni reload/multi-tab ed è protetto dal cookie
+  // HttpOnly (token 256-bit, brute-force infeasible) — limite generoso separato
+  // dal budget stretto anti-brute-force di /login.
+  REFRESH_RATE_LIMIT_MAX: z.coerce.number().int().default(30),
 
   // TOTP
   TOTP_ISSUER: z.string().default('PayrollGangSuite'),

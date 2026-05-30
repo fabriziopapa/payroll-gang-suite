@@ -213,7 +213,8 @@ CREATE INDEX IF NOT EXISTS idx_voci_illimitata
 - Fix HTTP 429 su bootstrap: il rate limit non causa più redirect alla login (la sessione resta valida)
 - `/auth/refresh` restituisce anche `user` — eliminata la chiamata extra a `/auth/me` nel bootstrap (1 richiesta invece di 2)
 - `/auth/me` spostato fuori dal rate limit auth stretto (resta sotto il solo global RL 100/60s — ha già un JWT valido)
-- Bootstrap classificato per status: 429 → toast + retry automatico con cap (5 tentativi), 5xx → toast errore; nessun logout silenzioso
+- `/auth/refresh`: rate limit dedicato generoso (`REFRESH_RATE_LIMIT_MAX`, default 30/5min) separato dal budget stretto di `/login` — pochi F5 non causano più 429 → logout apparente. È cookie-gated con token 256-bit, il limite stretto non aggiungeva sicurezza
+- Bootstrap classificato per status: 429 → **schermata di avviso dedicata** (mai login) con countdown + retry automatico (cap 5) e bottone "Riprova ora"; 5xx → toast errore; nessun logout silenzioso
 - `fetch` raw del bootstrap: 429/5xx intercettati su `res.status` (raw fetch non lancia su 4xx/5xx) + cleanup timer su unmount
 - `ApiError`: nuovo campo `retryAfterSec` da header `Retry-After` per le chiamate `apiFetch`
 

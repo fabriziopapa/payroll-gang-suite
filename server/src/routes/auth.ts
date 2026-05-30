@@ -164,8 +164,18 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   // ----------------------------------------------------------
   // POST /api/v1/auth/refresh
+  // Limite dedicato generoso (override del RL auth stretto): chiamato a ogni
+  // reload/multi-tab, cookie-gated con token ad alta entropia → 5/5min rompeva
+  // la UX (5 F5 = logout apparente). /login resta a AUTH_RATE_LIMIT_MAX.
   // ----------------------------------------------------------
-  app.post('/refresh', async (request, reply) => {
+  app.post('/refresh', {
+    config: {
+      rateLimit: {
+        max:        env.REFRESH_RATE_LIMIT_MAX,
+        timeWindow: env.AUTH_RATE_LIMIT_WINDOW_MS,
+      },
+    },
+  }, async (request, reply) => {
     const rawToken = request.cookies[REFRESH_COOKIE]
     if (!rawToken) return reply.code(401).send({ error: 'NO_REFRESH_TOKEN' })
 
