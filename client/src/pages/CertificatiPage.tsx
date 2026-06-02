@@ -11,6 +11,7 @@ import {
 } from '../api/endpoints'
 import { downloadDocx } from '../utils/docxDownloader'
 import { showToast } from '../components/ToastManager'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ApiError } from '../api/client'
 
 const todayIt = (): string => new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -46,6 +47,7 @@ export default function CertificatiPage() {
   const [lista, setLista]   = useState<CertificatoSummaryApi[]>([])
   const [annoFiltro, setAnnoFiltro] = useState(annoCorrente)
   const [search, setSearch] = useState('')
+  const [toDelete, setToDelete] = useState<CertificatoSummaryApi | null>(null)
 
   // ── carica template attivi + lista ─────────────────────────
   useEffect(() => {
@@ -134,6 +136,20 @@ export default function CertificatiPage() {
       downloadDocx(docx.base64, docx.filename)
     } catch {
       showToast('Rigenerazione fallita', 'error')
+    }
+  }
+
+  async function confermaElimina() {
+    if (!toDelete) return
+    try {
+      await certificatiApi.delete(toDelete.id)
+      showToast(`Certificato ${toDelete.protocollo} eliminato`, 'success')
+      refreshLista()
+    } catch (err) {
+      const code = err instanceof ApiError ? err.code : 'ERRORE'
+      showToast(`Eliminazione fallita: ${code}`, 'error')
+    } finally {
+      setToDelete(null)
     }
   }
 
@@ -301,9 +317,13 @@ export default function CertificatiPage() {
                     <td className="px-4 py-2 text-slate-200">{c.nominativo ?? '—'}</td>
                     <td className="px-4 py-2 text-slate-400">{c.periodo ?? '—'}</td>
                     <td className="px-4 py-2 text-slate-400">{c.siglaOperatore}</td>
-                    <td className="px-4 py-2 text-right">
+                    <td className="px-4 py-2 text-right whitespace-nowrap">
                       <button onClick={() => handleRigenera(c.id)}
                         className="text-xs text-indigo-400 hover:text-indigo-300">Scarica DOCX</button>
+                      {user?.isAdmin && (
+                        <button onClick={() => setToDelete(c)}
+                          className="ml-3 text-xs text-red-400 hover:text-red-300">Elimina</button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -312,6 +332,18 @@ export default function CertificatiPage() {
           )}
         </div>
       </div>
+
+      {toDelete && (
+        <ConfirmDialog
+          open
+          danger
+          title="Elimina certificato"
+          message={`Eliminare definitivamente il certificato ${toDelete.protocollo} (${toDelete.nominativo ?? '—'})? Il progressivo dell'anno viene risincronizzato: se elimini gli ultimi emessi, il contatore scala di conseguenza. Operazione irreversibile.`}
+          confirmLabel="Elimina"
+          onConfirm={confermaElimina}
+          onCancel={() => setToDelete(null)}
+        />
+      )}
     </div>
   )
 }

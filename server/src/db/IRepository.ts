@@ -403,6 +403,13 @@ export interface ICertificatiRepository {
   findById(id: string): Promise<CertificatoRow | null>
   /** Lista per anno (default: anno corrente) con ricerca opzionale matricola/nominativo. */
   findAll(anno?: number, search?: string): Promise<CertificatoSummaryRow[]>
+  /**
+   * Elimina un certificato e RISINCRONIZZA il progressivo dell'anno a
+   * MAX(progressivo) rimanente (o 0). Cancellando gli ultimi N il contatore
+   * scala di N; cancellando in mezzo non si riusano numeri (evita collisione
+   * sull'unique anno,progressivo). Ritorna { protocollo, anno } o null se assente.
+   */
+  delete(id: string): Promise<{ protocollo: string; anno: number } | null>
 }
 
 // ------------------------------------------------------------

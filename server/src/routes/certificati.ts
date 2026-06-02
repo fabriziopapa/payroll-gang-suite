@@ -15,6 +15,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requireAdmin } from '../middleware/authenticate.js'
 import { PgCertificatiRepository } from '../db/repositories/PgCertificatiRepository.js'
 import { PgTemplatiCertificatoRepository } from '../db/repositories/PgTemplatiCertificatoRepository.js'
 import { PgAuditRepository } from '../db/repositories/PgAuditRepository.js'
@@ -229,5 +230,25 @@ export async function certificatiRoutes(app: FastifyInstance): Promise<void> {
     })
 
     return reply.send({ filename, base64: docx.toString('base64') })
+  })
+
+  // ── DELETE /:id — elimina definitivamente + risincronizza progressivo ──
+  // Solo admin. Richiede header X-Confirm-Delete: true (op. distruttiva).
+  app.delete('/:id', { preHandler: [app.authenticate, requireAdmin] }, async (req, reply) => {
+    if (req.headers['x-confirm-delete'] !== 'true') {
+      return reply.code(400).send({ error: 'MISSING_CONFIRM_HEADER' })
+    }
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params)
+    const del = await repo.delete(id)
+    if (!del) return reply.code(404).send({ error: 'CERTIFICATO_NON_TROVATO' })
+
+    await audit.log({
+      userId: req.user?.id, azione: 'CERTIFICATO_ELIMINATO',
+      entita: 'certificato', entitaId: id,
+      dettagli: { protocollo: del.protocollo, anno: del.anno },
+      ip: req.ip, userAgent: req.headers['user-agent'],
+    })
+
+    return reply.code(204).send()
   })
 }

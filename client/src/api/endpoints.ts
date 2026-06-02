@@ -417,6 +417,14 @@ export const certificatiApi = {
   /** Rigenera il DOCX da datiJson (download). */
   docx: (id: string) =>
     apiFetch<DocxPayload>(`/certificati/${id}/docx`),
+
+  /** Elimina definitivamente un certificato (admin). Il progressivo viene
+   *  risincronizzato a MAX rimanente lato server. */
+  delete: (id: string) =>
+    apiFetch<void>(`/certificati/${id}`, {
+      method:  'DELETE',
+      headers: { 'X-Confirm-Delete': 'true' },
+    }),
 }
 
 export const templatiCertificatoApi = {

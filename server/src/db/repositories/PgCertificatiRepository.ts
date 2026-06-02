@@ -58,6 +58,30 @@ export class PgCertificatiRepository implements ICertificatiRepository {
     return (await this.findById(id))!
   }
 
+  async delete(id: string): Promise<{ protocollo: string; anno: number } | null> {
+    return this.db.transaction(async (tx) => {
+      const [del] = await tx
+        .delete(schema.certificati)
+        .where(eq(schema.certificati.id, id))
+        .returning({ protocollo: schema.certificati.protocollo, anno: schema.certificati.anno })
+      if (!del) return null
+
+      // Risincronizza il contatore dell'anno = MAX(progressivo) rimanente (o 0)
+      const [m] = await tx
+        .select({ max: sql<number>`coalesce(max(${schema.certificati.progressivo}), 0)` })
+        .from(schema.certificati)
+        .where(eq(schema.certificati.anno, del.anno))
+      const ultimo = Number(m?.max ?? 0)
+
+      await tx
+        .update(schema.certificatoProgressivi)
+        .set({ ultimo })
+        .where(eq(schema.certificatoProgressivi.anno, del.anno))
+
+      return del
+    })
+  }
+
   async findById(id: string): Promise<CertificatoRow | null> {
     const [row] = await this.db
       .select({ ...SEL, createdByUsername: schema.users.username })

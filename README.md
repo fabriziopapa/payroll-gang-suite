@@ -252,6 +252,7 @@ CREATE INDEX IF NOT EXISTS idx_voci_illimitata
 
 **Hotfix**
 - Rigenerazione DOCX (`GET /certificati/:id/docx`) restituiva 500 `parsed.voci_teoriche is not iterable`: il transform `postgres.camel` camelizzava ricorsivamente le chiavi del JSONB in lettura (`voci_teoriche`→`vociTeoriche`). Fix: `PgCertificatiRepository` legge `dati_json::text` (tipo text, ignorato dal transform) + `JSON.parse` manuale → chiavi snake_case preservate. Sistema record esistenti e futuri senza rigenerazione.
+- Eliminazione certificati: `DELETE /certificati/:id` (admin, header `X-Confirm-Delete`, audit `CERTIFICATO_ELIMINATO`). Rimozione definitiva + **risincronizzazione del progressivo** dell'anno a `MAX(progressivo)` rimanente (o 0) in transazione: cancellando gli ultimi N il contatore scala di N; cancellando in mezzo non si riusano numeri (no collisione su unique `anno,progressivo`). UI: bottone "Elimina" per riga (solo admin) + `ConfirmDialog`.
 
 ### 26.05.30
 **Auth / UX resiliente**
