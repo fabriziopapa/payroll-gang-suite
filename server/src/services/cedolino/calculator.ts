@@ -17,9 +17,12 @@ import type {
 // HALF_UP coerente con ROUND_HALF_UP di Python Decimal
 Decimal.set({ rounding: Decimal.ROUND_HALF_UP })
 
-/** Arrotonda a 2 decimali HALF_UP e restituisce number (o null). */
+/** Arrotonda a 2 decimali HALF_UP e restituisce number (o null).
+ *  SEC: rifiuta valori non finiti (NaN/Infinity) — un PDF/JSON malevolo non
+ *  deve produrre silenziosamente importi non validi su un documento ufficiale. */
 function money(d: Decimal | null | undefined): number | null {
   if (d === null || d === undefined) return null
+  if (!d.isFinite()) return null
   return d.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber()
 }
 

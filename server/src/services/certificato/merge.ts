@@ -8,6 +8,23 @@
 import type { CedolinoParsed } from '../cedolino/types.js'
 import type { CertificatoTemplate, CertificatoMeta } from './types.js'
 
+// SEC: chiavi vietate nella risoluzione path — evita traversal sulla catena
+// prototype (__proto__/prototype/constructor) da segnaposto o `src` malevoli.
+const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor'])
+
+/** Risolve un path puntato (es. "anagrafica.cognome") con blocklist prototype
+ *  e accesso solo a proprietà proprie (own). Ritorna undefined su chiave non valida. */
+export function getByPath(root: unknown, path: string): unknown {
+  let cur: unknown = root
+  for (const k of path.split('.')) {
+    if (cur == null || typeof cur !== 'object') return undefined
+    if (FORBIDDEN_KEYS.has(k)) return undefined
+    if (!Object.prototype.hasOwnProperty.call(cur, k)) return undefined
+    cur = (cur as Record<string, unknown>)[k]
+  }
+  return cur
+}
+
 /** Sesso dedotto dal codice fiscale: giorno di nascita > 40 ⇒ femmina. */
 export function sessoFromCF(cf: string | null | undefined): 'M' | 'F' {
   if (!cf || cf.length < 11) return 'M'
@@ -22,12 +39,9 @@ export function sessoFromCF(cf: string | null | undefined): 'M' | 'F' {
 export function resolve(text: string, data: Record<string, unknown>, sesso: 'M' | 'F'): string {
   // 1) genere: [[m|f]]
   let out = text.replace(/\[\[([^|\]]*)\|([^\]]*)\]\]/g, (_, m, f) => (sesso === 'F' ? f : m))
-  // 2) segnaposto: {{path}}
+  // 2) segnaposto: {{path}} — risolto con blocklist prototype (getByPath)
   out = out.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key: string) => {
-    const v = key.split('.').reduce<unknown>(
-      (o, k) => (o == null ? o : (o as Record<string, unknown>)[k]),
-      data,
-    )
+    const v = getByPath(data, key)
     return v == null ? '' : String(v)
   })
   return out

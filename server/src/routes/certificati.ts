@@ -1,5 +1,16 @@
 // ============================================================
 // PAYROLL GANG SUITE — Routes Certificati (/api/v1/certificati)
+//
+// MODELLO DI ACCESSO (deciso esplicitamente): REGISTRO CONDIVISO D'UFFICIO.
+// La lista e il download (GET /:id/docx) NON sono filtrati per createdBy:
+// ogni operatore autenticato vede/scarica tutti i certificati. È intenzionale —
+// gli account sono provisioned dall'admin (no signup pubblico), il protocollo
+// è progressivo d'ufficio, e ogni download è auditato (CERTIFICATO_SCARICATO).
+// NON è un IDOR: non scopare per utente è una scelta, non una svista.
+//
+// DATI A RIPOSO (deciso esplicitamente): dati_json (CF + retribuzioni/ritenute)
+// è salvato in CHIARO nel JSONB, coerente con come l'app già tratta codFis nelle
+// anagrafiche. Affidabilità sulla cifratura del volume DB lato VPS.
 // ============================================================
 
 import type { FastifyInstance } from 'fastify'
@@ -19,6 +30,63 @@ interface CertificatoDatiJson {
   parsed: CedolinoParsed
   meta: { data_rilascio: string; sesso?: 'M' | 'F' }
 }
+
+// SEC: schema STRETTO per il `parsed` ricevuto da POST / — l'operatore può
+// editare l'anteprima, quindi il client rispedisce l'oggetto, MA va validato:
+// numeri finiti, lunghezze stringa limitate, array limitati, chiavi note
+// (lo strip di zod elimina chiavi extra incl. __proto__). Sostituisce il
+// vecchio z.record(z.unknown()) che lasciava passare dati arbitrari.
+const numFinite = z.number().finite()
+const cedolinoParsedSchema = z.object({
+  anagrafica: z.object({
+    periodo_retribuzione: z.string().max(100).nullable(),
+    matricola:            z.string().max(20).nullable(),
+    cognome:              z.string().max(100).nullable(),
+    nome:                 z.string().max(100).nullable(),
+    codice_fiscale:       z.string().max(32).nullable(),
+    data_nascita:         z.string().max(20).nullable(),
+    luogo_nascita:        z.string().max(120).nullable(),
+    inquadramento:        z.string().max(200).nullable(),
+    area_profilo:         z.string().max(200).nullable(),
+    ruolo:                z.string().max(40).nullable(),
+    inizio_rapporto:      z.string().max(20).nullable(),
+    anzianita_servizio:   z.string().max(120).nullable(),
+    afferenza:            z.string().max(200).nullable(),
+    sede:                 z.string().max(200).nullable(),
+  }),
+  voci_teoriche: z.array(z.object({
+    descrizione: z.string().max(200),
+    valore:      numFinite.nullable(),
+    totale:      z.boolean(),
+  })).max(200),
+  voci_dettaglio: z.array(z.object({
+    sezione:     z.string().max(40).nullable(),
+    descrizione: z.string().max(200),
+    valore:      numFinite,
+    numeri_riga: z.array(numFinite).max(50),
+    arretrato:   z.boolean(),
+    conguaglio:  z.boolean(),
+    scadenza:    z.string().max(20).nullable(),
+    decorrenza:  z.string().max(20).nullable(),
+  })).max(500),
+  riepilogo_cedolino: z.record(z.string().max(40), numFinite.nullable()),
+  certificato: z.object({
+    lordo_teorico:          numFinite.nullable(),
+    ritenute_fiscali:       numFinite.nullable(),
+    ritenute_previdenziali: numFinite.nullable(),
+    netto_ritenute_legge:   numFinite.nullable(),
+    extraerariali_totale:   numFinite.nullable(),
+    extraerariali_righe: z.array(z.object({
+      descrizione: z.string().max(200),
+      decorrenza:  z.string().max(20).nullable(),
+      scadenza:    z.string().max(20).nullable(),
+      valore:      numFinite.nullable(),
+    })).max(200),
+    netto_a_pagare: numFinite.nullable(),
+    quinto:         numFinite.nullable(),
+    settimo:        numFinite.nullable(),
+  }),
+})
 
 /** Sanifica un segmento di filename (accenti/illegali → underscore). */
 function safeName(s: string): string {
@@ -60,7 +128,7 @@ export async function certificatiRoutes(app: FastifyInstance): Promise<void> {
   // ── POST / — crea record (protocollo atomico) + genera DOCX ────────────
   app.post('/', { preHandler: [app.authenticate] }, async (req, reply) => {
     const body = z.object({
-      parsed:        z.record(z.string(), z.unknown()),
+      parsed:        cedolinoParsedSchema,
       templateId:    z.string().uuid(),
       siglaOperatore: z.string().min(1).max(20),
       dirigente:     z.string().max(200).optional(),
@@ -69,6 +137,8 @@ export async function certificatiRoutes(app: FastifyInstance): Promise<void> {
       anno:          z.number().int().min(2000).max(2100).optional(),
     }).parse(req.body)
 
+    // post-validazione: la shape è ora sicura (numeri finiti, stringhe limitate,
+    // chiavi note). Il cast è solo un ponte di tipo verso il union SezioneCedolino.
     const parsed = body.parsed as unknown as CedolinoParsed
     const tplRow = await templates.findById(body.templateId)
     if (!tplRow) return reply.code(404).send({ error: 'TEMPLATE_NON_TROVATO' })

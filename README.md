@@ -231,6 +231,25 @@ CREATE INDEX IF NOT EXISTS idx_voci_illimitata
 
 ## Changelog
 
+### 26.06.02
+**Feature — Sezione Certificati**
+- Nuova sezione **Certificati giuridico-stipendiali**: upload cedolino Cineca (PDF) → parsing dinamico per-sezione → ricalcolo per categoria (decimal.js, ROUND_HALF_UP) → generazione DOCX con stampa unione (segnaposto `{{path}}`, tag genere `[[m|f]]` dedotto dal CF con override manuale)
+- Parser cedolino in TypeScript (`pdfjs-dist` legacy build, ricostruzione righe per coordinate) — verificato al centesimo sul cedolino reale (fiscali 326,59 · previdenziali 247,68 · netto di legge 1.647,11 · netto a pagare 1.243,52 · quinto 329,42 · settimo 235,30)
+- Template-come-dato con CRUD (`templati_certificato`), regole di matching voci configurabili (no hardcoding)
+- Protocollo progressivo `AAAA/NNN` **atomico** per anno solare (UPSERT in transazione su `certificato_progressivi`)
+- API: `POST /certificati/parse`, `POST /certificati`, `GET /certificati`, `GET /certificati/:id/docx`, CRUD `/templati-certificato` (scrittura admin) — tutte JWT, audit log integrato (`CERTIFICATO_CREATO/SCARICATO`, `TEMPLATE_*`)
+- Migrazione `0005_certificati.sql` (3 tabelle + seed template default)
+- Nuove dipendenze server: `decimal.js`, `pdfjs-dist`, `docx`
+
+**Security — hardening input non fidato (PDF caricato dall'utente)**
+- **ReDoS eliminato**: regex importi `NUM` con quantificatore limitato `{0,8}` invece di `*` — backtracking quadratico azzerato (riga 100k: ~60s → ~21ms), match importi validi invariato
+- **Anti-DoS estrazione PDF**: cap su pagine (40), frammenti testo (60k), righe/pagina (4k), lunghezza riga (2k); `pdfjs` con `useSystemFonts:false`, `disableFontFace:true`, `isEvalSupported:false`, `useWorkerFetch:false`
+- **Prototype-chain traversal bloccato**: risoluzione segnaposto/`src` via `getByPath()` con blocklist `__proto__`/`prototype`/`constructor` + accesso solo a proprietà proprie (segnaposto `{{__proto__…}}` → stringa vuota)
+- **Boundary JSON validato**: `POST /certificati` valida `parsed` con schema Zod stretto (numeri finiti, lunghezze stringa e array limitate, strip chiavi extra) invece di `z.unknown()` — niente più dati cedolino forgiabili o non-finiti nel DOCX/DB
+- **Privacy (opzione A)**: il parser NON estrae IBAN/banca né i codici fiscali del nucleo familiare
+- Upload PDF: validazione **magic bytes** `%PDF-` (non falsificabile come il Content-Type) + cap dimensione 8 MB, mai scritto su disco
+- Sanitizzazione control-char su tutte le celle del DOCX
+
 ### 26.05.30
 **Auth / UX resiliente**
 - Fix HTTP 429 su bootstrap: il rate limit non causa più redirect alla login (la sessione resta valida)

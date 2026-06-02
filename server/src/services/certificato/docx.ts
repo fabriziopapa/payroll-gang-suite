@@ -10,7 +10,7 @@ import {
 } from 'docx'
 import type { CedolinoParsed } from '../cedolino/types.js'
 import type { CertificatoTemplate, CertificatoMeta } from './types.js'
-import { prepareData, resolve, eur } from './merge.js'
+import { prepareData, resolve, eur, getByPath } from './merge.js'
 
 const FONT = 'Times New Roman'
 
@@ -80,10 +80,9 @@ export async function buildCertificatoDocx(
 
   // --- tabella emolumenti ---
   const W = 9360, c0 = 5400, c1 = 1080, c2 = 2880
-  const resolveSrc = { teo: ctx.teo, cert: parsed.certificato } as unknown as Record<string, Record<string, unknown>>
+  const resolveSrc = { teo: ctx.teo, cert: parsed.certificato }
   const emolRows = tpl.tabellaEmolumenti.map(r => {
-    const val = r.src.split('.').reduce<unknown>(
-      (o, k) => (o == null ? o : (o as Record<string, unknown>)[k]), resolveSrc)
+    const val = getByPath(resolveSrc, r.src) // SEC: blocklist prototype
     return new TableRow({
       children: [
         cell(r.voce, c0, { bold: r.bold }),
@@ -109,9 +108,9 @@ export async function buildCertificatoDocx(
   const exRows = ctx.extra.map(e => new TableRow({
     children: [
       cell(clean(e.voce), ec0),
-      cell(e.decorrenza, ec1, { align: AlignmentType.CENTER }),
-      cell(e.scadenza, ec2, { align: AlignmentType.CENTER }),
-      cell(e.importo, ec3, { align: AlignmentType.RIGHT }),
+      cell(clean(e.decorrenza), ec1, { align: AlignmentType.CENTER }),
+      cell(clean(e.scadenza), ec2, { align: AlignmentType.CENTER }),
+      cell(clean(e.importo), ec3, { align: AlignmentType.RIGHT }),
     ],
   }))
   children.push(new Table({ width: { size: W, type: WidthType.DXA }, columnWidths: [ec0, ec1, ec2, ec3], rows: [exHeader, ...exRows] }))

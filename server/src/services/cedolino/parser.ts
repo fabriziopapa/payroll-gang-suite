@@ -20,8 +20,17 @@ import type {
   SezioneCedolino,
 } from './types.js'
 
-// Numero italiano: 1.234,56 (con eventuale segno meno)
-const NUM = /-?\d{1,3}(?:\.\d{3})*,\d{2}/g
+// Numero italiano: 1.234,56 (con eventuale segno meno).
+// SEC: quantificatore LIMITATo {0,8} (non `*`) per evitare backtracking
+// quadratico (ReDoS) su righe lunghe di un PDF malevolo. {0,8} copre fino a
+// 10^24, ben oltre qualsiasi importo reale, ma mantiene il match lineare.
+const NUM = /-?\d{1,3}(?:\.\d{3}){0,8},\d{2}/g
+
+// SEC: limiti anti-DoS sull'estrazione testo da PDF non fidato
+const MAX_PAGES     = 40
+const MAX_ITEMS     = 60_000    // frammenti testo totali (cedolino reale ~1-2k)
+const MAX_LINES     = 4_000     // righe per pagina (anti-DoS su rows.find)
+const MAX_LINE_LEN  = 2_000     // troncamento riga (oltre = sospetta)
 
 const SECTION_ANCHORS: Array<[string, SezioneCedolino]> = [
   ['Retribuzioni',        'retribuzioni'],
@@ -71,10 +80,13 @@ export async function extractLines(buffer: Buffer): Promise<string[]> {
   // Import dinamico del legacy build (compatibile Node, niente DOM/worker)
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
   const data = new Uint8Array(buffer)
-  // Opzioni anti-DOM per Node; alcune chiavi non sono nei tipi v6 → cast esplicito.
+  // Opzioni anti-DOM/anti-DoS per Node; alcune chiavi non sono nei tipi v6 → cast.
+  // SEC: useSystemFonts:false + disableFontFace:true evitano accesso al
+  // filesystem font dell'host e riducono la superficie del parser font.
   const loadingTask = pdfjs.getDocument({
     data,
-    useSystemFonts: true,
+    useSystemFonts: false,
+    disableFontFace: true,
     isEvalSupported: false,
     useWorkerFetch: false,
   } as Parameters<typeof pdfjs.getDocument>[0])
@@ -82,26 +94,34 @@ export async function extractLines(buffer: Buffer): Promise<string[]> {
 
   const lines: string[] = []
   const Y_TOL = 2 // px: frammenti entro 2px sono sulla stessa riga
+  let itemCount = 0
 
   try {
-    for (let p = 1; p <= doc.numPages; p++) {
+    // SEC: cap sul numero di pagine processate
+    const numPages = Math.min(doc.numPages, MAX_PAGES)
+    for (let p = 1; p <= numPages; p++) {
+      if (itemCount >= MAX_ITEMS) break
       const page = await doc.getPage(p)
       const tc = await page.getTextContent()
 
-      // raccogli {x, y, str}
-      const items = tc.items
-        .filter((it: any) => typeof it.str === 'string')
-        .map((it: any) => ({
-          x: it.transform[4] as number,
-          y: it.transform[5] as number,
-          str: it.str as string,
-        }))
+      // raccogli {x, y, str} con cap sui frammenti totali (anti-DoS)
+      const items: Array<{ x: number; y: number; str: string }> = []
+      for (const it of tc.items as any[]) {
+        if (typeof it.str !== 'string') continue
+        if (++itemCount > MAX_ITEMS) break // SEC: cap frammenti totali
+        items.push({ x: it.transform[4] as number, y: it.transform[5] as number, str: it.str as string })
+      }
 
-      // raggruppa per Y (riga)
+      // raggruppa per Y (riga). Algoritmo originale verificato al centesimo:
+      // l'ancora è la Y del PRIMO frammento della riga, in ordine documento.
+      // SEC: il numero di righe è limitato da MAX_LINES → rows.find resta O(cap).
       const rows: Array<{ y: number; parts: Array<{ x: number; str: string }> }> = []
       for (const it of items) {
         let row = rows.find(r => Math.abs(r.y - it.y) <= Y_TOL)
-        if (!row) { row = { y: it.y, parts: [] }; rows.push(row) }
+        if (!row) {
+          if (rows.length >= MAX_LINES) continue // SEC: cap righe per pagina
+          row = { y: it.y, parts: [] }; rows.push(row)
+        }
         row.parts.push({ x: it.x, str: it.str })
       }
 
@@ -109,7 +129,8 @@ export async function extractLines(buffer: Buffer): Promise<string[]> {
       rows.sort((a, b) => b.y - a.y)
       for (const r of rows) {
         r.parts.sort((a, b) => a.x - b.x)
-        const text = r.parts.map(pt => pt.str).join(' ').replace(/\s+/g, ' ').trim()
+        let text = r.parts.map(pt => pt.str).join(' ').replace(/\s+/g, ' ').trim()
+        if (text.length > MAX_LINE_LEN) text = text.slice(0, MAX_LINE_LEN) // SEC
         if (text) lines.push(text)
       }
     }
