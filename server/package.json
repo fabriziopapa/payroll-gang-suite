@@ -1,6 +1,6 @@
 {
   "name": "@payroll-gang/server",
-  "version": "26.05.30",
+  "version": "26.06.02",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,8 @@
     "migrate": "drizzle-kit migrate",
     "seed": "tsx --env-file=../.env src/db/seed.ts",
     "regen-qr": "tsx --env-file=../.env src/db/regen-qr.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.0",
@@ -18,11 +19,14 @@
     "@fastify/helmet": "^13.0.0",
     "@fastify/rate-limit": "^10.0.0",
     "argon2": "^0.41.0",
+    "decimal.js": "^10.6.0",
+    "docx": "^9.7.1",
     "drizzle-orm": "^0.40.0",
     "fastify": "^5.0.0",
     "jsonwebtoken": "^9.0.0",
     "nodemailer": "^6.10.1",
     "otplib": "^12.0.1",
+    "pdfjs-dist": "^6.0.227",
     "postgres": "^3.4.0",
     "qrcode": "^1.5.3",
     "xlsx": "^0.18.5",

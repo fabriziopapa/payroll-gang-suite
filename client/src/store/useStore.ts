@@ -29,6 +29,8 @@ export type PageId =
   | 'capitoli'
   | 'impostazioni'
   | 'utenti'
+  | 'certificati'
+  | 'certificati-template'
 
 /** Struttura salvata nel campo `dati` JSONB della bozza */
 export interface BozzaDati {

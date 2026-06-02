@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.05.30-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.06.02-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -78,6 +78,29 @@ payroll-gang-suite/
 - **Export TXT Ruoli** — file per ruolo con deduplicazione matricole
 - **Comunicazioni** — generazione email con allegato PDF nominale
 - **Gestione utenti** — admin panel, TOTP onboarding, ruoli admin/base, lockout anti-brute-force
+- **Certificati giuridico-stipendiali** — upload cedolino Cineca (PDF) → parsing dinamico per-sezione → ricalcolo per categoria (verificato al centesimo) → generazione DOCX con stampa unione (segnaposto `{{path}}`, tag genere `[[m|f]]`), protocollo progressivo atomico per anno, template editabili (CRUD)
+
+---
+
+## Sezione Certificati
+
+Genera certificati a partire dai cedolini Cineca, replicando le regole di calcolo dell'ufficio.
+
+- **Parsing dinamico** (`server/src/services/cedolino/parser.ts`) — estrae testo dal PDF con `pdfjs-dist` (build legacy Node) ricostruendo le righe per coordinate, poi classifica ogni voce per sezione (`Retribuzioni`, `Accessorie`, `Contributi`, `Ritenute fiscali in/da`, `Ritenute sindacali`, `Altre Ritenute`). Nessun elenco fisso di voci: le voci non previste entrano automaticamente nella categoria corretta.
+- **Ricalcolo** (`calculator.ts`) — aritmetica `decimal.js` (ROUND_HALF_UP, 2 decimali): ritenute fiscali/previdenziali, netto di legge, extra-erariali, netto a pagare, quinto/settimo. Banco di prova al centesimo nel test.
+- **Privacy** — il parser NON estrae IBAN/banca né i codici fiscali del nucleo familiare (non necessari al certificato).
+- **Stampa unione + DOCX** (`server/src/services/certificato/`) — template-come-dato (`templati_certificato`), segnaposto e tag genere dedotto dal CF (override manuale da UI), generazione `docx` server-side.
+- **Protocollo atomico** — `AAAA/NNN` assegnato in transazione via `certificato_progressivi` (UPSERT `ultimo+1`), nessuna collisione in concorrenza.
+- **Audit** — `CERTIFICATO_CREATO/SCARICATO`, `TEMPLATE_*` nell'audit log append-only.
+
+**API** (tutte sotto `/api/v1`, JWT): `POST /certificati/parse` (PDF base64, validazione magic bytes `%PDF`, mai su disco), `POST /certificati` (crea + DOCX), `GET /certificati`, `GET /certificati/:id/docx`, CRUD `/templati-certificato` (scrittura admin).
+
+**Migrazione**: `server/src/db/migrations/0005_certificati.sql` (3 tabelle + seed template di default). Applicare con `psql "$DATABASE_URL" -f server/src/db/migrations/0005_certificati.sql`.
+
+**Test parser**: il test end-to-end è gated da env (il cedolino contiene PII e non è committato):
+```bash
+CEDOLINO_SAMPLE="/percorso/Cedolino_....pdf" npm run test --workspace=server
+```
 
 ---
 

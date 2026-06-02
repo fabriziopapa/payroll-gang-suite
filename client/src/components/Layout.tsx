@@ -74,6 +74,16 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    id:    'certificati',
+    label: 'Certificati',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M9 12h6m-6 4h6m2 5l-3-2-3 2V5a2 2 0 012-2h2a2 2 0 012 2v16z" />
+      </svg>
+    ),
+  },
+  {
     id:    'impostazioni',
     label: 'Impostazioni',
     icon: (
@@ -315,7 +325,8 @@ export default function Layout({ children }: LayoutProps) {
               </div>
             ) : (
               <h1 className="text-white font-semibold text-sm">
-                {NAV_ITEMS.find(n => n.id === currentPage)?.label ?? currentPage}
+                {NAV_ITEMS.find(n => n.id === currentPage)?.label
+                  ?? (currentPage === 'certificati-template' ? 'Certificati · Template' : currentPage)}
               </h1>
             )}
           </div>

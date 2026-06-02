@@ -35,6 +35,8 @@ import { vociRoutes }         from './routes/voci.js'
 import { bozzeRoutes }        from './routes/bozze.js'
 import { settingsRoutes }     from './routes/settings.js'
 import { capitoliRoutes }     from './routes/capitoli.js'
+import { certificatiRoutes }  from './routes/certificati.js'
+import { templatiCertificatoRoutes } from './routes/templatiCertificato.js'
 
 // ============================================================
 
@@ -144,6 +146,8 @@ await app.register(vociRoutes,        { prefix: '/api/v1/voci' })
 await app.register(capitoliRoutes,    { prefix: '/api/v1/capitoli' })
 await app.register(bozzeRoutes,       { prefix: '/api/v1/bozze' })
 await app.register(settingsRoutes,    { prefix: '/api/v1/settings' })
+await app.register(certificatiRoutes, { prefix: '/api/v1/certificati' })
+await app.register(templatiCertificatoRoutes, { prefix: '/api/v1/templati-certificato' })
 
 // Health check (no auth) — SEC-M07: solo status minimale, nessuna info di versione/sistema
 app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))

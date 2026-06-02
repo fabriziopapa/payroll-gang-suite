@@ -29,6 +29,8 @@ import ImpostazioniPage   from './pages/ImpostazioniPage'
 import GestioneUtentiPage from './pages/GestioneUtentiPage'
 import ViewerPage         from './pages/ViewerPage'
 import RicercaPage        from './pages/RicercaPage'
+import CertificatiPage    from './pages/CertificatiPage'
+import CertificatiTemplatePage from './pages/CertificatiTemplatePage'
 
 // Stato throttling bootstrap: null = nessun throttle in corso
 interface ThrottleState {
@@ -242,6 +244,8 @@ export default function App() {
       {currentPage === 'utenti'       && <GestioneUtentiPage />}
       {currentPage === 'viewer'       && <ViewerPage />}
       {currentPage === 'ricerca'      && <RicercaPage />}
+      {currentPage === 'certificati'  && <CertificatiPage />}
+      {currentPage === 'certificati-template' && <CertificatiTemplatePage />}
     </Layout>
   )
 }

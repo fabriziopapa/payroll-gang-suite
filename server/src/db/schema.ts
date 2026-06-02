@@ -260,6 +260,66 @@ export const anagImportLog = pgTable('anag_import_log', {
 ])
 
 // ------------------------------------------------------------
+// TEMPLATI CERTIFICATO (stampa unione — template-come-dato)
+// strutturaJson: blocchi testo statico + segnaposto {{path}} + tag [[m|f]]
+// + righe tabella emolumenti + regole matching voci teoriche (configurabili)
+// ------------------------------------------------------------
+
+export const templatiCertificato = pgTable('templati_certificato', {
+  id:            uuid('id').primaryKey().defaultRandom(),
+  nome:          varchar('nome', { length: 200 }).notNull(),
+  /** Struttura completa del template (bollo, corpo, tabella, firma, matching) */
+  strutturaJson: jsonb('struttura_json').notNull(),
+  attivo:        boolean('attivo').notNull().default(true),
+  createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+// ------------------------------------------------------------
+// PROGRESSIVO CERTIFICATI per anno solare (assegnazione atomica)
+// UPDATE ... SET ultimo = ultimo + 1 RETURNING ultimo  (dentro transazione)
+// evita collisioni in concorrenza meglio di MAX(progressivo)+1
+// ------------------------------------------------------------
+
+export const certificatoProgressivi = pgTable('certificato_progressivi', {
+  anno:   integer('anno').primaryKey(),
+  ultimo: integer('ultimo').notNull().default(0),
+})
+
+// ------------------------------------------------------------
+// CERTIFICATI giuridico-stipendiali generati
+// protocollo: calcolato in app (AAAA/NNN) — Drizzle non supporta GENERATED
+// datiJson: output parser cedolino (audit + rigenerazione DOCX senza ri-parsing)
+// NB: per scelta privacy (opzione A) datiJson NON contiene iban né CF nucleo
+// ------------------------------------------------------------
+
+export const certificati = pgTable('certificati', {
+  id:             uuid('id').primaryKey().defaultRandom(),
+  anno:           integer('anno').notNull(),
+  progressivo:    integer('progressivo').notNull(),
+  /** Derivato AAAA/NNN (zero-pad 3) — calcolato in app al momento dell'insert */
+  protocollo:     varchar('protocollo', { length: 20 }).notNull(),
+  matricola:      varchar('matricola', { length: 10 }),
+  cf:             varchar('cf', { length: 16 }),
+  /** Periodo retribuzione del cedolino, es. "MAGGIO 2026" */
+  periodo:        varchar('periodo', { length: 50 }),
+  /** Nominativo per ricerca rapida, es. "PINO Vincenzo" */
+  nominativo:     varchar('nominativo', { length: 200 }),
+  siglaOperatore: varchar('sigla_operatore', { length: 20 }).notNull(),
+  dirigente:      varchar('dirigente', { length: 200 }),
+  templateId:     uuid('template_id').references(() => templatiCertificato.id, { onDelete: 'set null' }),
+  /** Output del parser (anagrafica senza PII bancaria, voci, certificato calcolato) */
+  datiJson:       jsonb('dati_json').notNull(),
+  createdBy:      uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:      timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('idx_certificati_anno_progressivo').on(t.anno, t.progressivo),
+  index('idx_certificati_anno').on(t.anno),
+  index('idx_certificati_matricola').on(t.matricola),
+  index('idx_certificati_created_by').on(t.createdBy),
+])
+
+// ------------------------------------------------------------
 // TIPI INFERITI (usati nelle repository)
 // ------------------------------------------------------------
 
@@ -278,3 +338,7 @@ export type NewCapitoloAnag   = typeof capitoliAnag.$inferInsert
 export type Bozza             = typeof bozze.$inferSelect
 export type NewBozza          = typeof bozze.$inferInsert
 export type AuditEntry        = typeof auditLog.$inferSelect
+export type TemplateCertificato    = typeof templatiCertificato.$inferSelect
+export type NewTemplateCertificato = typeof templatiCertificato.$inferInsert
+export type Certificato            = typeof certificati.$inferSelect
+export type NewCertificato         = typeof certificati.$inferInsert

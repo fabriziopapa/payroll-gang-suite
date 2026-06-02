@@ -300,6 +300,148 @@ export const capitoliApi = {
     apiFetch<{ standard: string | null; locali: string | null }>('/capitoli/last-import'),
 }
 
+// ── Certificati ───────────────────────────────────────────────
+
+export interface AnagraficaCedolinoApi {
+  periodo_retribuzione: string | null
+  matricola:            string | null
+  cognome:              string | null
+  nome:                 string | null
+  codice_fiscale:       string | null
+  data_nascita:         string | null
+  luogo_nascita:        string | null
+  inquadramento:        string | null
+  area_profilo:         string | null
+  ruolo:                string | null
+  inizio_rapporto:      string | null
+  anzianita_servizio:   string | null
+  afferenza:            string | null
+  sede:                 string | null
+}
+
+export interface VoceTeoricaApi { descrizione: string; valore: number | null; totale: boolean }
+
+export interface VoceDettaglioApi {
+  sezione:     string | null
+  descrizione: string
+  valore:      number
+  numeri_riga: number[]
+  arretrato:   boolean
+  conguaglio:  boolean
+  scadenza:    string | null
+  decorrenza:  string | null
+}
+
+export interface CertificatoCalcolatoApi {
+  lordo_teorico:          number | null
+  ritenute_fiscali:       number | null
+  ritenute_previdenziali: number | null
+  netto_ritenute_legge:   number | null
+  extraerariali_totale:   number | null
+  extraerariali_righe:    Array<{ descrizione: string; decorrenza: string | null; scadenza: string | null; valore: number | null }>
+  netto_a_pagare:         number | null
+  quinto:                 number | null
+  settimo:                number | null
+}
+
+/** Output del parser cedolino (anteprima editabile). */
+export interface CedolinoParsedApi {
+  anagrafica:         AnagraficaCedolinoApi
+  voci_teoriche:      VoceTeoricaApi[]
+  voci_dettaglio:     VoceDettaglioApi[]
+  riepilogo_cedolino: Record<string, number | null>
+  certificato:        CertificatoCalcolatoApi
+}
+
+export interface DocxPayload { filename: string; base64: string }
+
+export interface CertificatoSummaryApi {
+  id:                string
+  anno:              number
+  progressivo:       number
+  protocollo:        string
+  matricola:         string | null
+  nominativo:        string | null
+  periodo:           string | null
+  siglaOperatore:    string
+  createdByUsername: string | null
+  createdAt:         string
+}
+
+export interface CertificatoCreatedApi extends CertificatoSummaryApi {
+  docx: DocxPayload
+}
+
+export interface TemplateApi {
+  id:            string
+  nome:          string
+  strutturaJson: unknown
+  attivo:        boolean
+  createdAt:     string
+  updatedAt:     string
+}
+
+export interface CreaCertificatoBody {
+  parsed:         CedolinoParsedApi
+  templateId:     string
+  siglaOperatore: string
+  dirigente?:     string
+  dataRilascio:   string
+  sesso?:         'M' | 'F'
+  anno?:          number
+}
+
+export const certificatiApi = {
+  /** Estrae i dati dal PDF (base64). Nessuna persistenza. */
+  parse: (pdfBase64: string) =>
+    apiFetch<CedolinoParsedApi>('/certificati/parse', {
+      method: 'POST',
+      body:   JSON.stringify({ pdf: pdfBase64 }),
+    }),
+
+  /** Crea record (protocollo atomico) + genera DOCX. */
+  create: (body: CreaCertificatoBody) =>
+    apiFetch<CertificatoCreatedApi>('/certificati', {
+      method: 'POST',
+      body:   JSON.stringify(body),
+    }),
+
+  list: (anno?: number, search?: string) => {
+    const q = new URLSearchParams()
+    if (anno) q.set('anno', String(anno))
+    if (search) q.set('search', search)
+    const qs = q.toString()
+    return apiFetch<CertificatoSummaryApi[]>(`/certificati${qs ? `?${qs}` : ''}`)
+  },
+
+  /** Rigenera il DOCX da datiJson (download). */
+  docx: (id: string) =>
+    apiFetch<DocxPayload>(`/certificati/${id}/docx`),
+}
+
+export const templatiCertificatoApi = {
+  list: (soloAttivi?: boolean) =>
+    apiFetch<TemplateApi[]>(`/templati-certificato${soloAttivi ? '?soloAttivi=true' : ''}`),
+
+  getById: (id: string) =>
+    apiFetch<TemplateApi>(`/templati-certificato/${id}`),
+
+  create: (nome: string, strutturaJson: unknown, attivo = true) =>
+    apiFetch<TemplateApi>('/templati-certificato', {
+      method: 'POST',
+      body:   JSON.stringify({ nome, strutturaJson, attivo }),
+    }),
+
+  update: (id: string, data: { nome?: string; strutturaJson?: unknown; attivo?: boolean }) =>
+    apiFetch<TemplateApi>(`/templati-certificato/${id}`, {
+      method: 'PUT',
+      body:   JSON.stringify(data),
+    }),
+
+  delete: (id: string) =>
+    apiFetch<void>(`/templati-certificato/${id}`, { method: 'DELETE' }),
+}
+
 // ── Settings ─────────────────────────────────────────────────
 
 export const settingsApi = {

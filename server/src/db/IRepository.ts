@@ -321,6 +321,91 @@ export interface ICapitoliAnagRepository {
 }
 
 // ------------------------------------------------------------
+// Templati Certificato Repository (template-come-dato, CRUD)
+// ------------------------------------------------------------
+
+export interface TemplateRow {
+  id:            string
+  nome:          string
+  strutturaJson: unknown
+  attivo:        boolean
+  createdAt:     Date
+  updatedAt:     Date
+}
+
+export interface TemplateInput {
+  nome:          string
+  strutturaJson: unknown
+  attivo?:       boolean
+}
+
+export interface ITemplatiCertificatoRepository {
+  findAll(soloAttivi?: boolean): Promise<TemplateRow[]>
+  findById(id: string): Promise<TemplateRow | null>
+  create(data: TemplateInput): Promise<TemplateRow>
+  update(id: string, data: Partial<TemplateInput>): Promise<TemplateRow>
+  delete(id: string): Promise<void>
+}
+
+// ------------------------------------------------------------
+// Certificati Repository
+// ------------------------------------------------------------
+
+export interface CertificatoInput {
+  anno:           number
+  matricola?:     string | null
+  cf?:            string | null
+  periodo?:       string | null
+  nominativo?:    string | null
+  siglaOperatore: string
+  dirigente?:     string | null
+  templateId?:    string | null
+  /** Output parser (audit + rigenerazione). Privacy opzione A: no iban/CF nucleo. */
+  datiJson:       unknown
+  createdBy?:     string | null
+}
+
+export interface CertificatoRow {
+  id:             string
+  anno:           number
+  progressivo:    number
+  protocollo:     string
+  matricola:      string | null
+  cf:             string | null
+  periodo:        string | null
+  nominativo:     string | null
+  siglaOperatore: string
+  dirigente:      string | null
+  templateId:     string | null
+  datiJson:       unknown
+  createdBy:      string | null
+  createdByUsername: string | null
+  createdAt:      Date
+}
+
+/** Lista senza datiJson (può essere grande) */
+export interface CertificatoSummaryRow {
+  id:             string
+  anno:           number
+  progressivo:    number
+  protocollo:     string
+  matricola:      string | null
+  nominativo:     string | null
+  periodo:        string | null
+  siglaOperatore: string
+  createdByUsername: string | null
+  createdAt:      Date
+}
+
+export interface ICertificatiRepository {
+  /** Crea record assegnando il progressivo in modo ATOMICO (transazione). */
+  create(data: CertificatoInput): Promise<CertificatoRow>
+  findById(id: string): Promise<CertificatoRow | null>
+  /** Lista per anno (default: anno corrente) con ricerca opzionale matricola/nominativo. */
+  findAll(anno?: number, search?: string): Promise<CertificatoSummaryRow[]>
+}
+
+// ------------------------------------------------------------
 // Factory type — punto di accesso unico al DB layer
 // ------------------------------------------------------------
 

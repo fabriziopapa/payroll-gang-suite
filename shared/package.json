@@ -1,6 +1,6 @@
 {
   "name": "@payroll-gang/shared",
-  "version": "26.05.30",
+  "version": "26.06.02",
   "private": true,
   "type": "module",
   "main": "./types/index.ts",
