@@ -112,7 +112,11 @@ const SEL = {
   siglaOperatore: schema.certificati.siglaOperatore,
   dirigente:      schema.certificati.dirigente,
   templateId:     schema.certificati.templateId,
-  datiJson:       schema.certificati.datiJson,
+  // FIX: leggi il JSONB come TEXT (::text → tipo 25) per BYPASSARE il transform
+  // postgres.camel.value.from, che camelizzerebbe ricorsivamente le chiavi del
+  // JSONB (voci_teoriche → vociTeoriche) rompendo parser/merge/docx in regen.
+  // Lo storage resta snake_case; qui lo ri-parsiamo a mano preservandolo.
+  datiJson:       sql<string>`${schema.certificati.datiJson}::text`,
   createdBy:      schema.certificati.createdBy,
   createdAt:      schema.certificati.createdAt,
 }
@@ -129,7 +133,14 @@ function toRow(r: RowShape): CertificatoRow {
     id: r.id, anno: r.anno, progressivo: r.progressivo, protocollo: r.protocollo,
     matricola: r.matricola, cf: r.cf, periodo: r.periodo, nominativo: r.nominativo,
     siglaOperatore: r.siglaOperatore, dirigente: r.dirigente, templateId: r.templateId,
-    datiJson: r.datiJson, createdBy: r.createdBy,
+    // datiJson arriva come stringa (::text) → ri-parsa preservando snake_case
+    datiJson: typeof r.datiJson === 'string' ? safeParse(r.datiJson) : r.datiJson,
+    createdBy: r.createdBy,
     createdByUsername: r.createdByUsername ?? null, createdAt: r.createdAt,
   }
+}
+
+/** Parse difensivo del JSONB letto come testo. */
+function safeParse(s: string): unknown {
+  try { return JSON.parse(s) } catch { return null }
 }

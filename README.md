@@ -250,6 +250,9 @@ CREATE INDEX IF NOT EXISTS idx_voci_illimitata
 - Upload PDF: validazione **magic bytes** `%PDF-` (non falsificabile come il Content-Type) + cap dimensione 8 MB, mai scritto su disco
 - Sanitizzazione control-char su tutte le celle del DOCX
 
+**Hotfix**
+- Rigenerazione DOCX (`GET /certificati/:id/docx`) restituiva 500 `parsed.voci_teoriche is not iterable`: il transform `postgres.camel` camelizzava ricorsivamente le chiavi del JSONB in lettura (`voci_teoriche`→`vociTeoriche`). Fix: `PgCertificatiRepository` legge `dati_json::text` (tipo text, ignorato dal transform) + `JSON.parse` manuale → chiavi snake_case preservate. Sistema record esistenti e futuri senza rigenerazione.
+
 ### 26.05.30
 **Auth / UX resiliente**
 - Fix HTTP 429 su bootstrap: il rate limit non causa più redirect alla login (la sessione resta valida)
