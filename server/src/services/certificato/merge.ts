@@ -95,7 +95,7 @@ export function prepareData(
 
   // Etichette anagrafica (regole dal template)
   const inq = parsed.anagrafica.inquadramento ?? ''
-  parsed.anagrafica.inquadramento_label = tpl.inquadramentoMap[inq] ?? inq
+  parsed.anagrafica.inquadramento_label = (tpl.inquadramentoMap ?? {})[inq] ?? inq
   parsed.anagrafica.settore = (parsed.anagrafica.area_profilo ?? '').replace(/^Settore\s+/i, '')
 
   // Matching voci teoriche → campi template (CONFIGURABILE, fix #5)
@@ -103,7 +103,7 @@ export function prepareData(
   for (const t of parsed.voci_teoriche) {
     if (t.totale) continue
     const d = t.descrizione.toLowerCase()
-    for (const rule of tpl.matchTeoriche) {
+    for (const rule of tpl.matchTeoriche ?? []) {
       if (rule.keywords.some(k => d.includes(k.toLowerCase()))) {
         if (teo[rule.field] == null) teo[rule.field] = t.valore
         break
@@ -121,7 +121,7 @@ export function prepareData(
   const extra = parsed.certificato.extraerariali_righe.map(v => {
     const lbl = cleanLabel(v.descrizione)
     return {
-      voce:       tpl.extraRename[lbl] ?? lbl,
+      voce:       (tpl.extraRename ?? {})[lbl] ?? lbl,
       decorrenza: v.decorrenza ?? '',
       scadenza:   v.scadenza ?? '',
       importo:    eur(v.valore),
