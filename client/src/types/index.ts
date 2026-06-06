@@ -341,3 +341,44 @@ export interface CsvExportRow {
   idContrattoCSA: string;
   nota: string;
 }
+
+// ------------------------------------------------------------
+// CERTIFICATO — TEMPLATE-COME-DATO
+// Specchio client di server/src/services/certificato/types.ts
+// (CertificatoTemplate). Usato dall'editor a sezioni in
+// CertificatiTemplatePage + componenti riusabili in
+// components/certificatoTemplate/.
+// ------------------------------------------------------------
+
+/** Riga della tabella emolumenti del certificato. */
+export interface RigaEmolumento {
+  voce:  string;
+  /** es. "(+)" "(-)" "(=)" */
+  segno: string;
+  /** path nel contesto risoluzione: "teo.<campo>" oppure "cert.<campo>" */
+  src:   string;
+  bold?: boolean;
+}
+
+/** Regola di matching voce teorica → campo template, via parole chiave. */
+export interface MatchTeorica {
+  field:    string;
+  keywords: string[];
+}
+
+/** Template-come-dato per la generazione DOCX dei certificati (campo strutturaJson). */
+export interface CertificatoTemplate {
+  bollo:        { testo: string };
+  intestazione: { protocollo: string; posizione: string };
+  titolo:       string;
+  corpo:        string[];
+  tabellaEmolumenti:  RigaEmolumento[];
+  testoExtraerariali: string;
+  testoNetto:   string;
+  chiusura:     string;
+  luogoData:    string;
+  firma:        string[];
+  matchTeoriche:    MatchTeorica[];
+  inquadramentoMap: Record<string, string>;
+  extraRename:      Record<string, string>;
+}

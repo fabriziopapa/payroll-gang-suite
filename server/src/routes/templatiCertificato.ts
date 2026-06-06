@@ -10,6 +10,49 @@ import { requireAdmin } from '../middleware/authenticate.js'
 import { PgTemplatiCertificatoRepository } from '../db/repositories/PgTemplatiCertificatoRepository.js'
 import { PgAuditRepository } from '../db/repositories/PgAuditRepository.js'
 
+// SEC/ROBUSTEZZA: schema STRETTO per strutturaJson — mirror cedolinoParsedSchema
+// (routes/certificati.ts). Sostituisce il vecchio z.record(z.unknown()) che
+// lasciava passare qualunque oggetto: un template-come-dato incompleto (es.
+// inquadramentoMap assente) passava la validazione e faceva esplodere
+// prepareData() con TypeError a runtime, in fase di generazione DOCX — tardi,
+// con un 500 generico. Qui, invece, l'intera shape di CertificatoTemplate
+// (services/certificato/types.ts) è verificata in scrittura: niente più
+// template malformati persistibili via API.
+const rigaEmolumentoSchema = z.object({
+  voce:  z.string().min(1).max(200),
+  segno: z.string().min(1).max(10),
+  /** path nel contesto resolve, es. "teo.stipendio" | "cert.netto_a_pagare" */
+  src:   z.string().min(1).max(100),
+  bold:  z.boolean().optional(),
+})
+
+const matchTeoricaSchema = z.object({
+  field:    z.string().min(1).max(60),
+  keywords: z.array(z.string().min(1).max(100)).min(1).max(20),
+})
+
+/** inquadramentoMap / extraRename — entrambe Record<string,string> a lunghezza limitata */
+const stringMapSchema = z.record(z.string().min(1).max(200), z.string().max(200))
+
+const certificatoTemplateSchema = z.object({
+  bollo:        z.object({ testo: z.string().max(2000) }),
+  intestazione: z.object({
+    protocollo: z.string().max(500),
+    posizione:  z.string().max(500),
+  }),
+  titolo:             z.string().min(1).max(300),
+  corpo:              z.array(z.string().max(5000)).max(50),
+  tabellaEmolumenti:  z.array(rigaEmolumentoSchema).max(50),
+  testoExtraerariali: z.string().max(2000),
+  testoNetto:         z.string().max(2000),
+  chiusura:           z.string().max(2000),
+  luogoData:          z.string().max(500),
+  firma:              z.array(z.string().max(500)).max(20),
+  matchTeoriche:      z.array(matchTeoricaSchema).max(50),
+  inquadramentoMap:   stringMapSchema,
+  extraRename:        stringMapSchema,
+})
+
 export async function templatiCertificatoRoutes(app: FastifyInstance): Promise<void> {
   const repo  = new PgTemplatiCertificatoRepository(app.db)
   const audit = new PgAuditRepository(app.db)
@@ -32,7 +75,7 @@ export async function templatiCertificatoRoutes(app: FastifyInstance): Promise<v
 
   const bodySchema = z.object({
     nome:          z.string().min(1).max(200),
-    strutturaJson: z.record(z.string(), z.unknown()),
+    strutturaJson: certificatoTemplateSchema,
     attivo:        z.boolean().optional(),
   })
 
