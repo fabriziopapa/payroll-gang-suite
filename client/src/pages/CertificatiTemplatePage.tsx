@@ -149,6 +149,7 @@ export default function CertificatiTemplatePage() {
     setNome(t.nome)
     setAttivo(t.attivo)
     setDraft(normalizzaTemplate(t.strutturaJson))
+    setModoJson(false); setJsonText(''); setJsonErr(null)   // riapri sempre sul form a sezioni
     setAperto(true)
     setFormKey(k => k + 1)   // rimonta le sezioni: stato locale "pulito" sul nuovo contesto
   }
@@ -158,12 +159,40 @@ export default function CertificatiTemplatePage() {
     setNome('Nuovo template')
     setAttivo(true)
     setDraft(structuredClone(TEMPLATE_VUOTO))
+    setModoJson(false); setJsonText(''); setJsonErr(null)
     setAperto(true)
     setFormKey(k => k + 1)
   }
 
   function patch<K extends keyof CertificatoTemplate>(key: K, value: CertificatoTemplate[K]) {
     setDraft(d => ({ ...d, [key]: value }))
+  }
+
+  // Attiva la vista JSON: la semina da `draft` (sempre la versione canonica più
+  // recente, comprese le modifiche fatte dal form). Ri-seminare ad ogni
+  // attivazione tiene la vista coerente anche dopo un giro nel form a sezioni.
+  function attivaModoJson() {
+    setJsonText(JSON.stringify(draft, null, 2))
+    setJsonErr(null)
+    setModoJson(true)
+  }
+  function disattivaModoJson() {
+    if (jsonErr) showToast('JSON non valido: ripristinata l\'ultima versione valida', 'error')
+    setModoJson(false)
+  }
+  // Ad ogni modifica: se il testo è JSON valido lo riversa subito in `draft`
+  // (normalizzato — autoripara campi mancanti/malformati come al caricamento),
+  // così Salva e il form a sezioni vedono sempre l'ultima versione valida.
+  // Su JSON non valido non tocca `draft`: resta l'ultima versione buona.
+  function onJsonChange(text: string) {
+    setJsonText(text)
+    try {
+      const parsed = JSON.parse(text)
+      setDraft(normalizzaTemplate(parsed))
+      setJsonErr(null)
+    } catch (e) {
+      setJsonErr(e instanceof Error ? e.message : 'JSON non valido')
+    }
   }
 
   async function salva() {
@@ -253,6 +282,38 @@ export default function CertificatiTemplatePage() {
                 </label>
               </div>
 
+              {/* Flag vista JSON: per chi vuole/deve intervenire a mano sulla struttura grezza */}
+              <label className="flex items-center gap-2 -mt-1">
+                <input type="checkbox" checked={modoJson}
+                  onChange={e => e.target.checked ? attivaModoJson() : disattivaModoJson()}
+                  className="w-4 h-4 accent-indigo-600" />
+                <span className="text-sm text-slate-300">Modifica struttura come JSON</span>
+                <span className="text-xs text-slate-500">— vista avanzata, in alternativa al form a sezioni</span>
+              </label>
+
+              {modoJson ? (
+                <div className="space-y-1.5">
+                  <div>
+                    <span className="text-xs text-slate-500">JSON struttura (strutturaJson)</span>
+                    <p className="text-[11px] text-slate-600">
+                      Stessa struttura validata dal server al salvataggio. Ogni modifica sintatticamente valida
+                      viene riportata subito nel form a sezioni — disattiva il flag per tornarci e continuare da lì.
+                    </p>
+                  </div>
+                  <textarea
+                    value={jsonText}
+                    onChange={e => onJsonChange(e.target.value)}
+                    spellCheck={false}
+                    className={`input font-mono text-xs h-96 leading-relaxed ${jsonErr ? 'border-red-600/70 focus:ring-red-500' : ''}`}
+                  />
+                  {jsonErr ? (
+                    <p className="text-xs text-red-400">JSON non valido — non sincronizzato: {jsonErr}</p>
+                  ) : (
+                    <p className="text-xs text-emerald-500">JSON valido, sincronizzato con il form a sezioni e pronto per il salvataggio.</p>
+                  )}
+                </div>
+              ) : (
+              <>
               <PlaceholderPalette containerRef={fieldsRef} />
 
               {/* Sezioni-campo: la palette traccia i focus qui dentro per l'inserimento */}
@@ -397,6 +458,8 @@ export default function CertificatiTemplatePage() {
               </section>
 
               </div>{/* /fieldsRef */}
+              </>
+              )}
 
               <div className="flex items-center justify-between pt-1">
                 {selId && (
