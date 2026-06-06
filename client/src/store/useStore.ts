@@ -31,6 +31,8 @@ export type PageId =
   | 'utenti'
   | 'certificati'
   | 'certificati-template'
+  | 'pdf-region-templates'
+  | 'pdf-region-editor'
 
 /** Struttura salvata nel campo `dati` JSONB della bozza */
 export interface BozzaDati {
@@ -50,6 +52,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   rubrica:                 [],
   modelliComunicazione:    [],
   turnstileEnabled:        true,
+  pdfRegionEditorEnabled:  false,
 }
 
 // ── Helpers ───────────────────────────────────────────────────

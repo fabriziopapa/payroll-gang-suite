@@ -2,6 +2,7 @@
 // PAYROLL GANG SUITE — Schema Drizzle ORM (PostgreSQL)
 // ============================================================
 
+import { sql } from 'drizzle-orm'
 import {
   pgTable,
   varchar,
@@ -320,6 +321,49 @@ export const certificati = pgTable('certificati', {
 ])
 
 // ------------------------------------------------------------
+// TEMPLATI PDF REGION (riconoscimento layout cedolino via regioni)
+// VERSIONATI E IMMUTABILI: ogni riga = una versione; modifiche →
+// nuova riga (versione+1), auto-attivata, predecessore disattivato
+// in transazione (mai UPDATE in-place sui campi geometrici).
+// templateFamilyId: lineage stabile fra versioni, indipendente da
+// nome/id (refinement Gate 2 — evita rottura lineage a rinomina).
+// pageGeometryJson/partiJson: solo coordinate % — MAI bytes/binary PDF.
+// certificatoTemplateId: FK fissata a CREAZIONE, lega permanentemente
+// layout↔forma certificato (mai modificabile dopo — Gate 1, Q6).
+// ------------------------------------------------------------
+
+export const templatiPdfRegion = pgTable('templati_pdf_region', {
+  id:               uuid('id').primaryKey().defaultRandom(),
+  templateFamilyId: uuid('template_family_id').notNull().defaultRandom(),
+  nome:             varchar('nome', { length: 200 }).notNull(),
+  nota:             text('nota'),
+  /** Contatore interno per unicità/ordinamento — mai esposto come label */
+  versione:         integer('versione').notNull().default(1),
+  /** Formato AA.MM.GG (mirror APP_VERSION) — puramente cosmetico/audit */
+  versioneLabel:    varchar('versione_label', { length: 8 }).notNull(),
+  attivo:           boolean('attivo').notNull().default(true),
+  /** PageGeometry[]: pageIndex/widthPt/heightPt/rotation */
+  pageGeometryJson: jsonb('page_geometry_json').notNull(),
+  /** ParteTemplate[]: discriminated union ParteAnagrafica | ParteVoce */
+  partiJson:        jsonb('parti_json').notNull(),
+  certificatoTemplateId: uuid('certificato_template_id').notNull().references(() => templatiCertificato.id),
+  createdBy:        uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:        timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:        timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('idx_templati_pdf_region_family_versione').on(t.templateFamilyId, t.versione),
+  // Audit Gate4 H2: vincolo strutturale "max 1 versione attiva per famiglia" —
+  // indice unico parziale, garanzia DB-level indipendente dal lock applicativo
+  // in createNewVersion(). Riflette migration 0007_pdf_region_one_active.sql
+  // (creato CONCURRENTLY in produzione — drizzle non genera/applica DDL da qui,
+  // serve solo a tenere lo schema introspect-coerente con il DB reale).
+  uniqueIndex('idx_pdf_region_one_active_per_family').on(t.templateFamilyId).where(sql`attivo = true`),
+  index('idx_templati_pdf_region_attivo').on(t.attivo),
+  index('idx_templati_pdf_region_family').on(t.templateFamilyId),
+  index('idx_templati_pdf_region_created_by').on(t.createdBy),
+])
+
+// ------------------------------------------------------------
 // TIPI INFERITI (usati nelle repository)
 // ------------------------------------------------------------
 
@@ -342,3 +386,5 @@ export type TemplateCertificato    = typeof templatiCertificato.$inferSelect
 export type NewTemplateCertificato = typeof templatiCertificato.$inferInsert
 export type Certificato            = typeof certificati.$inferSelect
 export type NewCertificato         = typeof certificati.$inferInsert
+export type PdfRegionTemplate      = typeof templatiPdfRegion.$inferSelect
+export type NewPdfRegionTemplate   = typeof templatiPdfRegion.$inferInsert

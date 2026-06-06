@@ -106,7 +106,9 @@ export async function certificatiRoutes(app: FastifyInstance): Promise<void> {
     preHandler: [app.authenticate],
     bodyLimit: 12 * 1024 * 1024, // base64 gonfia ~33%
   }, async (req, reply) => {
-    const { pdf } = z.object({ pdf: z.string().min(1) }).parse(req.body)
+    // Audit Gate4 M2: cap esplicito anche a livello schema (mirror pdfRegionTemplates.ts)
+    // — stesso valore del `bodyLimit` di route, limite auto-documentato nel contratto.
+    const { pdf } = z.object({ pdf: z.string().min(1).max(12 * 1024 * 1024) }).parse(req.body)
 
     const buf = Buffer.from(pdf, 'base64')
     if (buf.byteLength === 0) return reply.code(400).send({ error: 'PDF_VUOTO' })

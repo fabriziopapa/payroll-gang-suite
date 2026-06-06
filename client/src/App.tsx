@@ -3,7 +3,7 @@
 // Auth gate + routing basato su stato Zustand
 // ============================================================
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, lazy, Suspense } from 'react'
 import { useStore } from './store/useStore'
 import { setAccessToken, setOnUnauthorized } from './api/client'
 import { settingsApi } from './api/endpoints'
@@ -31,6 +31,23 @@ import ViewerPage         from './pages/ViewerPage'
 import RicercaPage        from './pages/RicercaPage'
 import CertificatiPage    from './pages/CertificatiPage'
 import CertificatiTemplatePage from './pages/CertificatiTemplatePage'
+import PdfRegionTemplatesPage from './pages/PdfRegionTemplatesPage'
+
+// Lazy: unica pagina che porta pdfjs-dist (canvas rendering, Step 7/usePdfDocument)
+// — code-split dedicato, niente nel bundle principale finché un admin non apre
+// lo strumento di disegno regioni (uso saltuario, costo di caricamento accettabile).
+const PdfRegionEditorPage = lazy(() => import('./pages/PdfRegionEditorPage'))
+
+function PdfEditorLoadingFallback() {
+  return (
+    <div className="p-10 flex items-center justify-center">
+      <svg className="animate-spin w-6 h-6 text-indigo-400" fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+      </svg>
+    </div>
+  )
+}
 
 // Stato throttling bootstrap: null = nessun throttle in corso
 interface ThrottleState {
@@ -164,6 +181,7 @@ export default function App() {
           rubrica:              Array.isArray(raw?.rubrica)              ? (raw.rubrica              as AppSettings['rubrica'])              : [],
           modelliComunicazione: Array.isArray(raw?.modelliComunicazione) ? (raw.modelliComunicazione as AppSettings['modelliComunicazione']) : [],
           turnstileEnabled:     typeof raw?.turnstileEnabled === 'boolean' ? raw.turnstileEnabled : true,
+          pdfRegionEditorEnabled: typeof raw?.pdfRegionEditorEnabled === 'boolean' ? raw.pdfRegionEditorEnabled : false,
         })
       })
       .catch(() => { /* usa defaults locali già nello store */ })
@@ -246,6 +264,12 @@ export default function App() {
       {currentPage === 'ricerca'      && <RicercaPage />}
       {currentPage === 'certificati'  && <CertificatiPage />}
       {currentPage === 'certificati-template' && <CertificatiTemplatePage />}
+      {currentPage === 'pdf-region-templates' && <PdfRegionTemplatesPage />}
+      {currentPage === 'pdf-region-editor' && user?.isAdmin && (
+        <Suspense fallback={<PdfEditorLoadingFallback />}>
+          <PdfRegionEditorPage />
+        </Suspense>
+      )}
     </Layout>
   )
 }

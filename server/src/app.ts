@@ -7,6 +7,7 @@ import cookie from '@fastify/cookie'
 import helmet from '@fastify/helmet'
 import cors from '@fastify/cors'
 import rateLimit from '@fastify/rate-limit'
+import { ZodError } from 'zod'
 
 import { env } from './config/env.js'
 import { db, closeDb } from './db/connection.js'
@@ -37,6 +38,7 @@ import { settingsRoutes }     from './routes/settings.js'
 import { capitoliRoutes }     from './routes/capitoli.js'
 import { certificatiRoutes }  from './routes/certificati.js'
 import { templatiCertificatoRoutes } from './routes/templatiCertificato.js'
+import { pdfRegionTemplatesRoutes } from './routes/pdfRegionTemplates.js'
 
 // ============================================================
 
@@ -58,6 +60,7 @@ await app.register(helmet, {
     directives: {
       defaultSrc:     ["'self'"],
       scriptSrc:      ["'self'", 'https://challenges.cloudflare.com'],
+      workerSrc:      ["'self'"],                      // pdf.worker (pdfjs-dist, region editor)
       styleSrc:       ["'self'", "'unsafe-inline'"],  // Tailwind CSS
       imgSrc:         ["'self'", 'data:'],             // QR code data URL
       frameSrc:       ['https://challenges.cloudflare.com'],  // Turnstile iframe
@@ -97,6 +100,25 @@ await app.register(rateLimit, {
     error: 'RATE_LIMIT_EXCEEDED',
     message: 'Troppe richieste. Riprova tra poco.',
   }),
+})
+
+// ------------------------------------------------------------
+// Error handler globale
+// ------------------------------------------------------------
+// Audit Gate4 M1: le routes chiamano `schema.parse(req.body/query/params)` senza
+// try/catch — uno ZodError non gestito risale al default handler di Fastify, che
+// lo serializza con statusCode 500 ESPONENDO la struttura interna dello schema
+// (nomi campi, vincoli, ecc.) nella risposta. Normalizziamo qui a 400 strutturato
+// e teniamo i 500 reali generici (niente leak di stack/dettagli interni al client).
+app.setErrorHandler((error, _req, reply) => {
+  if (error instanceof ZodError) {
+    return reply.code(400).send({
+      error:  'VALIDATION_ERROR',
+      issues: error.issues.map(i => ({ path: i.path, message: i.message })),
+    })
+  }
+  app.log.error(error)
+  return reply.code(500).send({ error: 'INTERNAL_SERVER_ERROR' })
 })
 
 // ------------------------------------------------------------
@@ -148,6 +170,7 @@ await app.register(bozzeRoutes,       { prefix: '/api/v1/bozze' })
 await app.register(settingsRoutes,    { prefix: '/api/v1/settings' })
 await app.register(certificatiRoutes, { prefix: '/api/v1/certificati' })
 await app.register(templatiCertificatoRoutes, { prefix: '/api/v1/templati-certificato' })
+await app.register(pdfRegionTemplatesRoutes, { prefix: '/api/v1/pdf-region-templates' })
 
 // Health check (no auth) — SEC-M07: solo status minimale, nessuna info di versione/sistema
 app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))

@@ -84,6 +84,16 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    id:    'pdf-region-templates',
+    label: 'Certificati PDF',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M7.5 3.75H6a2.25 2.25 0 00-2.25 2.25v1.5M16.5 3.75H18a2.25 2.25 0 012.25 2.25v1.5m0 9V18a2.25 2.25 0 01-2.25 2.25h-1.5m-9 0H6a2.25 2.25 0 01-2.25-2.25v-1.5M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      </svg>
+    ),
+  },
+  {
     id:    'impostazioni',
     label: 'Impostazioni',
     icon: (
@@ -112,11 +122,14 @@ interface LayoutProps {
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const { currentPage, navigate, user, clearAuth, isDirty, currentBozzaNome, viewerBozza } = useStore()
+  const { currentPage, navigate, user, clearAuth, isDirty, currentBozzaNome, viewerBozza, settings } = useStore()
 
-  // Nav items dinamici: "Utenti" visibile solo agli admin
+  // Nav items dinamici:
+  // - "Utenti" visibile solo agli admin
+  // - "Certificati PDF" dietro kill-switch pdfRegionEditorEnabled (default off — modulo in rollout)
   const visibleNavItems = NAV_ITEMS.filter(item =>
-    item.id !== 'utenti' || user?.isAdmin,
+    (item.id !== 'utenti' || user?.isAdmin) &&
+    (item.id !== 'pdf-region-templates' || (settings.pdfRegionEditorEnabled ?? false)),
   )
   const [loggingOut, setLoggingOut]   = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -326,7 +339,9 @@ export default function Layout({ children }: LayoutProps) {
             ) : (
               <h1 className="text-white font-semibold text-sm">
                 {NAV_ITEMS.find(n => n.id === currentPage)?.label
-                  ?? (currentPage === 'certificati-template' ? 'Certificati · Template' : currentPage)}
+                  ?? (currentPage === 'certificati-template' ? 'Certificati · Template'
+                    : currentPage === 'pdf-region-editor'    ? 'Template estrazione PDF'
+                    : currentPage)}
               </h1>
             )}
           </div>

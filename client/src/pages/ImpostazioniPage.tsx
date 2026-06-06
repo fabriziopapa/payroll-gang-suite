@@ -31,6 +31,7 @@ export default function ImpostazioniPage() {
   const [saved,          setSaved]          = useState(false)
   const [error,          setError]          = useState<string | null>(null)
   const [savingTurnstile, setSavingTurnstile] = useState(false)
+  const [savingPdfRegion, setSavingPdfRegion] = useState(false)
 
   // form aggiunta riga scorporo standard
   const [newRuolo,    setNewRuolo]    = useState('')
@@ -91,6 +92,22 @@ export default function ImpostazioniPage() {
       showToast('Errore nel salvataggio', 'error')
     } finally {
       setSavingTurnstile(false)
+    }
+  }
+
+  async function handleTogglePdfRegion(enabled: boolean) {
+    setSavingPdfRegion(true)
+    try {
+      await settingsApi.update({ pdfRegionEditorEnabled: enabled })
+      setSettings({ ...settings, pdfRegionEditorEnabled: enabled })
+      showToast(
+        enabled ? 'Modulo Certificati PDF abilitato' : 'Modulo Certificati PDF disabilitato',
+        'success',
+      )
+    } catch {
+      showToast('Errore nel salvataggio', 'error')
+    } finally {
+      setSavingPdfRegion(false)
     }
   }
 
@@ -414,6 +431,43 @@ export default function ImpostazioniPage() {
                     className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white
                       shadow transform transition duration-200
                       ${(settings.turnstileEnabled ?? true) ? 'translate-x-5' : 'translate-x-0'}`}
+                  />
+                </button>
+              </div>
+            </section>
+          )}
+
+          {/* Sezione Moduli — kill-switch funzionalità in rollout, solo admin */}
+          {user?.isAdmin && (
+            <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 mb-6">
+              <h3 className="text-sm font-semibold text-white mb-1">Moduli</h3>
+              <p className="text-slate-400 text-xs mb-4">
+                Funzionalità in fase di rollout, attivabili/disattivabili per tutti gli utenti.
+              </p>
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-sm text-slate-300 font-medium">Certificati PDF (estrazione regioni)</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Mostra la voce "Certificati PDF" in navigazione e abilita l'editor template
+                    di estrazione regioni dal cedolino PDF.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={savingPdfRegion}
+                  onClick={() => handleTogglePdfRegion(!(settings.pdfRegionEditorEnabled ?? false))}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full
+                    border-2 border-transparent transition-colors duration-200
+                    focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2
+                    focus:ring-offset-slate-900 disabled:opacity-50
+                    ${(settings.pdfRegionEditorEnabled ?? false) ? 'bg-indigo-600' : 'bg-slate-700'}`}
+                  role="switch"
+                  aria-checked={settings.pdfRegionEditorEnabled ?? false}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white
+                      shadow transform transition duration-200
+                      ${(settings.pdfRegionEditorEnabled ?? false) ? 'translate-x-5' : 'translate-x-0'}`}
                   />
                 </button>
               </div>

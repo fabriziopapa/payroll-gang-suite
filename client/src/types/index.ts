@@ -306,6 +306,8 @@ export interface AppSettings {
   modelliComunicazione:     ModelloComunicazione[];
   /** Protezione bot Cloudflare Turnstile — default true. Disabilitabile da admin. */
   turnstileEnabled?:        boolean;
+  /** Kill-switch modulo Certificati PDF (region editor/templates) — default false. Abilitabile da admin. */
+  pdfRegionEditorEnabled?:  boolean;
 }
 
 // ------------------------------------------------------------
