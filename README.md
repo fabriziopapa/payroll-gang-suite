@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.06.02-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.06.06-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -79,6 +79,7 @@ payroll-gang-suite/
 - **Comunicazioni** — generazione email con allegato PDF nominale
 - **Gestione utenti** — admin panel, TOTP onboarding, ruoli admin/base, lockout anti-brute-force
 - **Certificati giuridico-stipendiali** — upload cedolino Cineca (PDF) → parsing dinamico per-sezione → ricalcolo per categoria (verificato al centesimo) → generazione DOCX con stampa unione (segnaposto `{{path}}`, tag genere `[[m|f]]`), protocollo progressivo atomico per anno, template editabili (CRUD)
+- **PDF Region Editor** *(in rollout, kill-switch off)* — strumento admin: disegno regioni di riconoscimento layout direttamente sul cedolino renderizzato (canvas), template versionati e immutabili riusabili per l'estrazione automatica delle voci
 
 ---
 
@@ -101,6 +102,27 @@ Genera certificati a partire dai cedolini Cineca, replicando le regole di calcol
 ```bash
 CEDOLINO_SAMPLE="/percorso/Cedolino_....pdf" npm run test --workspace=server
 ```
+
+---
+
+## Sezione PDF Region Editor
+
+*(in rollout — dietro kill-switch, non ancora attivo in produzione)*
+
+Strumento admin per costruire **template di riconoscimento layout** dei cedolini: l'operatore disegna le regioni (anagrafica, voci) direttamente sul PDF renderizzato; il sistema le salva come template-come-dato riusabile dal parser per l'estrazione automatica.
+
+- **Disegno regioni su canvas** (`PdfRegionEditorPage.tsx` + hook `usePdfDocument`) — render PDF via `pdfjs-dist` (canvas, pagina lazy/code-split: niente nel bundle principale finché un admin non apre lo strumento), coordinate salvate in **percentuale** — mai bytes/binary del PDF persistiti
+- **Template versionati e immutabili** (tabella `templati_pdf_region`) — ogni modifica = nuova riga (versione+1) auto-attivata, predecessore disattivato in transazione (mai `UPDATE` in-place sui campi geometrici); `template_family_id` = lineage stabile fra versioni, indipendente dal nome (sopravvive a rinomina)
+- **Vincolo "1 versione attiva per famiglia"** garantito a doppio livello — lock applicativo (`SELECT ... FOR UPDATE` su tutte le righe della famiglia, ordine deterministico per `id`: serializza i `PUT` concorrenti senza deadlock) **+** indice unico parziale DB-level `idx_pdf_region_one_active_per_family` (migrazione `0007`, garanzia strutturale indipendente dal codice applicativo)
+- **Preview/estrazione** (`POST /:id/extract`) — testa il template su un PDF caricato senza persistere nulla; stesso hardening anti-abuso di `/certificati/parse` (validazione magic bytes `%PDF`, cap dimensione, mai scritto su disco)
+- **Kill-switch** — `pdfRegionEditorEnabled` in `AppSettings` (default `false`), toggle admin in Impostazioni → Moduli; voce di navigazione e route nascoste finché disattivato (pattern identico a `turnstileEnabled`)
+- **Accesso** — lista template in sola lettura per tutti (`pdf-region-templates`); editor di disegno regioni riservato agli admin (`pdf-region-editor`, route guard `user?.isAdmin`)
+
+**API** (tutte sotto `/api/v1/pdf-region-templates`, JWT): `GET /` (lista, `?all=true` per includere versioni storiche), `GET /:id`, `POST /` (nuova famiglia), `PUT /:id` (nuova versione), `DELETE /:id` (admin, header `X-Confirm-Delete` — se elimini la versione attiva riattiva automaticamente quella restante con numero più alto, mai famiglie orfane), `POST /:id/extract` (preview, nessuna persistenza).
+
+**Migrazioni**: `0006_pdf_region_templates.sql` (tabella + seed template "slim") e `0007_pdf_region_one_active.sql` (indice unico parziale — usa `CREATE UNIQUE INDEX CONCURRENTLY`, va eseguito **fuori da una transazione**: incollare lo statement da solo in Adminer/psql, non wrappato in `BEGIN`/`COMMIT`).
+
+**Nginx (deploy)**: il rendering PDF carica un Web Worker da `pdfjs-dist` — la CSP servita da Nginx per la SPA deve includere `worker-src 'self';` (assente di default, va aggiunta manualmente alla direttiva `Content-Security-Policy` nel vhost — il CSP di `@fastify/helmet` lato server **non** governa gli asset statici serviti da Nginx).
 
 ---
 
@@ -230,6 +252,22 @@ CREATE INDEX IF NOT EXISTS idx_voci_illimitata
 ---
 
 ## Changelog
+
+### 26.06.06
+**Feature — PDF Region Editor** *(in rollout, kill-switch off — non ancora attivo in produzione)*
+- Nuovo strumento admin: disegno su canvas delle regioni di riconoscimento layout direttamente sul cedolino renderizzato (`pdfjs-dist`, pagina lazy/code-split), per costruire template riusabili dal parser cedolino — coordinate salvate solo in percentuale, mai bytes/binary del PDF
+- Template versionati e immutabili (`templati_pdf_region`) — ogni modifica = nuova riga auto-attivata, predecessore disattivato in transazione, `template_family_id` = lineage stabile indipendente dal nome
+- Kill-switch `pdfRegionEditorEnabled` in `AppSettings` (default `false`) — pattern identico a `turnstileEnabled` (tipo → default store → merge bootstrap → guard nav/route → toggle admin in Impostazioni → Moduli)
+- API `POST /:id/extract` — preview/test del template su un PDF caricato, nessuna persistenza, stesso hardening anti-abuso di `/certificati/parse`
+- Migrazioni `0006_pdf_region_templates.sql` + `0007_pdf_region_one_active.sql`
+- Nuova dipendenza client: `pdfjs-dist` (canvas rendering — code-split dedicato)
+
+**Hardening — audit Gate4 pre-merge** (race condition, vincoli DB, error handling)
+- **Race condition** `createNewVersion()`: `SELECT MAX(versione)` + `INSERT` non atomici sotto isolamento READ COMMITTED (default `postgres.js`) — due `PUT` concorrenti potevano leggere lo stesso MAX e collidere sull'unique `(templateFamilyId, versione)`. Fix: lock `SELECT ... FOR UPDATE` su tutte le righe della famiglia ordinate per `id` (ordine di lock deterministico → nessun deadlock 40P01 fra transazioni concorrenti), MAX ricalcolato lato applicazione dal set bloccato (Postgres rifiuta `FOR UPDATE` combinato con funzioni di aggregazione)
+- **Vincolo strutturale "1 versione attiva per famiglia"**: indice unico parziale `idx_pdf_region_one_active_per_family ON templati_pdf_region(template_family_id) WHERE attivo = true` — garanzia DB-level indipendente dal codice applicativo, complementare (non sostitutiva) al lock sopra
+- **`setErrorHandler` globale Fastify**: uno `ZodError` non gestito risaliva al default handler con status 500, esponendo la struttura interna dello schema di validazione nella risposta — ora normalizzato a `400 { error: 'VALIDATION_ERROR', issues: [...] }`, i 500 reali restano generici (`{ error: 'INTERNAL_SERVER_ERROR' }`, dettagli solo nei log server)
+- **Cap esplicito sul base64 PDF**: `.max(12 MB)` aggiunto allo schema Zod (`pdfRegionTemplates.ts` + mirror `certificati.ts`) — esplicita a livello di contratto/validazione lo stesso limite già imposto dal `bodyLimit` di route (difesa in profondità, schema auto-documentato)
+- **`DELETE /:id` su versione attiva**: prima lasciava la famiglia orfana (zero righe `attivo = true`). Fix: in transazione (stesso ordine di lock della race condition sopra — niente deadlock incrociato) riattiva automaticamente la versione restante con il numero più alto, se esiste
 
 ### 26.06.02
 **Feature — Sezione Certificati**

@@ -450,6 +450,130 @@ export const templatiCertificatoApi = {
     apiFetch<void>(`/templati-certificato/${id}`, { method: 'DELETE' }),
 }
 
+// ── PDF Region Editor ────────────────────────────────────────
+// Mirror verbatim dei tipi dominio server (services/pdfRegion/types.ts,
+// Gate 2 §A) — strutture dati pure, identiche client/server (round-trip
+// JSON lossless: niente divergenza di forma come per CedolinoParsedApi,
+// che invece allenta riepilogo_cedolino a Record<string, number|null>).
+// `sezione` allentato a string — mirror VoceDettaglioApi riga 325
+// (SezioneCedolino non attraversa il confine di tipo client/server).
+
+/** Geometria pagina — widthPt/heightPt in punti PDF nativi (pdfjs getViewport @ scale 1). */
+export interface PageGeometry {
+  pageIndex: number
+  widthPt:   number
+  heightPt:  number
+  rotation:  0 | 90 | 180 | 270
+}
+
+/** Rettangolo regione — coordinate percentuali 0..1 relative alla pagina (spazio-viewport). */
+export interface RegionRect {
+  pageIndex: number
+  x:         number
+  y:         number
+  width:     number
+  height:    number
+}
+
+export type AnagraficaRuolo = 'matricola' | 'cognome_nome' | 'periodo_retribuzione'
+
+/** Parte anagrafica — 1 sola regione (discriminated union, mirror server: niente campi ambigui). */
+export interface ParteAnagrafica {
+  kind:    'anagrafica'
+  id:      string
+  label:   string
+  ruolo:   AnagraficaRuolo
+  regione: RegionRect
+}
+
+/** Parte voce — coppia di regioni + attributi calcolo. Strada A pura: `sezione` passthrough diretto. */
+export interface ParteVoce {
+  kind:               'voce'
+  id:                 string
+  label:              string
+  regioneDescrizione: RegionRect
+  regioneImporto:     RegionRect
+  sezione:            string            // SezioneCedolino — passthrough Strada A (allentato, vedi nota)
+  sign:               '+' | '-'
+  isArretrato:        boolean
+  decorrenza?:        string | null     // ISO 8601 — solo sezione 'sindacali'/'altre_ritenute'
+  scadenza?:          string | null
+}
+
+export type ParteTemplate = ParteAnagrafica | ParteVoce
+
+export interface AdattatoreWarning {
+  tipo:      'TEO_MANCANTE' | 'IMPORTO_NON_LETTO' | 'RIEPILOGO_SINTETIZZATO'
+  campo?:    string
+  parteId?:  string
+  messaggio: string
+}
+
+export interface AdattatoreError {
+  tipo:      'REGIONE_VUOTA' | 'IMPORTO_NON_PARSABILE' | 'PAGINA_FUORI_RANGE' | 'ANAGRAFICA_INCOMPLETA'
+  parteId?:  string
+  messaggio: string
+}
+
+/** Risposta /extract — preview editabile, NESSUNA persistenza (mirror /certificati/parse). */
+export interface ExtractPreviewResult {
+  parsed:   CedolinoParsedApi
+  warnings: AdattatoreWarning[]
+  errors:   AdattatoreError[]   // se non vuoto, blocca generazione finché non corretto in anteprima
+}
+
+export interface PdfRegionTemplateApi {
+  id:                    string
+  templateFamilyId:      string
+  nome:                  string
+  nota:                  string | null
+  versione:              number
+  versioneLabel:         string
+  attivo:                boolean
+  pageGeometry:          PageGeometry[]
+  parti:                 ParteTemplate[]
+  certificatoTemplateId: string
+  createdBy:             string | null
+  createdByUsername:     string | null
+  createdAt:             string
+  updatedAt:             string
+}
+
+/** Body create/createNewVersion — solo i campi editabili dall'operatore (mirror Gate 2 §D). */
+export type PdfRegionTemplateBody = Omit<PdfRegionTemplateApi,
+  'id' | 'templateFamilyId' | 'versione' | 'versioneLabel' | 'attivo' |
+  'createdBy' | 'createdByUsername' | 'createdAt' | 'updatedAt'>
+
+export const pdfRegionTemplatesApi = {
+  list: (opts?: { all?: boolean }) =>
+    apiFetch<PdfRegionTemplateApi[]>(`/pdf-region-templates${opts?.all ? '?all=true' : ''}`),
+
+  getById: (id: string) =>
+    apiFetch<PdfRegionTemplateApi>(`/pdf-region-templates/${id}`),
+
+  create: (data: PdfRegionTemplateBody) =>
+    apiFetch<PdfRegionTemplateApi>('/pdf-region-templates', {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+
+  /** Crea nuova versione (admin) — mai patch parziale, sempre sostituzione completa. */
+  createNewVersion: (id: string, data: PdfRegionTemplateBody) =>
+    apiFetch<PdfRegionTemplateApi>(`/pdf-region-templates/${id}`, {
+      method: 'PUT', body: JSON.stringify(data),
+    }),
+
+  delete: (id: string) =>
+    apiFetch<void>(`/pdf-region-templates/${id}`, {
+      method: 'DELETE', headers: { 'X-Confirm-Delete': 'true' },
+    }),
+
+  /** Estrae anteprima dal PDF (base64) applicando il template. Nessuna persistenza. */
+  extract: (id: string, pdfBase64: string) =>
+    apiFetch<ExtractPreviewResult>(`/pdf-region-templates/${id}/extract`, {
+      method: 'POST', body: JSON.stringify({ pdf: pdfBase64 }),
+    }),
+}
+
 // ── Settings ─────────────────────────────────────────────────
 
 export const settingsApi = {

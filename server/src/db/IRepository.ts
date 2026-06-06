@@ -413,15 +413,68 @@ export interface ICertificatiRepository {
 }
 
 // ------------------------------------------------------------
+// PDF Region Templates Repository (template-come-dato, VERSIONATO E IMMUTABILE)
+// Ogni riga = una versione immutabile. Modifiche → createNewVersion()
+// (nuova riga, mai update in-place sui campi geometrici). templateFamilyId
+// = lineage stabile fra versioni, indipendente da nome/id — refinement
+// Gate 2: evita rottura del lineage se l'admin rinomina creando versione.
+// ------------------------------------------------------------
+
+export interface PdfRegionTemplateRow {
+  id:                    string
+  templateFamilyId:      string
+  nome:                  string
+  nota:                  string | null
+  versione:              number
+  versioneLabel:         string
+  attivo:                boolean
+  pageGeometryJson:      unknown
+  partiJson:             unknown
+  certificatoTemplateId: string
+  createdBy:             string | null
+  createdByUsername:     string | null
+  createdAt:             Date
+  updatedAt:             Date
+}
+
+export interface PdfRegionTemplateInput {
+  nome:                  string
+  nota?:                 string | null
+  pageGeometryJson:      unknown
+  partiJson:             unknown
+  certificatoTemplateId: string
+  createdBy?:            string | null
+}
+
+export interface IPdfRegionTemplatesRepository {
+  /** Lista — default solo versioni attive; soloAttivi=false → storico completo (tutte le versioni/famiglie). */
+  findAll(soloAttivi?: boolean): Promise<PdfRegionTemplateRow[]>
+  findById(id: string): Promise<PdfRegionTemplateRow | null>
+  /** Crea v1: versione=1, versioneLabel=<oggi AA.MM.GG>, templateFamilyId nuovo, attivo=true. */
+  create(data: PdfRegionTemplateInput): Promise<PdfRegionTemplateRow>
+  /**
+   * Crea NUOVA VERSIONE in transazione atomica:
+   *  1. risolve famiglia/MAX(versione) dalla riga `precedenteId`
+   *  2. inserisce riga: stesso templateFamilyId, versione = max+1, versioneLabel = <oggi>, attivo = true
+   *  3. disattiva (attivo = false) la riga precedentemente attiva della stessa famiglia
+   * Mirror del pattern transazionale "progressivo atomico" di PgCertificatiRepository.
+   * MAI update in-place sui campi geometrici — immutabilità delle versioni preservata.
+   */
+  createNewVersion(precedenteId: string, data: PdfRegionTemplateInput): Promise<PdfRegionTemplateRow>
+  delete(id: string): Promise<void>
+}
+
+// ------------------------------------------------------------
 // Factory type — punto di accesso unico al DB layer
 // ------------------------------------------------------------
 
 export interface RepositoryFactory {
-  anagrafiche:  IAnagraficheRepository
-  voci:         IVociRepository
-  bozze:        IBozzeRepository
-  users:        IUsersRepository
-  settings:     ISettingsRepository
-  audit:        IAuditRepository
-  capitoliAnag: ICapitoliAnagRepository
+  anagrafiche:       IAnagraficheRepository
+  voci:              IVociRepository
+  bozze:             IBozzeRepository
+  users:             IUsersRepository
+  settings:          ISettingsRepository
+  audit:             IAuditRepository
+  capitoliAnag:      ICapitoliAnagRepository
+  pdfRegionTemplates: IPdfRegionTemplatesRepository
 }
