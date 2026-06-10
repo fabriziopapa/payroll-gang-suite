@@ -53,3 +53,8 @@ server/sql/setup - Copy.sql
 
 # ── Config server con dominio reale (usare nginx.conf.example) ─
 nginx.conf
+
+# ── File aaPanel creati nella document root VPS (immutabili chattr +i) ─
+.user.ini
+**/.user.ini
+.htaccess
