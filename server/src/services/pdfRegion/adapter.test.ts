@@ -59,6 +59,50 @@ test('adaptToParsed — caso base: anagrafica + voci di varie sezioni, riepilogo
   assert.ok(r.warnings.some(w => w.tipo === 'RIEPILOGO_SINTETIZZATO'))
 })
 
+test('adaptToParsed — campi anagrafica 1:1 (CF, nascita, inquadramento, sede, …) mappati direttamente', () => {
+  const parti: ParteTemplate[] = [
+    anagrafica('a1', 'Matricola',      'matricola'),
+    anagrafica('a2', 'CF',             'codice_fiscale'),
+    anagrafica('a3', 'Data nascita',   'data_nascita'),
+    anagrafica('a4', 'Luogo nascita',  'luogo_nascita'),
+    anagrafica('a5', 'Inquadramento',  'inquadramento'),
+    anagrafica('a6', 'Area/profilo',   'area_profilo'),
+    anagrafica('a7', 'Ruolo',          'ruolo'),
+    anagrafica('a8', 'Inizio rapporto','inizio_rapporto'),
+    anagrafica('a9', 'Anzianità',      'anzianita_servizio'),
+    anagrafica('a10', 'Afferenza',     'afferenza'),
+    anagrafica('a11', 'Sede',          'sede'),
+    voce('v1', 'Retribuzione', 'retribuzioni'),
+  ]
+  const r = adaptToParsed(extraction([
+    t('a1', 'anagrafica', '004695'),
+    t('a2', 'anagrafica', 'SPSNZE87L30F839F'),
+    t('a3', 'anagrafica', '30/07/1987'),
+    t('a4', 'anagrafica', 'NAPOLI (NA)'),
+    t('a5', 'anagrafica', 'Area degli Operatori'),
+    t('a6', 'anagrafica', 'Settore dei servizi generali e tecnici'),
+    t('a7', 'anagrafica', 'ND'),
+    t('a8', 'anagrafica', '05/05/2025'),
+    t('a9', 'anagrafica', 'anni 01 mesi 00 giorni 26'),
+    t('a10', 'anagrafica', 'Ufficio Economato e Patrimonio'),
+    t('a11', 'anagrafica', 'Sede di Via Acton'),
+    t('v1', 'descrizione', 'Retribuzione complessiva'), t('v1', 'importo', '1.775,57'),
+  ]), parti)
+
+  const a = r.parsed.anagrafica
+  assert.equal(a.codice_fiscale,     'SPSNZE87L30F839F')
+  assert.equal(a.data_nascita,       '30/07/1987')
+  assert.equal(a.luogo_nascita,      'NAPOLI (NA)')
+  assert.equal(a.inquadramento,      'Area degli Operatori')
+  assert.equal(a.area_profilo,       'Settore dei servizi generali e tecnici')
+  assert.equal(a.ruolo,              'ND')
+  assert.equal(a.inizio_rapporto,    '05/05/2025')
+  assert.equal(a.anzianita_servizio, 'anni 01 mesi 00 giorni 26')
+  assert.equal(a.afferenza,          'Ufficio Economato e Patrimonio')
+  assert.equal(a.sede,               'Sede di Via Acton')
+  assert.equal(r.errors.length, 0)
+})
+
 test('adaptToParsed — sign del template è la fonte di verità sul segno (non il testo letto)', () => {
   const parti: ParteTemplate[] = [
     voce('v1', 'Detrazione', 'fiscali_correnti', '-'),

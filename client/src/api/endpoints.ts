@@ -477,7 +477,12 @@ export interface RegionRect {
   height:    number
 }
 
-export type AnagraficaRuolo = 'matricola' | 'cognome_nome' | 'periodo_retribuzione'
+export type AnagraficaRuolo =
+  | 'matricola' | 'cognome_nome' | 'periodo_retribuzione'
+  // campi 1:1 su AnagraficaCedolino — mirror server services/pdfRegion/types.ts
+  | 'codice_fiscale' | 'data_nascita' | 'luogo_nascita'
+  | 'inquadramento' | 'area_profilo' | 'ruolo'
+  | 'inizio_rapporto' | 'anzianita_servizio' | 'afferenza' | 'sede'
 
 /** Parte anagrafica — 1 sola regione (discriminated union, mirror server: niente campi ambigui). */
 export interface ParteAnagrafica {

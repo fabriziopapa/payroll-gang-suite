@@ -83,7 +83,7 @@ const ANAGRAFICA_VUOTA: AnagraficaCedolino = {
 }
 
 /**
- * Costruisce l'anagrafica dalle (al più 3) ParteAnagrafica del template.
+ * Costruisce l'anagrafica dalle ParteAnagrafica del template.
  * PRIVACY: stesso sottoinsieme di campi del parser dinamico (no IBAN/CF
  * nucleo) — il template non può aggirarlo: AnagraficaRuolo è un'enum chiusa.
  */
@@ -118,6 +118,12 @@ function buildAnagrafica(
         anagrafica.nome    = nome
         break
       }
+      default:
+        // Campi 1:1 — il valore del ruolo È il nome del campo AnagraficaCedolino
+        // (codice_fiscale, data_nascita, luogo_nascita, inquadramento, area_profilo,
+        //  ruolo, inizio_rapporto, anzianita_servizio, afferenza, sede).
+        anagrafica[p.ruolo] = testo
+        break
     }
   }
 

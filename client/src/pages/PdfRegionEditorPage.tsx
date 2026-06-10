@@ -47,6 +47,24 @@ const SEZIONI = [
   'fiscali_correnti', 'fiscali_conguaglio', 'sindacali', 'altre_ritenute',
 ] as const
 
+// Campi anagrafica selezionabili — mirror AnagraficaRuolo server
+// (services/pdfRegion/types.ts). Copre tutti i campi di AnagraficaCedolino.
+const RUOLI_ANAGRAFICA: Array<{ value: AnagraficaRuolo; label: string }> = [
+  { value: 'matricola',            label: 'Matricola' },
+  { value: 'cognome_nome',         label: 'Cognome e nome' },
+  { value: 'periodo_retribuzione', label: 'Periodo retribuzione' },
+  { value: 'codice_fiscale',       label: 'Codice fiscale' },
+  { value: 'data_nascita',         label: 'Data di nascita' },
+  { value: 'luogo_nascita',        label: 'Luogo di nascita' },
+  { value: 'inquadramento',        label: 'Inquadramento' },
+  { value: 'area_profilo',         label: 'Area/profilo' },
+  { value: 'ruolo',                label: 'Ruolo (es. ND/PA/PO)' },
+  { value: 'inizio_rapporto',      label: 'Inizio rapporto' },
+  { value: 'anzianita_servizio',   label: 'Anzianità servizio' },
+  { value: 'afferenza',            label: 'Afferenza' },
+  { value: 'sede',                 label: 'Sede' },
+]
+
 // ── Draft state — mirror ParteAnagrafica/ParteVoce con regioni nullable ──
 
 interface ParteAnagraficaDraft {
@@ -621,9 +639,9 @@ export default function PdfRegionEditorPage() {
                               <span className="text-xs text-slate-500">Ruolo</span>
                               <select className="input mt-1" value={p.ruolo}
                                 onChange={e => setAnagraficaField(p.id, 'ruolo', e.target.value as AnagraficaRuolo)}>
-                                <option value="matricola">Matricola</option>
-                                <option value="cognome_nome">Cognome e nome</option>
-                                <option value="periodo_retribuzione">Periodo retribuzione</option>
+                                {RUOLI_ANAGRAFICA.map(r => (
+                                  <option key={r.value} value={r.value}>{r.label}</option>
+                                ))}
                               </select>
                             </label>
                             <RegionSlot label="Regione" value={p.regione} pageIndex={pageIndex}

@@ -238,6 +238,12 @@ export default function PdfRegionTemplatesPage() {
             <Field label="Inizio rapporto" value={ana.inizio_rapporto ?? ''} onChange={v => setAnag('inizio_rapporto', v)} />
             <Field label="Inquadramento"  value={ana.inquadramento ?? ''}  onChange={v => setAnag('inquadramento', v)} />
             <Field label="Periodo"        value={ana.periodo_retribuzione ?? ''} onChange={v => setAnag('periodo_retribuzione', v)} />
+            <Field label="Matricola"      value={ana.matricola ?? ''}      onChange={v => setAnag('matricola', v)} />
+            <Field label="Area/profilo"   value={ana.area_profilo ?? ''}   onChange={v => setAnag('area_profilo', v)} />
+            <Field label="Ruolo"          value={ana.ruolo ?? ''}          onChange={v => setAnag('ruolo', v)} />
+            <Field label="Anzianità servizio" value={ana.anzianita_servizio ?? ''} onChange={v => setAnag('anzianita_servizio', v)} />
+            <Field label="Afferenza"      value={ana.afferenza ?? ''}      onChange={v => setAnag('afferenza', v)} />
+            <Field label="Sede"           value={ana.sede ?? ''}           onChange={v => setAnag('sede', v)} />
           </div>
 
           {/* Riepilogo certificato (calcolato) */}

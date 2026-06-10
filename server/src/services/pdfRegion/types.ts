@@ -26,7 +26,13 @@ export interface RegionRect {
   height:    number
 }
 
-export type AnagraficaRuolo = 'matricola' | 'cognome_nome' | 'periodo_retribuzione'
+export type AnagraficaRuolo =
+  | 'matricola' | 'cognome_nome' | 'periodo_retribuzione'
+  // campi 1:1 su AnagraficaCedolino (stesso nome) — mirror parser dinamico.
+  // PRIVACY: niente IBAN/banca/CF nucleo familiare (come il parser).
+  | 'codice_fiscale' | 'data_nascita' | 'luogo_nascita'
+  | 'inquadramento' | 'area_profilo' | 'ruolo'
+  | 'inizio_rapporto' | 'anzianita_servizio' | 'afferenza' | 'sede'
 
 /** Parte anagrafica — 1 sola regione, NIENTE coppia descrizione/importo né sezione/segno
  *  (discriminated union: il compilatore impedisce accessi ambigui a campi dell'altro ramo). */

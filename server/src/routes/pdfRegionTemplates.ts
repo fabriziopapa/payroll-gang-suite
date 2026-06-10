@@ -50,7 +50,12 @@ const parteAnagraficaSchema = z.object({
   kind:    z.literal('anagrafica'),
   id:      z.string().uuid(),
   label:   z.string().min(1).max(100),
-  ruolo:   z.enum(['matricola', 'cognome_nome', 'periodo_retribuzione']),
+  ruolo:   z.enum([
+    'matricola', 'cognome_nome', 'periodo_retribuzione',
+    'codice_fiscale', 'data_nascita', 'luogo_nascita',
+    'inquadramento', 'area_profilo', 'ruolo',
+    'inizio_rapporto', 'anzianita_servizio', 'afferenza', 'sede',
+  ]),
   regione: regionRectSchema,
 })
 
