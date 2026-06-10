@@ -45,4 +45,7 @@ export interface CertificatoMeta {
   dirigente:       string
   /** override genere manuale ('M' | 'F'); se assente dedotto dal CF */
   sesso?:          'M' | 'F'
+  /** modalità di assolvimento marca da bollo scelta alla generazione
+   *  (lista configurabile in Impostazioni); se assente usa tpl.bollo.testo */
+  bollo_testo?:    string
 }

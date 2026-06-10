@@ -12,6 +12,7 @@ import type { UserApi } from './api/endpoints'
 import { DEFAULT_CSV_PARAMS, TAG_BUILTIN } from './constants/csvDefaults'
 import { DEFAULT_COEFFICIENTI_SCORPORO } from './constants/scorporoCoefficients'
 import type { AppSettings } from './types'
+import { DEFAULT_BOLLO_OPZIONI } from './types'
 
 // Bootstrap: numero massimo di retry automatici su 429 prima di fermarsi
 // (oltre il cap resta l'avviso con retry manuale, mai redirect login)
@@ -182,6 +183,9 @@ export default function App() {
           modelliComunicazione: Array.isArray(raw?.modelliComunicazione) ? (raw.modelliComunicazione as AppSettings['modelliComunicazione']) : [],
           turnstileEnabled:     typeof raw?.turnstileEnabled === 'boolean' ? raw.turnstileEnabled : true,
           pdfRegionEditorEnabled: typeof raw?.pdfRegionEditorEnabled === 'boolean' ? raw.pdfRegionEditorEnabled : false,
+          bolloOpzioni:         Array.isArray(raw?.bolloOpzioni) && (raw.bolloOpzioni as unknown[]).length
+            ? (raw.bolloOpzioni as string[]).filter(x => typeof x === 'string')
+            : DEFAULT_BOLLO_OPZIONI,
         })
       })
       .catch(() => { /* usa defaults locali già nello store */ })

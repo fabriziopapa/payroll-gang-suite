@@ -116,10 +116,26 @@ export async function buildCertificatoDocx(
   const buildCopia = (): (Paragraph | Table)[] => {
     const children: (Paragraph | Table)[] = []
 
-    // --- bollo (alto a destra) ---
-    for (const l of tpl.bollo.testo.split('\n')) {
-      children.push(para(run(R(l), { size: 18, bold: true }), { align: AlignmentType.RIGHT, after: 0 }))
-    }
+    // --- bollo (alto a SINISTRA, incorniciato) — modalità scelta alla
+    // generazione, fallback template. Box: tabella a cella singola con bordi
+    // continui, allineata al margine sinistro (lato opposto al protocollo).
+    const bolloLines = (meta.bollo_testo ?? tpl.bollo.testo).split('\n')
+    const BOLLO_W = 3800
+    children.push(new Table({
+      width: { size: BOLLO_W, type: WidthType.DXA },
+      columnWidths: [BOLLO_W],
+      rows: [new TableRow({
+        children: [new TableCell({
+          borders,
+          width: { size: BOLLO_W, type: WidthType.DXA },
+          margins: { top: 100, bottom: 100, left: 160, right: 160 },
+          children: bolloLines.map(l => new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [run(R(l), { size: 18, bold: true })],
+          })),
+        })],
+      })],
+    }))
     children.push(para(run('', { size: 12 }), { after: 120 }))
 
     // --- protocollo / posizione ---

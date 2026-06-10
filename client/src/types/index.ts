@@ -308,7 +308,15 @@ export interface AppSettings {
   turnstileEnabled?:        boolean;
   /** Kill-switch modulo Certificati PDF (region editor/templates) — default false. Abilitabile da admin. */
   pdfRegionEditorEnabled?:  boolean;
+  /** Modalità di assolvimento marca da bollo per i certificati — lista
+   *  modificabile da Impostazioni; alla generazione l'operatore ne sceglie una. */
+  bolloOpzioni?:            string[];
 }
+
+/** Default modalità assolvimento marca da bollo (seed lista bolloOpzioni). */
+export const DEFAULT_BOLLO_OPZIONI: string[] = [
+  'MARCA DA BOLLO DA EURO 16,00\nASSOLTA TRAMITE BONIFICO',
+];
 
 // ------------------------------------------------------------
 // CSV EXPORT ROW (struttura della riga CSV HR)

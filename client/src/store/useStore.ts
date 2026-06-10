@@ -11,6 +11,7 @@ import type {
   AppSettings,
   Comunicazione,
 } from '../types'
+import { DEFAULT_BOLLO_OPZIONI } from '../types'
 import type { UserApi, AnagraficaApi, VoceApi, BozzaApi, CapitoloAnagApi } from '../api/endpoints'
 import { DEFAULT_COEFFICIENTI_SCORPORO } from '../constants/scorporoCoefficients'
 import { DEFAULT_CSV_PARAMS, PALETTE_DETTAGLIO, TAG_BUILTIN } from '../constants/csvDefaults'
@@ -53,6 +54,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   modelliComunicazione:    [],
   turnstileEnabled:        true,
   pdfRegionEditorEnabled:  false,
+  bolloOpzioni:            DEFAULT_BOLLO_OPZIONI,
 }
 
 // ── Helpers ───────────────────────────────────────────────────

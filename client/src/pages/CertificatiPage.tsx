@@ -13,6 +13,7 @@ import { downloadDocx } from '../utils/docxDownloader'
 import { showToast } from '../components/ToastManager'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ApiError } from '../api/client'
+import { DEFAULT_BOLLO_OPZIONI } from '../types'
 
 const todayIt = (): string => new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
 const eur = (n: number | null): string =>
@@ -28,7 +29,7 @@ function readFileAsBase64(file: File): Promise<string> {
 }
 
 export default function CertificatiPage() {
-  const { navigate, user } = useStore()
+  const { navigate, user, settings } = useStore()
   const fileRef = useRef<HTMLInputElement>(null)
 
   const [parsed, setParsed]       = useState<CedolinoParsedApi | null>(null)
@@ -42,6 +43,13 @@ export default function CertificatiPage() {
   const [dirigente, setDirigente] = useState('Alfonso Borgogni')
   const [dataRilascio, setDataRilascio] = useState(todayIt())
   const [sessoOverride, setSessoOverride] = useState<'' | 'M' | 'F'>('')
+
+  // Modalità assolvimento marca da bollo: lista da Impostazioni (modificabile
+  // in autonomia), fallback al default storico se la lista è vuota/assente.
+  const bolloOpzioni = settings.bolloOpzioni?.length ? settings.bolloOpzioni : DEFAULT_BOLLO_OPZIONI
+  const [bolloIdx, setBolloIdx] = useState(0)
+  // lista accorciata da Impostazioni → indice fuori range, rientra sul primo
+  const bolloSel = bolloOpzioni[Math.min(bolloIdx, bolloOpzioni.length - 1)]!
 
   const annoCorrente = new Date().getFullYear()
   const [lista, setLista]   = useState<CertificatoSummaryApi[]>([])
@@ -116,6 +124,7 @@ export default function CertificatiPage() {
         dirigente: dirigente.trim() || undefined,
         dataRilascio,
         ...(sessoOverride ? { sesso: sessoOverride } : {}),
+        bolloTesto: bolloSel,
       })
       downloadDocx(created.docx.base64, created.docx.filename)
       showToast(`Certificato ${created.protocollo} generato`, 'success')
@@ -272,6 +281,16 @@ export default function CertificatiPage() {
                 <option value="M">Maschile</option>
                 <option value="F">Femminile</option>
               </select>
+            </label>
+            <label className="block sm:col-span-2">
+              <span className="text-xs text-slate-500">Marca da bollo — modalità di assolvimento</span>
+              <select className="input mt-1" value={Math.min(bolloIdx, bolloOpzioni.length - 1)}
+                onChange={e => setBolloIdx(parseInt(e.target.value))}>
+                {bolloOpzioni.map((o, i) => (
+                  <option key={i} value={i}>{o.replace(/\n/g, ' — ')}</option>
+                ))}
+              </select>
+              <span className="block mt-1 text-[11px] text-slate-600 whitespace-pre-line">{bolloSel}</span>
             </label>
           </div>
 

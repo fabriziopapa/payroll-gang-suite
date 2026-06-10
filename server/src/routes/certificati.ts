@@ -29,7 +29,7 @@ const MAX_PDF_BYTES = 8 * 1024 * 1024
 /** Shape persistita in certificati.dati_json: parser output + meta per regen. */
 interface CertificatoDatiJson {
   parsed: CedolinoParsed
-  meta: { data_rilascio: string; sesso?: 'M' | 'F' }
+  meta: { data_rilascio: string; sesso?: 'M' | 'F'; bollo_testo?: string }
 }
 
 // SEC: schema STRETTO per il `parsed` ricevuto da POST / — l'operatore può
@@ -138,6 +138,7 @@ export async function certificatiRoutes(app: FastifyInstance): Promise<void> {
       dataRilascio:  z.string().min(1).max(20),
       sesso:         z.enum(['M', 'F']).optional(),
       anno:          z.number().int().min(2000).max(2100).optional(),
+      bolloTesto:    z.string().min(1).max(300).optional(),
     }).parse(req.body)
 
     // post-validazione: la shape è ora sicura (numeri finiti, stringhe limitate,
@@ -153,7 +154,11 @@ export async function certificatiRoutes(app: FastifyInstance): Promise<void> {
 
     const datiJson: CertificatoDatiJson = {
       parsed,
-      meta: { data_rilascio: body.dataRilascio, ...(body.sesso ? { sesso: body.sesso } : {}) },
+      meta: {
+        data_rilascio: body.dataRilascio,
+        ...(body.sesso ? { sesso: body.sesso } : {}),
+        ...(body.bolloTesto ? { bollo_testo: body.bolloTesto } : {}),
+      },
     }
 
     const record = await repo.create({
@@ -175,6 +180,7 @@ export async function certificatiRoutes(app: FastifyInstance): Promise<void> {
       data_rilascio:   body.dataRilascio,
       dirigente:       body.dirigente ?? '',
       ...(body.sesso ? { sesso: body.sesso } : {}),
+      ...(body.bolloTesto ? { bollo_testo: body.bolloTesto } : {}),
     }
     const docx = await buildCertificatoDocx(parsed, tpl, meta)
     const filename = `Certificato_${safeName(record.protocollo)}_${safeName(nominativo ?? '')}.docx`
@@ -220,6 +226,7 @@ export async function certificatiRoutes(app: FastifyInstance): Promise<void> {
       data_rilascio:   dati.meta?.data_rilascio ?? '',
       dirigente:       record.dirigente ?? '',
       ...(dati.meta?.sesso ? { sesso: dati.meta.sesso } : {}),
+      ...(dati.meta?.bollo_testo ? { bollo_testo: dati.meta.bollo_testo } : {}),
     }
     const docx = await buildCertificatoDocx(dati.parsed, tpl, meta)
     const filename = `Certificato_${safeName(record.protocollo)}_${safeName(record.nominativo ?? '')}.docx`

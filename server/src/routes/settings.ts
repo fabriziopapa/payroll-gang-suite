@@ -27,6 +27,7 @@ const ALLOWED_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   'modelliComunicazione',
   'turnstileEnabled',
   'pdfRegionEditorEnabled',
+  'bolloOpzioni',
 ])
 
 // Chiavi esposte senza autenticazione (solo valori non sensibili)

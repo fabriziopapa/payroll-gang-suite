@@ -389,6 +389,8 @@ export interface CreaCertificatoBody {
   dataRilascio:   string
   sesso?:         'M' | 'F'
   anno?:          number
+  /** modalità assolvimento marca da bollo scelta (da settings.bolloOpzioni) */
+  bolloTesto?:    string
 }
 
 export const certificatiApi = {

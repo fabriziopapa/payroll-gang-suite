@@ -8,6 +8,7 @@ import { useStore } from '../store/useStore'
 import { settingsApi } from '../api/endpoints'
 import { showToast } from '../components/ToastManager'
 import type { Contatto, ModelloComunicazione, ScorporoMap } from '../types'
+import { DEFAULT_BOLLO_OPZIONI } from '../types'
 
 const TURNSTILE_CONFIGURED = Boolean(import.meta.env['VITE_TURNSTILE_SITE_KEY'])
 
@@ -20,7 +21,7 @@ export default function ImpostazioniPage() {
   const { settings, setSettings, user } = useStore()
 
   // ── Tab attiva ────────────────────────────────────────────
-  type Tab = 'generali' | 'rubrica' | 'modelli'
+  type Tab = 'generali' | 'rubrica' | 'modelli' | 'bollo'
   const [tab, setTab] = useState<Tab>('generali')
 
   // ── Stato locale — sezione Generali ───────────────────────
@@ -55,11 +56,18 @@ export default function ImpostazioniPage() {
   const [modEdit,   setModEdit]       = useState<string | null>(null)
   const [savingMod, setSavingMod]     = useState(false)
 
+  // ── Stato locale — Marca da bollo (certificati) ───────────
+  const [bolli, setBolli]           = useState<string[]>(settings.bolloOpzioni ?? DEFAULT_BOLLO_OPZIONI)
+  const [bolloTesto, setBolloTesto] = useState('')
+  const [bolloEdit, setBolloEdit]   = useState<number | null>(null)
+  const [savingBollo, setSavingBollo] = useState(false)
+
   // Sync locale quando settings cambiano dall'esterno
   useEffect(() => {
     setRubrica(settings.rubrica ?? [])
     setModelli(settings.modelliComunicazione ?? [])
-  }, [settings.rubrica, settings.modelliComunicazione])
+    setBolli(settings.bolloOpzioni ?? DEFAULT_BOLLO_OPZIONI)
+  }, [settings.rubrica, settings.modelliComunicazione, settings.bolloOpzioni])
 
   // Ascolta il save-modello da ComunicazioneModal
   // Usa getState() per evitare stale closure su `settings` e `modelli`
@@ -220,10 +228,39 @@ export default function ImpostazioniPage() {
     } catch { showToast('Errore nel salvataggio del modello', 'error') } finally { setSavingMod(false) }
   }
 
+  // ── Actions Marca da bollo ────────────────────────────────
+  async function saveBolli(data: string[]) {
+    setSavingBollo(true)
+    try {
+      await settingsApi.update({ bolloOpzioni: data })
+      setSettings({ ...useStore.getState().settings, bolloOpzioni: data })
+    } catch { showToast('Errore nel salvataggio', 'error') } finally { setSavingBollo(false) }
+  }
+
+  function addBollo() {
+    const testo = bolloTesto.trim()
+    if (!testo) return
+    const updated = bolloEdit !== null
+      ? bolli.map((b, i) => (i === bolloEdit ? testo : b))
+      : [...bolli, testo]
+    setBolli(updated)
+    setBolloTesto(''); setBolloEdit(null)
+    void saveBolli(updated)
+  }
+
+  function removeBollo(idx: number) {
+    if (bolli.length <= 1) { showToast('Deve restare almeno una modalità', 'error'); return }
+    const updated = bolli.filter((_, i) => i !== idx)
+    setBolli(updated)
+    if (bolloEdit === idx) { setBolloEdit(null); setBolloTesto('') }
+    void saveBolli(updated)
+  }
+
   const TABS: Array<{ id: Tab; label: string }> = [
     { id: 'generali', label: 'Generali' },
     { id: 'rubrica',  label: `Rubrica (${rubrica.length})` },
     { id: 'modelli',  label: `Modelli comunicazione (${modelli.length})` },
+    { id: 'bollo',    label: `Marca da bollo (${bolli.length})` },
   ]
 
   return (
@@ -667,6 +704,81 @@ export default function ImpostazioniPage() {
                 <button
                   type="button"
                   onClick={() => { setModEdit(null); setModNome(''); setModOgg(''); setModCorpo('') }}
+                  className="text-slate-500 hover:text-slate-300 text-sm transition"
+                >
+                  Annulla
+                </button>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── TAB MARCA DA BOLLO ────────────────────────────────── */}
+      {tab === 'bollo' && (
+        <>
+          <section className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden mb-4">
+            <div className="px-5 pt-4 pb-2">
+              <h3 className="text-sm font-semibold text-white">Modalità di assolvimento — certificati</h3>
+              <p className="text-slate-400 text-xs mt-1">
+                Testo stampato in alto a destra sul certificato. L&apos;operatore sceglie la modalità
+                al momento della generazione. Le righe multiple vanno a capo nel documento.
+              </p>
+            </div>
+            <div className="divide-y divide-slate-800/60">
+              {bolli.map((b, i) => (
+                <div key={i} className="px-4 py-3 hover:bg-slate-800/20 group flex items-start gap-3">
+                  <p className="flex-1 min-w-0 text-slate-200 text-sm whitespace-pre-line">{b}</p>
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition shrink-0">
+                    <button
+                      onClick={() => { setBolloEdit(i); setBolloTesto(b) }}
+                      className="p-1.5 rounded text-slate-500 hover:text-white hover:bg-slate-700 transition"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => removeBollo(i)}
+                      className="p-1.5 rounded text-slate-500 hover:text-red-400 hover:bg-red-950/30 transition"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Form aggiunta / modifica modalità */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+            <h3 className="text-sm font-semibold text-white mb-3">
+              {bolloEdit !== null ? 'Modifica modalità' : 'Nuova modalità'}
+            </h3>
+            <label className="block text-xs text-slate-400 mb-1">Testo (max 300 caratteri — a capo = riga nuova sul certificato)</label>
+            <textarea
+              rows={3} maxLength={300}
+              placeholder={'es. MARCA DA BOLLO DA EURO 16,00\nASSOLTA TRAMITE PAGO-PA'}
+              value={bolloTesto}
+              onChange={e => setBolloTesto(e.target.value)}
+              className={`${inputCls} w-full`}
+            />
+            <div className="flex items-center gap-3 mt-4">
+              <button
+                onClick={addBollo}
+                disabled={!bolloTesto.trim() || savingBollo}
+                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500
+                           text-white text-sm font-medium transition disabled:opacity-50"
+              >
+                {savingBollo ? 'Salvataggio…' : bolloEdit !== null ? 'Aggiorna modalità' : 'Aggiungi modalità'}
+              </button>
+              {bolloEdit !== null && (
+                <button
+                  type="button"
+                  onClick={() => { setBolloEdit(null); setBolloTesto('') }}
                   className="text-slate-500 hover:text-slate-300 text-sm transition"
                 >
                   Annulla
