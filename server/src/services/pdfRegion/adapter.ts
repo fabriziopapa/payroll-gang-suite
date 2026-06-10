@@ -230,6 +230,7 @@ function synthesizeRiepilogo(voci: VoceDettaglio[]): RiepilogoCedolino {
   return {
     retribuzioni:   sommaSezioni('retribuzioni'),
     accessorie:     sommaSezioni('accessorie'),
+    abbattimenti:   sommaSezioni('abbattimenti'),
     contributi:     sommaSezioni('contributi'),
     fiscali_totali: sommaSezioni('fiscali_correnti', 'fiscali_conguaglio'),
     altre_ritenute: sommaSezioni('sindacali', 'altre_ritenute'),

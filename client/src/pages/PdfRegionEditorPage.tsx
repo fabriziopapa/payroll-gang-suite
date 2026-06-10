@@ -43,7 +43,7 @@ import { PALETTE_DETTAGLIO } from '../constants/csvDefaults'
 
 // mirror SEZIONI server (services/cedolino/types.ts SezioneCedolino / routes/pdfRegionTemplates.ts)
 const SEZIONI = [
-  'retribuzioni', 'accessorie', 'contributi',
+  'retribuzioni', 'accessorie', 'abbattimenti', 'contributi',
   'fiscali_correnti', 'fiscali_conguaglio', 'sindacali', 'altre_ritenute',
 ] as const
 

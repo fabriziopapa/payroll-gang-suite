@@ -83,8 +83,11 @@ export function usePdfDocument(bytes: Uint8Array | null): UsePdfDocumentResult {
         setNumPages(doc.numPages)
         setLoading(false)
       },
-      () => {
+      (err: unknown) => {
         if (cancelled) return
+        // La causa reale (worker non caricato, MIME, PDF corrotto…) resta in
+        // console: il messaggio utente è generico, il debug no.
+        console.error('[usePdfDocument] caricamento PDF fallito:', err)
         setLoadError('PDF non leggibile o danneggiato — verifica il file e riprova.')
         setLoading(false)
       },

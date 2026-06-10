@@ -24,7 +24,7 @@ import type { PageGeometry, ParteTemplate } from '../services/pdfRegion/types.js
 const MAX_PDF_BYTES = 8 * 1024 * 1024
 
 const SEZIONI = [
-  'retribuzioni', 'accessorie', 'contributi',
+  'retribuzioni', 'accessorie', 'abbattimenti', 'contributi',
   'fiscali_correnti', 'fiscali_conguaglio', 'sindacali', 'altre_ritenute',
 ] as const
 

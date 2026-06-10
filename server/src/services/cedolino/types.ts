@@ -7,6 +7,7 @@
 export type SezioneCedolino =
   | 'retribuzioni'
   | 'accessorie'
+  | 'abbattimenti'
   | 'contributi'
   | 'fiscali_correnti'
   | 'fiscali_conguaglio'
@@ -55,6 +56,7 @@ export interface VoceDettaglio {
 export interface RiepilogoCedolino {
   retribuzioni:   number | null
   accessorie:     number | null
+  abbattimenti:   number | null
   contributi:     number | null
   fiscali_totali: number | null
   altre_ritenute: number | null
@@ -79,6 +81,20 @@ export interface CertificatoCalcolato {
   netto_a_pagare:         number | null
   quinto:                 number | null
   settimo:                number | null
+}
+
+/** Riga della tabella riassuntiva di verifica (replica foglio Excel ufficio):
+ *  confronto voce per voce tra valori cedolino e valori esposti nel certificato. */
+export interface RiassuntoRiga {
+  voce:        string
+  segno:       '+' | '-' | '='
+  cedolino:    number | null
+  certificato: number | null
+}
+
+export interface RiassuntoGruppo {
+  titolo: string
+  righe:  RiassuntoRiga[]
 }
 
 /** Output completo del parser — serializzato in certificati.dati_json */

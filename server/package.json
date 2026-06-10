@@ -1,11 +1,11 @@
 {
   "name": "@payroll-gang/server",
-  "version": "26.06.06",
+  "version": "26.06.10",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "tsx --env-file=../.env watch src/app.ts",
-    "build": "tsc",
+    "build": "tsc && node -e \"require('node:fs').cpSync('src/services/certificato/assets','dist/services/certificato/assets',{recursive:true})\"",
     "start": "node --env-file=../.env dist/app.js",
     "migrate": "drizzle-kit migrate",
     "seed": "tsx --env-file=../.env src/db/seed.ts",

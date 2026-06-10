@@ -59,6 +59,15 @@ export default defineConfig({
           react:   ['react', 'react-dom'],
           zustand: ['zustand', 'immer'],
         },
+        // Asset .mjs (pdf.worker di pdfjs-dist via `?url`) rinominati .js:
+        // nginx aaPanel non mappa .mjs → serve application/octet-stream e
+        // Chrome (strict MIME + nosniff) rifiuta il module worker → ogni PDF
+        // dell'editor regioni falliva con "PDF non leggibile o danneggiato".
+        // L'estensione .js viene servita come application/javascript ovunque.
+        assetFileNames: (info) =>
+          info.names?.some(n => n.endsWith('.mjs'))
+            ? 'assets/[name]-[hash].js'
+            : 'assets/[name]-[hash][extname]',
       },
     },
   },

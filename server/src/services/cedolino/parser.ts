@@ -35,6 +35,7 @@ const MAX_LINE_LEN  = 2_000     // troncamento riga (oltre = sospetta)
 const SECTION_ANCHORS: Array<[string, SezioneCedolino]> = [
   ['Retribuzioni',        'retribuzioni'],
   ['Accessorie',          'accessorie'],
+  ['Abbattimenti',        'abbattimenti'],
   ['Contributi',          'contributi'],
   ['Ritenute fiscali in', 'fiscali_correnti'],
   ['Ritenute fiscali da', 'fiscali_conguaglio'],
@@ -247,6 +248,8 @@ function parseRiepilogo(lines: string[]): RiepilogoCedolino {
   return {
     retribuzioni:   grab(new RegExp('Retribuzioni\\s+(' + N + ')')),
     accessorie:     grab(new RegExp('Accessorie\\s+(' + N + ')')),
+    // Riepilogo: "Abbattimenti  0,00  35,87" — la trattenuta è il 2° numero
+    abbattimenti:   grab(new RegExp('Abbattimenti\\s+[\\d.,]+\\s+(' + N + ')')),
     contributi:     grab(new RegExp('Contributi Assistenziali e Previdenziali CD\\s+[\\d.,]+\\s+(' + N + ')')),
     fiscali_totali: grab(new RegExp('Ritenute fiscali totali\\s+[\\d.,]+\\s+(' + N + ')')),
     altre_ritenute: grab(new RegExp('Altre ritenute\\s+[\\d.,]+\\s+(' + N + ')')),
