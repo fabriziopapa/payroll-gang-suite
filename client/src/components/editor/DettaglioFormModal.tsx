@@ -65,6 +65,32 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
   const [centroCosto, setCentroCosto]               = useState(existing?.centroCosto ?? '')
   const [note, setNote]                             = useState(existing?.note ?? '')
 
+  // ── Validazione campi obbligatori (tab Principale) ────────
+  type FieldErrors = Partial<Record<'nomeDescrittivo' | 'competenza' | 'dataCompetenzaVoce', string>>
+  const [errors, setErrors] = useState<FieldErrors>({})
+
+  function validate(): FieldErrors {
+    const errs: FieldErrors = {}
+    if (!nomeDescrittivo.trim())
+      errs.nomeDescrittivo = 'Il nome descrittivo è obbligatorio'
+    if (!competenza.trim())
+      errs.competenza = 'La competenza è obbligatoria'
+    else if (!/^\d{2}\/\d{4}$/.test(competenza))
+      errs.competenza = 'Formato non valido: usare MM/YYYY (es. 04/2026)'
+    if (!dataCompetenzaVoce)
+      errs.dataCompetenzaVoce = 'La data competenza voce è obbligatoria'
+    return errs
+  }
+
+  function clearError(field: keyof FieldErrors) {
+    setErrors(prev => {
+      if (!prev[field]) return prev
+      const next = { ...prev }
+      delete next[field]
+      return next
+    })
+  }
+
   // ── Search state ──────────────────────────────────────────
   const [voceSearch, setVoceSearch]         = useState(existing?.voce ?? '')
   const [capitoloSearch, setCapitoloSearch] = useState(existing?.capitolo ?? '')
@@ -114,8 +140,20 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
   const selectedCapitoloObj = capitoliAnag.find(c => c.codice === capitolo)
 
   // ── Submit ────────────────────────────────────────────────
-  function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    const errs = validate()
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs)
+      // I campi obbligatori vivono nel tab "Principale": riportalo in vista
+      // prima di spostare il focus sul primo campo invalido
+      setTab('base')
+      setTimeout(() => {
+        dialogRef.current?.querySelector<HTMLInputElement>('[aria-invalid="true"]')?.focus()
+      }, 0)
+      showToast('Compila i campi obbligatori evidenziati', 'error')
+      return
+    }
     const data: Partial<Omit<DettaglioLiquidazione, 'id' | 'colore'>> = {
       nomeDescrittivo,
       voce,
@@ -210,15 +248,17 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto">
+        <form onSubmit={handleSubmit} noValidate className="flex-1 overflow-y-auto">
           <div className="px-5 py-4 space-y-4">
 
             {/* ── TAB BASE ──────────────────────────────────── */}
             {tab === 'base' && (
               <>
-                <Field label="Nome descrittivo *">
-                  <input required value={nomeDescrittivo} onChange={e => setNomeDescrittivo(e.target.value)}
-                    placeholder="es. TFA Sostegno Nov 2026" className={inputCls} />
+                <Field label="Nome descrittivo *" error={errors.nomeDescrittivo}>
+                  <input value={nomeDescrittivo}
+                    onChange={e => { setNomeDescrittivo(e.target.value); clearError('nomeDescrittivo') }}
+                    placeholder="es. TFA Sostegno Nov 2026"
+                    className={errors.nomeDescrittivo ? inputErrCls : inputCls} />
                 </Field>
 
                 {/* ── VOCE HR ──────────────────────────── */}
@@ -332,14 +372,16 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
 
                 {/* Competenza */}
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label="Competenza (MM/YYYY)">
-                    <input value={competenza} onChange={e => setCompetenza(e.target.value)}
-                      placeholder="04/2026" pattern="\d{2}/\d{4}" title="Formato MM/YYYY"
-                      className={inputCls} />
+                  <Field label="Competenza (MM/YYYY) *" error={errors.competenza}>
+                    <input value={competenza}
+                      onChange={e => { setCompetenza(e.target.value); clearError('competenza') }}
+                      placeholder="04/2026" inputMode="numeric"
+                      className={errors.competenza ? inputErrCls : inputCls} />
                   </Field>
-                  <Field label="Data competenza voce">
+                  <Field label="Data competenza voce *" error={errors.dataCompetenzaVoce}>
                     <input type="date" value={dataCompetenzaVoce}
-                      onChange={e => setDataCompetenzaVoce(e.target.value)} className={inputCls} />
+                      onChange={e => { setDataCompetenzaVoce(e.target.value); clearError('dataCompetenzaVoce') }}
+                      className={errors.dataCompetenzaVoce ? inputErrCls : inputCls} />
                   </Field>
                 </div>
 
@@ -404,17 +446,20 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
                 <Field label="Riferimento cedolino">
                   <input value={riferimento} onChange={e => setRiferimento(e.target.value)}
                     placeholder="es. TL@TFA SOSTEGNO 2023/24@" className={inputCls} />
-                  {tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                      {tags.map(tag => (
-                        <button key={tag} type="button"
-                          onClick={() => setRiferimento(v => v + tag + '@')}
-                          className="px-2 py-0.5 rounded text-xs bg-slate-700 text-slate-300 hover:bg-slate-600 transition">
-                          {tag}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {tags.map(tag => (
+                      <button key={tag} type="button"
+                        onClick={() => setRiferimento(v => v + tag + '@')}
+                        className="px-2 py-0.5 rounded text-xs bg-slate-700 text-slate-300 hover:bg-slate-600 transition">
+                        {tag}
+                      </button>
+                    ))}
+                    <button type="button"
+                      onClick={() => setRiferimento(v => v + '@')}
+                      className="px-2 py-0.5 rounded text-xs bg-slate-700 text-slate-300 hover:bg-slate-600 transition">
+                      @
+                    </button>
+                  </div>
                 </Field>
               </>
             )}
@@ -493,15 +538,32 @@ const inputCls = `w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-7
   text-white text-sm placeholder-slate-500
   focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition`
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+const inputErrCls = `w-full px-3 py-2 rounded-lg bg-slate-800 border border-red-500/70
+  text-white text-sm placeholder-slate-500
+  focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition`
+
+function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
   const id       = useId()
+  const errorId  = `${id}-error`
   const childArr = Children.toArray(children)
   const first    = childArr[0]
   const rest     = childArr.slice(1)
+  const a11y = error ? { 'aria-invalid': true as const, 'aria-describedby': errorId } : {}
   return (
     <div>
       <label htmlFor={id} className="block text-sm font-medium text-slate-300 mb-1.5">{label}</label>
-      {isValidElement(first) ? cloneElement(first as React.ReactElement<{ id?: string }>, { id }) : first}
+      {isValidElement(first)
+        ? cloneElement(first as React.ReactElement<{ id?: string; 'aria-invalid'?: boolean; 'aria-describedby'?: string }>, { id, ...a11y })
+        : first}
+      {error && (
+        <p id={errorId} role="alert" className="mt-1 flex items-center gap-1 text-xs text-red-400">
+          <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M12 9v3.75m0 3.75h.008v.008H12v-.008zM21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          {error}
+        </p>
+      )}
       {rest}
     </div>
   )
