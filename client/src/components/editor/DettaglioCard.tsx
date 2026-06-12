@@ -3,7 +3,7 @@
 // Card colorata con lista nominativi e azioni
 // ============================================================
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useStore } from '../../store/useStore'
 import { showToast } from '../ToastManager'
 import { ConfirmDialog } from '../ConfirmDialog'
@@ -39,6 +39,18 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
   const [comunModal,   setComunModal]   = useState<{ open: boolean; existing?: Comunicazione }>({ open: false })
   const [comunList,    setComunList]    = useState(false)   // mostra lista comunicazioni esistenti
   const comunMenuRef = useRef<HTMLDivElement>(null)
+  const cardRef      = useRef<HTMLDivElement>(null)
+
+  // ── Ordinamento snapshot (solo vista) ─────────────────────
+  // L'ordine viene congelato al click sull'header: le modifiche inline
+  // successive NON riposizionano le righe (data-entry sequenziale stabile)
+  const [sort, setSort] = useState<{ col: SortCol; dir: 'asc' | 'desc'; ids: string[] } | null>(null)
+
+  // ── Ricerca "evidenzia e scrolla" (stile Ctrl+F) ──────────
+  // Le righe non vengono MAI nascoste: solo highlight + scroll al match
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [query, setQuery]           = useState('')
+  const [matchPos, setMatchPos]     = useState(0)
 
   // Chiudi il dropdown lista comunicazioni cliccando fuori (senza capture — usa ref)
   const handleOutsideClick = useCallback((e: MouseEvent) => {
@@ -78,6 +90,77 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
 
   const noms         = nominativi.filter(n => n.dettaglioId === dettaglio.id)
   const comunDettaglio = comunicazioni.filter(c => c.dettaglioId === dettaglio.id)
+
+  // VISTA ORDINATA — SOLO per il render del tbody e la navigazione Enter.
+  // Mai passare a ComunicazioneModal / TotaleRow / downloadMatricolePerRuolo /
+  // export: l'ordine canonico (documento) è quello dello store (`noms`).
+  const displayNoms = useMemo(() => {
+    if (!sort) return noms
+    const byId    = new Map(noms.map(n => [n.id, n]))
+    const ordered = sort.ids.map(id => byId.get(id)).filter((n): n is Nominativo => !!n)
+    // Difensivo: nominativi assenti dallo snapshot (l'aggiunta resetta il sort,
+    // ma in caso di stato anomalo nessuna riga deve sparire dalla vista)
+    if (ordered.length !== noms.length) {
+      const seen = new Set(sort.ids)
+      ordered.push(...noms.filter(n => !seen.has(n.id)))
+    }
+    return ordered
+  }, [noms, sort])
+
+  function handleSortClick(col: SortCol) {
+    setSort(prev => {
+      if (!prev || prev.col !== col) {
+        return { col, dir: 'asc', ids: [...noms].sort((a, b) => compareNomBy(col, a, b)).map(n => n.id) }
+      }
+      if (prev.dir === 'asc') {
+        // Comparatore invertito (non reverse dell'array): i pari merito
+        // restano in ordine di inserimento grazie al sort stabile
+        return { col, dir: 'desc', ids: [...noms].sort((a, b) => compareNomBy(col, b, a)).map(n => n.id) }
+      }
+      return null  // terzo click: ripristino ordine documento
+    })
+  }
+
+  function handleAddNominativo() {
+    if (sort) {
+      setSort(null)
+      showToast("Ordinamento rimosso — ripristinato l'ordine di inserimento", 'info')
+    }
+    onAddNominativo()
+  }
+
+  // Match ricerca: nominativo + matricola, accent/case-insensitive, token in AND
+  const matchIds = useMemo(() => {
+    const q = normalizeSearch(query.trim())
+    if (!q) return []
+    const tokens = q.split(/\s+/)
+    return displayNoms
+      .filter(n => {
+        const hay = normalizeSearch(`${n.cognomeNome} ${n.matricola}`)
+        return tokens.every(t => hay.includes(t))
+      })
+      .map(n => n.id)
+  }, [displayNoms, query])
+  const matchSet  = useMemo(() => new Set(matchIds), [matchIds])
+  const safePos   = matchIds.length === 0 ? 0 : Math.min(matchPos, matchIds.length - 1)
+  const currentId = matchIds[safePos] ?? null
+
+  // Scroll al match corrente
+  useEffect(() => {
+    if (!currentId) return
+    cardRef.current?.querySelector(`[data-nom-id="${currentId}"]`)?.scrollIntoView({ block: 'center' })
+  }, [currentId])
+
+  function closeSearch() {
+    setSearchOpen(false)
+    setQuery('')
+    setMatchPos(0)
+  }
+
+  function stepMatch(delta: 1 | -1) {
+    if (matchIds.length === 0) return
+    setMatchPos(p => (p + delta + matchIds.length) % matchIds.length)
+  }
 
   function confirmDelete() {
     setDeleteGruppoOpen(true)
@@ -278,7 +361,7 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
         onClose={() => setComunModal({ open: false })}
       />
     )}
-    <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+    <div ref={cardRef} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
 
       {/* ── Header colorato ────────────────────────────────── */}
       <div
@@ -331,6 +414,23 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
 
         {/* Azioni */}
         <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+
+          {/* 🔍 Ricerca evidenzia-e-scrolla (solo gruppi numerosi) */}
+          {noms.length > 15 && (
+            <button
+              onClick={() => {
+                if (searchOpen) { closeSearch() } else { setCollapsed(false); setSearchOpen(true) }
+              }}
+              className={`p-1.5 rounded-lg transition hover:bg-slate-800
+                ${searchOpen ? 'text-indigo-400' : 'text-slate-400 hover:text-indigo-400'}`}
+              title="Cerca nel gruppo (evidenzia, non nasconde)"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
+              </svg>
+            </button>
+          )}
 
           {/* ✉ Comunicazione — badge + dropdown lista esistenti */}
           <div className="relative">
@@ -419,7 +519,7 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
             </>
           )}
           <button
-            onClick={onAddNominativo}
+            onClick={handleAddNominativo}
             className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs
                        bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600/30 transition"
           >
@@ -490,13 +590,62 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
               </button>
             </div>
           ) : (
+            <>
+            {/* Barra ricerca evidenzia-e-scrolla */}
+            {searchOpen && (
+              <div className="flex items-center gap-2 px-4 py-2 border-b border-slate-800/50 bg-slate-800/30">
+                <svg className="w-3.5 h-3.5 text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
+                </svg>
+                <input
+                  autoFocus
+                  type="search"
+                  value={query}
+                  onChange={e => { setQuery(e.target.value); setMatchPos(0) }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter')  { e.preventDefault(); stepMatch(e.shiftKey ? -1 : 1) }
+                    if (e.key === 'Escape') { e.preventDefault(); closeSearch() }
+                  }}
+                  placeholder="Cerca nominativo o matricola…"
+                  aria-label="Cerca nominativo o matricola nel gruppo"
+                  className="flex-1 min-w-0 px-2 py-1 rounded bg-slate-800 border border-slate-700
+                             text-white text-xs placeholder-slate-500
+                             focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+                <span aria-live="polite" className="text-xs text-slate-500 shrink-0 font-mono">
+                  {query.trim() ? `${matchIds.length === 0 ? 0 : safePos + 1} di ${matchIds.length}` : ''}
+                </span>
+                <button type="button" onClick={() => stepMatch(-1)} disabled={matchIds.length === 0}
+                  title="Match precedente (Shift+Invio)"
+                  className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 transition">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7"/>
+                  </svg>
+                </button>
+                <button type="button" onClick={() => stepMatch(1)} disabled={matchIds.length === 0}
+                  title="Match successivo (Invio)"
+                  className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 transition">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
+                  </svg>
+                </button>
+                <button type="button" onClick={closeSearch} title="Chiudi ricerca (Esc)"
+                  className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700 transition">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+                  </svg>
+                </button>
+              </div>
+            )}
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-800/50">
-                  <th className="text-left px-4 py-2 text-slate-500 text-xs font-medium">Nominativo</th>
-                  <th className="text-left px-4 py-2 text-slate-500 text-xs font-medium hidden sm:table-cell">Matricola</th>
-                  <th className="text-left px-4 py-2 text-slate-500 text-xs font-medium">Ruolo</th>
-                  <th className="text-right px-4 py-2 text-slate-500 text-xs font-medium">Lordo</th>
+                  <SortableTh label="Nominativo" col="nominativo" sort={sort} onSort={handleSortClick} />
+                  <SortableTh label="Matricola"  col="matricola"  sort={sort} onSort={handleSortClick}
+                    className="hidden sm:table-cell" />
+                  <SortableTh label="Ruolo"      col="ruolo"      sort={sort} onSort={handleSortClick} />
+                  <SortableTh label="Lordo"      col="lordo"      sort={sort} onSort={handleSortClick} align="right" />
                   {dettaglio.flagScorporo && (
                     <th className="text-right px-4 py-2 text-slate-500 text-xs font-medium">Lordo benef.</th>
                   )}
@@ -504,19 +653,21 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
                 </tr>
               </thead>
               <tbody>
-                {noms.map((nom, idx) => (
+                {displayNoms.map((nom, idx) => (
                   <NominativoRow
                     key={nom.id}
                     nom={nom}
                     dettaglio={dettaglio}
                     coefficienti={settings.coefficienti}
                     coefficientiContoTerzi={settings.coefficientiContoTerzi}
+                    searchHit={nom.id === currentId ? 'current' : matchSet.has(nom.id) ? 'match' : null}
                     onRemove={() => setRemoveConfirmId(nom.id)}
                     isEditingImporto={editingImportoNomId === nom.id}
                     onStartEditImporto={() => setEditingImportoNomId(nom.id)}
                     onStopEditImporto={() => setEditingImportoNomId(null)}
                     onCommitAndNext={() => {
-                      const next = noms[idx + 1]
+                      // Naviga la vista ordinata: "riga successiva" = quella sotto l'occhio
+                      const next = displayNoms[idx + 1]
                       setEditingImportoNomId(next ? next.id : null)
                     }}
                   />
@@ -533,6 +684,7 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
                 </tfoot>
               )}
             </table>
+            </>
           )}
         </div>
       )}
@@ -566,13 +718,14 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
 
 // ── Riga nominativo ───────────────────────────────────────────
 
-function NominativoRow({ nom, dettaglio, coefficienti, coefficientiContoTerzi, onRemove,
+function NominativoRow({ nom, dettaglio, coefficienti, coefficientiContoTerzi, searchHit, onRemove,
   isEditingImporto, onStartEditImporto, onStopEditImporto, onCommitAndNext,
 }: {
   nom:                       Nominativo
   dettaglio:                 DettaglioLiquidazione
   coefficienti:              ReturnType<typeof useStore.getState>['settings']['coefficienti']
   coefficientiContoTerzi?:   ReturnType<typeof useStore.getState>['settings']['coefficientiContoTerzi']
+  searchHit?:                'match' | 'current' | null
   onRemove:                  () => void
   isEditingImporto:          boolean
   onStartEditImporto:   () => void
@@ -621,7 +774,13 @@ function NominativoRow({ nom, dettaglio, coefficienti, coefficientiContoTerzi, o
   const cessatoWarn = finRapWarn(nom.finRap, dettaglio.dataCompetenzaVoce || undefined)
 
   return (
-    <tr className="border-b border-slate-800/30 hover:bg-slate-800/20 group transition">
+    <tr
+      data-nom-id={nom.id}
+      className={`border-b border-slate-800/30 group transition
+        ${searchHit === 'current' ? 'bg-indigo-900/40'
+          : searchHit === 'match' ? 'bg-indigo-900/15'
+          : 'hover:bg-slate-800/20'}`}
+    >
       <td className="px-4 py-2 text-white text-sm">
         <span className="inline-flex items-center gap-1.5">
           {nom.cognomeNome}
@@ -745,6 +904,58 @@ function NominativoRow({ nom, dettaglio, coefficienti, coefficientiContoTerzi, o
         </button>
       </td>
     </tr>
+  )
+}
+
+// ── Ordinamento e ricerca (helper puri, solo vista) ───────────
+
+type SortCol = 'nominativo' | 'matricola' | 'ruolo' | 'lordo'
+
+const sortCollator = new Intl.Collator('it', { sensitivity: 'base', numeric: true })
+
+function compareNomBy(col: SortCol, a: Nominativo, b: Nominativo): number {
+  switch (col) {
+    case 'nominativo': return sortCollator.compare(a.cognomeNome, b.cognomeNome)
+    case 'matricola':  return sortCollator.compare(a.matricola, b.matricola)
+    case 'ruolo':      return sortCollator.compare(a.ruolo, b.ruolo)
+    case 'lordo':      return a.importoLordo - b.importoLordo
+  }
+}
+
+/** lowercase + rimozione diacritici: "Buonì" matcha "buoni" */
+function normalizeSearch(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+}
+
+function SortableTh({ label, col, sort, onSort, align = 'left', className = '' }: {
+  label:     string
+  col:       SortCol
+  sort:      { col: SortCol; dir: 'asc' | 'desc' } | null
+  onSort:    (col: SortCol) => void
+  align?:    'left' | 'right'
+  className?: string
+}) {
+  const active = sort?.col === col
+  const arrow  = active ? (sort.dir === 'asc' ? '▲' : '▼') : '⇅'
+  return (
+    <th
+      aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+      className={`p-0 ${className}`}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(col)}
+        title="Ordina la vista — non modifica l'ordine salvato"
+        className={`w-full flex items-center gap-1 px-4 py-2 text-xs font-medium transition
+          focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 rounded
+          ${align === 'right' ? 'justify-end' : ''}
+          ${active ? 'text-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}
+      >
+        {align === 'right' && <span className={`text-[10px] ${active ? '' : 'text-slate-700'}`} aria-hidden="true">{arrow}</span>}
+        {label}
+        {align === 'left' && <span className={`text-[10px] ${active ? '' : 'text-slate-700'}`} aria-hidden="true">{arrow}</span>}
+      </button>
+    </th>
   )
 }
 
