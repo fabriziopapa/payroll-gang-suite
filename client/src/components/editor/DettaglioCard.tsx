@@ -7,7 +7,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useStore } from '../../store/useStore'
 import { showToast } from '../ToastManager'
 import { ConfirmDialog } from '../ConfirmDialog'
-import { calcolaImportoCSV, formatEur } from '../../utils/biz'
+import { calcolaImportoCSV, formatEur, finRapWarn } from '../../utils/biz'
 import type { DettaglioLiquidazione, Nominativo } from '../../types'
 import { anagraficheApi } from '../../api/endpoints'
 import RuoloDisambiguaModal, { type DisambiguaItem } from '../RuoloDisambiguaModal'
@@ -27,6 +27,7 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
     nominativi, removeDettaglio, removeNominativo, addDettaglio,
     updateNominativo, settings,
     comunicazioni, addComunicazione, updateComunicazione, removeComunicazione,
+    anagrafiche, setAnagrafiche,
   } = useStore()
   const [collapsed, setCollapsed]             = useState(false)
   const [editingImportoNomId, setEditingImportoNomId] = useState<string | null>(null)
@@ -119,6 +120,27 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
   async function handleAggiornaRuolo() {
     if (noms.length === 0) return
     setAggRuoloLoading(true)
+
+    // Sincronizza finRap dal record anagrafico più recente.
+    // Non si può usare ruolo-at: per i cessati prima della data competenza
+    // la query non restituisce righe (fin_rap >= data) — proprio il caso
+    // che serve segnalare con il badge rosso.
+    let anagList = anagrafiche
+    if (anagList.length === 0) {
+      try {
+        anagList = await anagraficheApi.list()
+        setAnagrafiche(anagList)
+      } catch { /* anagrafica non disponibile — si aggiorna solo il ruolo */ }
+    }
+    const anagByMatricola = new Map(anagList.map(a => [a.matricola, a]))
+    for (const nom of noms) {
+      const rec = anagByMatricola.get(nom.matricola)
+      // Record assente (es. cessato da >3 anni, fuori dal filtro rilevanza):
+      // non toccare il finRap già salvato sul nominativo
+      if (rec && (nom.finRap ?? null) !== (rec.finRap ?? null)) {
+        updateNominativo(nom.id, { finRap: rec.finRap ?? null })
+      }
+    }
 
     const dataDate     = dettaglio.dataCompetenzaVoce || undefined
     const toDisambigua: DisambiguaItem[]  = []
@@ -596,9 +618,25 @@ function NominativoRow({ nom, dettaglio, coefficienti, coefficientiContoTerzi, o
     setEditingRuolo(false)
   }
 
+  const cessatoWarn = finRapWarn(nom.finRap, dettaglio.dataCompetenzaVoce || undefined)
+
   return (
     <tr className="border-b border-slate-800/30 hover:bg-slate-800/20 group transition">
-      <td className="px-4 py-2 text-white text-sm">{nom.cognomeNome}</td>
+      <td className="px-4 py-2 text-white text-sm">
+        <span className="inline-flex items-center gap-1.5">
+          {nom.cognomeNome}
+          {cessatoWarn && (
+            <span
+              className="inline-flex items-center gap-1 text-xs text-red-400 font-mono shrink-0"
+              title={`Fine rapporto: ${cessatoWarn} — precedente alla data di competenza voce`}
+              aria-label={`Cessato — fine rapporto ${cessatoWarn}`}
+            >
+              <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" aria-hidden="true" />
+              {cessatoWarn}
+            </span>
+          )}
+        </span>
+      </td>
       <td className="px-4 py-2 text-slate-400 text-xs font-mono hidden sm:table-cell">{nom.matricola}</td>
       <td className="px-4 py-2">
         {editingRuolo ? (

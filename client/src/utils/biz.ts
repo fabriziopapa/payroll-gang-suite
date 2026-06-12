@@ -275,3 +275,20 @@ export function formatEur(n: number): string {
     maximumFractionDigits: 2,
   }) + ' €'
 }
+
+/**
+ * Ritorna la data fine rapporto formattata DD/MM/YYYY se è precedente
+ * alla data di competenza voce, null altrimenti.
+ * Confronto lessicografico su ISO date (YYYY-MM-DD) — sicuro e O(1).
+ * Usata sia nell'anteprima di aggiunta (NominativoFormModal, warning ambra)
+ * sia nella lista nominativi (DettaglioCard, badge rosso cessazione).
+ */
+export function finRapWarn(
+  finRap:         string | null | undefined,
+  dataCompetenza: string | undefined,
+): string | null {
+  if (!finRap || !dataCompetenza) return null
+  if (finRap >= dataCompetenza) return null
+  const [y, m, d] = finRap.split('-')
+  return `${d ?? '??'}/${m ?? '??'}/${y ?? '??'}`
+}

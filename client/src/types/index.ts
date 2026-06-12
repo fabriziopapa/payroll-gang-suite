@@ -8,7 +8,7 @@
 // ------------------------------------------------------------
 
 export const APP_NAME = 'Payroll Gang Suite' as const;
-export const APP_VERSION = '26.06.10' as const;
+export const APP_VERSION = '26.06.12' as const;
 
 // ------------------------------------------------------------
 // RUOLI
@@ -67,6 +67,13 @@ export interface Nominativo {
    * Resettato a false dopo un aggiornamento automatico riuscito da DB.
    */
   ruoloModificato?: boolean;
+  /**
+   * Data fine rapporto (YYYY-MM-DD) dall'anagrafica al momento dell'aggiunta.
+   * null/undefined = attivo o dato non disponibile.
+   * Se precedente alla data competenza voce → badge rosso cessazione in DettaglioCard.
+   * Per i nominativi pre-esistenti viene popolata dal tasto "Aggiorna Ruolo".
+   */
+  finRap?: string | null;
   /**
    * Voci di budget interne. Se presente, importoLordo = sum(importoBudget[].importo).
    * Opzionale per backward compat: nominativi senza budget usano solo importoLordo.

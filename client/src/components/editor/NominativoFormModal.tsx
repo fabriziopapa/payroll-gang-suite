@@ -11,6 +11,7 @@ import { useStore, type BozzaDati } from '../../store/useStore'
 import { anagraficheApi, bozzeApi, type AnagraficaApi } from '../../api/endpoints'
 import type { DettaglioLiquidazione, Nominativo, ImportoBudgetItem } from '../../types'
 import RuoloDisambiguaModal, { type DisambiguaItem } from '../RuoloDisambiguaModal'
+import { finRapWarn } from '../../utils/biz'
 import { useModalKeyboard } from '../../hooks/useFocusTrap'
 import BudgetPanel from './BudgetPanel'
 
@@ -125,21 +126,6 @@ interface GroupedAnag {
 
 function normStr(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-}
-
-/**
- * Ritorna la data fine rapporto formattata DD/MM/YYYY se è precedente
- * alla data di competenza voce, null altrimenti.
- * Confronto lexicografico su ISO date (YYYY-MM-DD) — sicuro e O(1).
- */
-function finRapWarn(
-  finRap:         string | null | undefined,
-  dataCompetenza: string | undefined,
-): string | null {
-  if (!finRap || !dataCompetenza) return null
-  if (finRap >= dataCompetenza) return null
-  const [y, m, d] = finRap.split('-')
-  return `${d ?? '??'}/${m ?? '??'}/${y ?? '??'}`
 }
 
 // ── Filtro rilevanza: esclude cessati da più di 2 anni ────────
@@ -332,6 +318,11 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
     const importoLordo = importoEffettivo
     const importoBudget: ImportoBudgetItem[] | undefined =
       confirmedBudget.length > 0 ? confirmedBudget : undefined
+    // finRap dall'anagrafica: lookup per matricola copre sia la selezione
+    // dal dropdown sia l'inserimento manuale della matricola
+    const anagRecord = selectedAnag?.matricola === mMatricola.trim()
+      ? selectedAnag
+      : anagrafiche.find(x => x.matricola === mMatricola.trim())
     addNominativo({
       matricola:    mMatricola.trim(),
       cognomeNome:  mCognNome.trim(),
@@ -341,6 +332,7 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
       importoLordo,
       importoBudget,
       origine:      'manuale',
+      finRap:       anagRecord?.finRap ?? null,
     })
     // Rimane aperto — reset form
     setMSearch('')
@@ -462,6 +454,7 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
         dettaglioId:  dettaglio.id,
         importoLordo: r.importoParsed,
         origine:      'pdf',
+        finRap:       a.finRap ?? null,
       })
     }
     onClose()
@@ -560,6 +553,10 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
         dettaglioId:  dettaglio.id,
         importoLordo: nom.importoLordo,
         origine:      nom.origine,
+        // Sorgente può non avere finRap (bozze pre-26.06.12) → fallback anagrafica
+        finRap:       nom.finRap
+          ?? anagrafiche.find(x => x.matricola === nom.matricola)?.finRap
+          ?? null,
       })
     }
     onClose()
