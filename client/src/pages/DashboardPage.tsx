@@ -7,6 +7,7 @@ import { useStore } from '../store/useStore'
 import { bozzeApi, type BozzaApi } from '../api/endpoints'
 import { showToast } from '../components/ToastManager'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import CopiaLiquidazioneModal from '../components/CopiaLiquidazioneModal'
 
 const PAGE_SIZE = 6
 
@@ -23,6 +24,9 @@ export default function DashboardPage() {
   const [deleting, setDeleting]           = useState<string | null>(null)
   const [archiving, setArchiving]         = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  // Bozza sorgente per la copia — caricata completa (con dati) via getById
+  const [copiaSource, setCopiaSource]     = useState<BozzaApi | null>(null)
+  const [copying, setCopying]             = useState<string | null>(null)
 
   // Carica bozze al mount
   useEffect(() => {
@@ -78,6 +82,16 @@ export default function DashboardPage() {
       upsertBozza(updated)
     } catch { showToast('Errore durante l\'operazione', 'error') }
     finally { setArchiving(null) }
+  }
+
+  // GET /bozze lista non include `dati` — fetch completo prima del modal copia
+  async function handleCopia(b: BozzaApi) {
+    setCopying(b.id)
+    try {
+      const full = await bozzeApi.getById(b.id)
+      setCopiaSource(full)
+    } catch { showToast('Errore nel caricamento della liquidazione da copiare', 'error') }
+    finally { setCopying(null) }
   }
 
   async function handleDelete(id: string) {
@@ -155,8 +169,10 @@ export default function DashboardPage() {
                 onView={() => handleOpenViewer(b)}
                 onArchive={() => handleArchive(b)}
                 onDelete={() => setConfirmDeleteId(b.id)}
+                onCopy={() => handleCopia(b)}
                 isArchiving={archiving === b.id}
                 isDeleting={deleting === b.id}
+                isCopying={copying === b.id}
               />
             ))}
           </div>
@@ -208,6 +224,18 @@ export default function DashboardPage() {
         onConfirm={() => { if (confirmDeleteId) handleDelete(confirmDeleteId); setConfirmDeleteId(null) }}
         onCancel={() => setConfirmDeleteId(null)}
       />
+
+      {copiaSource && (
+        <CopiaLiquidazioneModal
+          bozza={copiaSource}
+          onClose={() => setCopiaSource(null)}
+          onCreated={nuova => {
+            upsertBozza(nuova)
+            setCopiaSource(null)
+            showToast(`Creata «${nuova.nome}»`, 'success')
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -227,7 +255,7 @@ function StatCard({ label, value, color }: {
   )
 }
 
-function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onView, onArchive, onDelete, isArchiving, isDeleting }: {
+function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onView, onArchive, onDelete, onCopy, isArchiving, isDeleting, isCopying }: {
   bozza:              BozzaApi
   isOwn:              boolean
   createdByUsername:  string | null
@@ -235,8 +263,10 @@ function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onView, onArchive,
   onView:             () => void
   onArchive:          () => void
   onDelete:           () => void
+  onCopy:             () => void
   isArchiving:        boolean
   isDeleting:         boolean
+  isCopying:          boolean
 }) {
   const isArchiviata = bozza.stato === 'archiviata'
   const createdAt    = new Date(bozza.createdAt).toLocaleDateString('it-IT', {
@@ -326,6 +356,25 @@ function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onView, onArchive,
             </svg>
           </button>
         )}
+        {/* Copia liquidazione — tutti gli utenti, anche su archiviate */}
+        <button
+          onClick={onCopy}
+          disabled={isCopying}
+          className="p-2 sm:p-1.5 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-emerald-950/30 transition disabled:opacity-50"
+          title="Copia liquidazione (senza nominativi)"
+        >
+          {isCopying ? (
+            <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+          )}
+        </button>
         {/* Ripristina / Archivia */}
         <button
           onClick={onArchive}
