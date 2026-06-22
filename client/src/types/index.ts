@@ -8,7 +8,7 @@
 // ------------------------------------------------------------
 
 export const APP_NAME = 'Payroll Gang Suite' as const;
-export const APP_VERSION = '26.06.12' as const;
+export const APP_VERSION = '26.06.23' as const;
 
 // ------------------------------------------------------------
 // RUOLI
@@ -79,6 +79,12 @@ export interface Nominativo {
    * Opzionale per backward compat: nominativi senza budget usano solo importoLordo.
    */
   importoBudget?: ImportoBudgetItem[];
+  /**
+   * Riferimento cedolino specifico del nominativo (tag WD/WE con CF).
+   * Se presente vince su DettaglioLiquidazione.riferimentoCedolino nel CSV.
+   * Assente/vuoto → si usa quello del gruppo (caso TL). Backward compat totale.
+   */
+  riferimentoCedolino?: string;
 }
 
 // ------------------------------------------------------------
@@ -110,6 +116,24 @@ export interface VoceItem {
   capitoli: CapitoloItem[];
 }
 
+/**
+ * Config manuale per voce (parametri non importabili da XML).
+ * Persistita su tabella server `voci_config` (separata da `voci`),
+ * pre-compila il gruppo liquidazione alla selezione della voce.
+ */
+export interface VoceConfig {
+  /** Codice voce — chiave logica */
+  codice: string;
+  /** Override di csvDefaults.parti — null = default globale */
+  parti: number | null;
+  /** Pre-set scorporo del gruppo — null = nessuno */
+  tipoScorporo: 'none' | 'standard' | 'contoterzi' | null;
+  /** Prefisso tag riferimento cedolino — null = nessuno */
+  tagDefault: 'TL' | 'WD' | 'WE' | null;
+  /** Se tag WE: prende il figlio (FG) più giovane, sempre 1 riga CSV */
+  autoFiglio: boolean;
+}
+
 // ------------------------------------------------------------
 // TAG CEDOLINO
 // ------------------------------------------------------------
@@ -119,6 +143,14 @@ export interface TagCedolino {
   prefisso: string;
   /** true = built-in (non eliminabile), false = aggiunto dall'utente */
   builtin: boolean;
+  /**
+   * Semantica del tag — guida la costruzione del riferimento cedolino.
+   * - 'testo'     : testo libero a livello gruppo (es. TL@...@) — default storico
+   * - 'cf_dip'    : CF del dipendente, per-nominativo (es. WD@<anno><CF>@)
+   * - 'cf_figlio' : CF del figlio, per-nominativo (es. WE@<anno><CF_figlio>@)
+   * Opzionale per backward compat con tags pre-esistenti (default 'testo').
+   */
+  tipo?: 'testo' | 'cf_dip' | 'cf_figlio';
 }
 
 // ------------------------------------------------------------

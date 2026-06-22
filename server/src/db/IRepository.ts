@@ -115,6 +115,70 @@ export interface IVociRepository {
 }
 
 // ------------------------------------------------------------
+// Voci Config Repository (parametri manuali per voce — rif. cedolino)
+// ------------------------------------------------------------
+
+export type TipoScorporoConfig = 'none' | 'standard' | 'contoterzi'
+export type TagDefaultConfig   = 'TL' | 'WD' | 'WE'
+
+export interface VoceConfigRow {
+  codice:       string
+  parti:        number | null
+  tipoScorporo: TipoScorporoConfig | null
+  tagDefault:   TagDefaultConfig | null
+  autoFiglio:   boolean
+  updatedAt:    Date
+}
+
+export interface VoceConfigInput {
+  codice:        string
+  parti?:        number | null
+  tipoScorporo?: TipoScorporoConfig | null
+  tagDefault?:   TagDefaultConfig | null
+  autoFiglio?:   boolean
+}
+
+export interface IVociConfigRepository {
+  findAll(): Promise<VoceConfigRow[]>
+  findByCodice(codice: string): Promise<VoceConfigRow | null>
+  upsert(input: VoceConfigInput): Promise<VoceConfigRow>
+  delete(codice: string): Promise<void>
+}
+
+// ------------------------------------------------------------
+// Familiari Cache Repository (figli da CINECA CSA-WS — tag WE)
+// ------------------------------------------------------------
+
+export interface FamiliareCacheRow {
+  idAb:              number | null
+  matricola:         string | null
+  codFisc:           string
+  cognome:           string | null
+  nome:              string | null
+  sesso:             string | null
+  rapportoParentela: string
+  dataNasc:          string | null  // YYYY-MM-DD
+  aggiornatoAt:      Date
+}
+
+export interface FamiliareCacheInput {
+  idAb?:             number | null
+  matricola:         string
+  codFisc:           string
+  cognome?:          string | null
+  nome?:             string | null
+  sesso?:            string | null
+  rapportoParentela: string
+  dataNasc?:         string | null
+}
+
+export interface IFamiliariRepository {
+  findByMatricola(matricola: string): Promise<FamiliareCacheRow[]>
+  /** Sostituisce l'intero nucleo cachato per la matricola (snapshot). */
+  replaceForMatricola(matricola: string, rows: FamiliareCacheInput[]): Promise<void>
+}
+
+// ------------------------------------------------------------
 // Bozze Repository
 // ------------------------------------------------------------
 

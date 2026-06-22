@@ -8,9 +8,10 @@
 
 import { useState, useMemo, useRef, useEffect, useId, cloneElement, isValidElement, Children } from 'react'
 import { useStore, type BozzaDati } from '../../store/useStore'
-import { anagraficheApi, bozzeApi, type AnagraficaApi } from '../../api/endpoints'
-import type { DettaglioLiquidazione, Nominativo, ImportoBudgetItem } from '../../types'
+import { anagraficheApi, bozzeApi, vociConfigApi, cinecaApi, type AnagraficaApi, type FamiliareApi } from '../../api/endpoints'
+import type { DettaglioLiquidazione, Nominativo, ImportoBudgetItem, VoceConfig } from '../../types'
 import RuoloDisambiguaModal, { type DisambiguaItem } from '../RuoloDisambiguaModal'
+import { showToast } from '../ToastManager'
 import { finRapWarn } from '../../utils/biz'
 import { useModalKeyboard } from '../../hooks/useFocusTrap'
 import BudgetPanel from './BudgetPanel'
@@ -255,6 +256,59 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
   // Stato disambiguation modal (tab manuale)
   const [disambiguaItems, setDisambiguaItems] = useState<DisambiguaItem[]>([])
 
+  // ── Riferimento cedolino per-nominativo (tag WD/WE) ───────
+  const [voceConfig, setVoceConfig]   = useState<VoceConfig | null>(null)
+  const [mRiferimento, setMRiferimento] = useState('')
+  const [rifLoading, setRifLoading]   = useState(false)
+  const [figli, setFigli]             = useState<FamiliareApi[]>([])
+
+  // anno competenza (da "MM/YYYY") per il segmento <anno> del riferimento
+  const annoComp = (dettaglio.competenzaLiquidazione.split('/')[1] ?? '').trim()
+  const tagTipo  = voceConfig?.tagDefault ?? null   // 'TL' | 'WD' | 'WE' | null
+
+  // Carica la config della voce del gruppo (per sapere il tag)
+  useEffect(() => {
+    if (!dettaglio.voce) return
+    vociConfigApi.list()
+      .then(list => setVoceConfig(list.find(c => c.codice === dettaglio.voce) ?? null))
+      .catch(() => {})
+  }, [dettaglio.voce])
+
+  async function buildRiferimentoWD() {
+    if (!mMatricola.trim()) { showToast('Inserisci prima la matricola', 'error'); return }
+    setRifLoading(true)
+    try {
+      const { codFisc } = await cinecaApi.cf(mMatricola.trim())
+      setMRiferimento(`WD@${annoComp}${codFisc}@`)
+    } catch {
+      showToast('CF dipendente non disponibile (SGE/CINECA)', 'error')
+    } finally {
+      setRifLoading(false)
+    }
+  }
+
+  async function buildRiferimentoWE() {
+    if (!mMatricola.trim()) { showToast('Inserisci prima la matricola', 'error'); return }
+    setRifLoading(true)
+    try {
+      if (voceConfig?.autoFiglio) {
+        const { figlio } = await cinecaApi.figlioGiovane(mMatricola.trim())
+        setMRiferimento(`WE@${annoComp}${figlio.codFisc}@`)
+        setFigli([])
+      } else {
+        const { familiari } = await cinecaApi.familiari(mMatricola.trim())
+        const fg = familiari.filter(f => f.rapportoParentela.toUpperCase() === 'FG')
+        setFigli(fg)
+        if (fg.length === 0) showToast('Nessun figlio (FG) trovato', 'error')
+        else if (fg.length === 1) setMRiferimento(`WE@${annoComp}${fg[0]!.codFisc}@`)
+      }
+    } catch {
+      showToast('Errore lookup figli CINECA', 'error')
+    } finally {
+      setRifLoading(false)
+    }
+  }
+
   const suggestions = useMemo(
     () => mSearch.trim().length < 2 ? [] : searchAnagGrouped(mSearch, anagrafiche),
     [mSearch, anagrafiche],
@@ -333,6 +387,7 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
       importoBudget,
       origine:      'manuale',
       finRap:       anagRecord?.finRap ?? null,
+      riferimentoCedolino: mRiferimento.trim() || undefined,
     })
     // Rimane aperto — reset form
     setMSearch('')
@@ -341,6 +396,8 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
     setMRuolo('')
     setMDruolo('')
     setMImporto('')
+    setMRiferimento('')
+    setFigli([])
     setConfirmedBudget([])
     setBudgetAnchorEl(null)
     setFilled(false)
@@ -787,6 +844,53 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
                   />
                 )}
               </div>
+
+              {/* ── Riferimento cedolino (per-nominativo) ──── */}
+              {tagTipo === 'WD' || tagTipo === 'WE' ? (
+                <div className="space-y-2 p-3 rounded-lg bg-slate-800/40 border border-slate-700">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-slate-300">Riferimento cedolino</span>
+                    <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-indigo-900/40 text-indigo-300">
+                      {tagTipo} · {tagTipo === 'WD' ? 'CF dipendente' : 'CF figlio'}
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <input value={mRiferimento} onChange={e => setMRiferimento(e.target.value)}
+                      placeholder={`${tagTipo}@${annoComp}CF@`}
+                      className={`${inputCls} font-mono flex-1`} />
+                    <button type="button" disabled={rifLoading}
+                      onClick={tagTipo === 'WD' ? buildRiferimentoWD : buildRiferimentoWE}
+                      className="px-3 py-2 rounded-lg bg-indigo-600/20 text-indigo-300 border border-indigo-700/50
+                                 hover:bg-indigo-600/40 transition text-sm shrink-0 disabled:opacity-40">
+                      {rifLoading ? '…' : 'CINECA'}
+                    </button>
+                  </div>
+                  {tagTipo === 'WE' && figli.length > 1 && (
+                    <select
+                      onChange={e => { const cf = e.target.value; if (cf) setMRiferimento(`WE@${annoComp}${cf}@`) }}
+                      className={inputCls} defaultValue="">
+                      <option value="" disabled>Scegli il figlio…</option>
+                      {figli.map(f => (
+                        <option key={f.codFisc} value={f.codFisc}>
+                          {f.cognome} {f.nome} — {f.codFisc}{f.dataNasc ? ` (${f.dataNasc})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <p className="text-xs text-slate-500">
+                    {annoComp || '—'} = anno competenza · CF recuperato da CSA-WS
+                    {tagTipo === 'WE' && voceConfig?.autoFiglio && ' · figlio più giovane (auto)'}
+                  </p>
+                </div>
+              ) : dettaglio.riferimentoCedolino ? (
+                <div className="p-3 rounded-lg bg-slate-800/40 border border-slate-700">
+                  <span className="text-sm font-medium text-slate-300">Riferimento cedolino</span>
+                  <p className="font-mono text-xs text-slate-400 mt-1 break-all">
+                    {dettaglio.riferimentoCedolino}
+                    <span className="text-slate-600"> · dal gruppo</span>
+                  </p>
+                </div>
+              ) : null}
             </form>
           )}
 

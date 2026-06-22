@@ -3,7 +3,7 @@
 // ============================================================
 
 import { apiFetch } from './client'
-import type { AppSettings } from '../types'
+import type { AppSettings, VoceConfig } from '../types'
 
 // ── Tipi risposta dal server ──────────────────────────────────
 
@@ -266,6 +266,52 @@ export const vociApi = {
 
   lastImport: () =>
     apiFetch<{ lastImport: string | null }>('/voci/last-import'),
+}
+
+// ── Voci Config (parametri manuali per voce — rif. cedolino) ──
+
+export const vociConfigApi = {
+  list: () =>
+    apiFetch<VoceConfig[]>('/voci-config'),
+
+  save: (codice: string, cfg: Omit<VoceConfig, 'codice'>) =>
+    apiFetch<VoceConfig>(`/voci-config/${encodeURIComponent(codice)}`, {
+      method: 'PUT',
+      body:   JSON.stringify(cfg),
+    }),
+
+  remove: (codice: string) =>
+    apiFetch<{ success: boolean }>(`/voci-config/${encodeURIComponent(codice)}`, {
+      method: 'DELETE',
+    }),
+}
+
+// ── CINECA CSA-WS (riferimento cedolino WD/WE) ────────────────
+
+export interface FamiliareApi {
+  codFisc:           string
+  rapportoParentela: string
+  cognome:           string | null
+  nome:              string | null
+  sesso:             string | null
+  dataNasc:          string | null
+}
+
+export const cinecaApi = {
+  /** CF dipendente (dato locale SGE) — per tag WD */
+  cf: (matricola: string) =>
+    apiFetch<{ matricola: string; codFisc: string; source: string }>(
+      `/cineca/cf?matricola=${encodeURIComponent(matricola)}`),
+
+  /** Nucleo familiare completo — per scelta manuale figlio (WE) */
+  familiari: (matricola: string) =>
+    apiFetch<{ matricola: string; familiari: FamiliareApi[]; fromCache: boolean }>(
+      `/cineca/familiari?matricola=${encodeURIComponent(matricola)}`),
+
+  /** Figlio (FG) più giovane — per tag WE con scelta automatica */
+  figlioGiovane: (matricola: string) =>
+    apiFetch<{ matricola: string; figlio: FamiliareApi; fromCache: boolean }>(
+      `/cineca/figlio-giovane?matricola=${encodeURIComponent(matricola)}`),
 }
 
 // ── Capitoli Anagrafica ───────────────────────────────────────

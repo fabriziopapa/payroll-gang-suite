@@ -62,6 +62,17 @@ const envSchema = z.object({
   SMTP_USER:   z.string().optional(),
   SMTP_PASS:   z.string().optional(),
   SMTP_FROM:   z.string().optional(),
+
+  // CINECA CSA-WS (opzionale — il server parte senza; le route /cineca/*
+  // rispondono 503 finché le credenziali non sono configurate)
+  CINECA_BASE_URL: z.string().url().optional(),       // es. https://prod.csa-ws.cineca.it
+  CINECA_TENANT:   z.string().optional(),             // es. uniparthenope
+  CINECA_USER:     z.string().optional(),
+  CINECA_PASSWORD: z.string().optional(),
+  // Gruppi richiesti nel token (CSV). 'familiari'=figli (WE), 'sge'=stato giuridico (CF dip.)
+  CINECA_GROUPS:   z.string().default('familiari,sge'),
+  // Codice rapportoParentela per figlio/figlia (da screen CSA: "FG")
+  PARENTELA_FIGLIO: z.string().default('FG'),
 })
 
 const parsed = envSchema.safeParse(process.env)
@@ -104,3 +115,7 @@ export function parseDurationMs(s: string): number {
  * automaticamente sia la scadenza del token in DB sia il maxAge del cookie.
  */
 export const REFRESH_TOKEN_MS = parseDurationMs(env.JWT_REFRESH_EXPIRES)
+
+/** true se tutte le credenziali CINECA CSA-WS sono presenti */
+export const cinecaConfigured =
+  !!(env.CINECA_BASE_URL && env.CINECA_TENANT && env.CINECA_USER && env.CINECA_PASSWORD)

@@ -4,10 +4,12 @@
 
 import React, { useState, useEffect } from 'react'
 import { useStore } from '../store/useStore'
-import { vociApi, type VoceApi } from '../api/endpoints'
+import { vociApi, vociConfigApi, type VoceApi } from '../api/endpoints'
 import { sendXmlInChunks, type ChunkProgress } from '../utils/xmlChunker'
 import Pagination from '../components/Pagination'
 import { usePageLoad } from '../hooks/usePageLoad'
+import VoceConfigModal from '../components/VoceConfigModal'
+import type { VoceConfig } from '../types'
 
 export default function VociPage() {
   const { voci, setVoci } = useStore()
@@ -19,16 +21,30 @@ export default function VociPage() {
   const [expanded, setExpanded]     = useState<number | null>(null)
   const [page, setPage]             = useState(1)
   const [pageSize, setPageSize]     = useState(20)
+  const [configs, setConfigs]       = useState<Record<string, VoceConfig>>({})
+  const [configVoce, setConfigVoce] = useState<VoceApi | null>(null)
 
   const { isLoading, loadError } = usePageLoad(
     async () => {
-      const [data, li] = await Promise.all([vociApi.active(), vociApi.lastImport()])
+      const [data, li, cfgs] = await Promise.all([
+        vociApi.active(), vociApi.lastImport(), vociConfigApi.list(),
+      ])
       setVoci(data)
       setLastImport(li.lastImport)
+      setConfigs(Object.fromEntries(cfgs.map(c => [c.codice, c])))
     },
     [setVoci],
     'Impossibile caricare le voci. Controlla la connessione e riprova.',
   )
+
+  function applyConfigChange(codice: string, cfg: VoceConfig | null) {
+    setConfigs(prev => {
+      const next = { ...prev }
+      if (cfg) next[codice] = cfg
+      else delete next[codice]
+      return next
+    })
+  }
 
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -157,8 +173,10 @@ export default function VociPage() {
                 <VoceRow
                   key={v.id}
                   voce={v}
+                  config={configs[v.codice]}
                   expanded={expanded === v.id}
                   onToggle={() => setExpanded(expanded === v.id ? null : v.id)}
+                  onConfig={() => setConfigVoce(v)}
                 />
               ))}
               {filtered.length > 0 && (
@@ -176,38 +194,67 @@ export default function VociPage() {
           )}
         </div>
       )}
+
+      {configVoce && (
+        <VoceConfigModal
+          voce={configVoce}
+          existing={configs[configVoce.codice]}
+          onClose={() => setConfigVoce(null)}
+          onSaved={applyConfigChange}
+        />
+      )}
     </div>
   )
 }
 
-function VoceRow({ voce, expanded, onToggle }: {
-  voce: VoceApi; expanded: boolean; onToggle: () => void
+function VoceRow({ voce, config, expanded, onToggle, onConfig }: {
+  voce: VoceApi; config?: VoceConfig; expanded: boolean; onToggle: () => void; onConfig: () => void
 }) {
   const isIllimitata = voce.dataFin === '22220202'
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-800/50 transition"
-      >
-        <span className="font-mono text-sm text-indigo-400 shrink-0 w-16">{voce.codice}</span>
-        <span className="text-white text-sm flex-1 truncate">{voce.descrizione}</span>
-        <span className="text-xs text-slate-500 shrink-0 hidden sm:block">
-          {voce.dataIn.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3')}
-          {!isIllimitata && ` → ${voce.dataFin.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3')}`}
-        </span>
-        {voce.capitoli.length > 0 && (
-          <span className="text-xs text-slate-400 shrink-0">
-            {voce.capitoli.length} cap.
-          </span>
-        )}
-        <svg
-          className={`w-4 h-4 text-slate-500 transition-transform shrink-0 ${expanded ? 'rotate-180' : ''}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor"
+      <div className="flex items-center">
+        <button
+          onClick={onToggle}
+          className="flex-1 min-w-0 flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-800/50 transition"
         >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
-        </svg>
-      </button>
+          <span className="font-mono text-sm text-indigo-400 shrink-0 w-16">{voce.codice}</span>
+          <span className="text-white text-sm flex-1 truncate">{voce.descrizione}</span>
+          {config?.tagDefault && (
+            <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-900/40 text-indigo-300 font-mono shrink-0">
+              {config.tagDefault}
+            </span>
+          )}
+          <span className="text-xs text-slate-500 shrink-0 hidden sm:block">
+            {voce.dataIn.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3')}
+            {!isIllimitata && ` → ${voce.dataFin.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3')}`}
+          </span>
+          {voce.capitoli.length > 0 && (
+            <span className="text-xs text-slate-400 shrink-0">
+              {voce.capitoli.length} cap.
+            </span>
+          )}
+          <svg
+            className={`w-4 h-4 text-slate-500 transition-transform shrink-0 ${expanded ? 'rotate-180' : ''}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
+          </svg>
+        </button>
+        <button
+          onClick={onConfig}
+          title="Config voce (parti, scorporo, tag cedolino)"
+          aria-label="Config voce"
+          className={`shrink-0 px-3 py-3 border-l border-slate-800 transition
+            ${config ? 'text-indigo-400 hover:bg-indigo-900/20' : 'text-slate-500 hover:text-white hover:bg-slate-800/50'}`}
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+        </button>
+      </div>
       {expanded && voce.capitoli.length > 0 && (
         <div className="border-t border-slate-800 px-4 py-2 space-y-1">
           {voce.capitoli.map(c => (

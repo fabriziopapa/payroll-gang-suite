@@ -80,7 +80,9 @@ export function buildCsvRows(
         codiceEnte:                  CSV_FIXED.codiceEnte,
         codiceCapitolo:              det.capitolo,
         codiceCentroDiCosto:         det.centroCosto,
-        riferimento:                 det.riferimentoCedolino,
+        // Riferimento per-nominativo (tag WD/WE con CF) vince su quello del
+        // gruppo (TL). Backward compat: nominativi senza il campo → gruppo.
+        riferimento:                 nom.riferimentoCedolino || det.riferimentoCedolino,
         codiceRiferimentoVoce:       CSV_FIXED.codiceRiferimentoVoce,
         flagAdempimenti:             det.flagAdempimenti,
         idContrattoCSA:              det.idContrattoCSA,

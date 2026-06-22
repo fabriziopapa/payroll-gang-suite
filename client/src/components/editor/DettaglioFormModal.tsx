@@ -9,10 +9,10 @@ import { useState, useEffect, useMemo, useRef, useId, cloneElement, isValidEleme
 import { useStore } from '../../store/useStore'
 import { lastDayOfMonth } from '../../utils/biz'
 import { DEFAULT_CSV_PARAMS } from '../../constants/csvDefaults'
-import { vociApi, capitoliApi, anagraficheApi } from '../../api/endpoints'
+import { vociApi, capitoliApi, anagraficheApi, vociConfigApi } from '../../api/endpoints'
 import { showToast } from '../ToastManager'
 import { useModalKeyboard } from '../../hooks/useFocusTrap'
-import type { DettaglioLiquidazione } from '../../types'
+import type { DettaglioLiquidazione, VoceConfig } from '../../types'
 
 interface Props {
   existing?: DettaglioLiquidazione
@@ -91,6 +91,25 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
     })
   }
 
+  // ── Config voci (pre-compilazione alla selezione voce) ────
+  const [vociConfigs, setVociConfigs] = useState<Record<string, VoceConfig>>({})
+
+  function applyVoceConfig(codice: string) {
+    const cfg = vociConfigs[codice]
+    if (!cfg) return
+    if (cfg.parti != null) setParti(String(cfg.parti))
+    if (cfg.tipoScorporo) {
+      // downgrade a standard se CT richiesto ma non configurato
+      const next = cfg.tipoScorporo === 'contoterzi'
+        && Object.keys(settings.coefficientiContoTerzi ?? {}).length === 0
+          ? 'standard' : cfg.tipoScorporo
+      setScorporoMode(next as ScorporoMode)
+    }
+    if (cfg.tagDefault) {
+      setRiferimento(prev => prev.trim() === '' ? `${cfg.tagDefault}@` : prev)
+    }
+  }
+
   // ── Search state ──────────────────────────────────────────
   const [voceSearch, setVoceSearch]         = useState(existing?.voce ?? '')
   const [capitoloSearch, setCapitoloSearch] = useState(existing?.capitolo ?? '')
@@ -105,6 +124,9 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
     if (capitoliAnag.length === 0) {
       capitoliApi.list().then(data => setCapitoliAnag(data)).catch(() => {})
     }
+    vociConfigApi.list()
+      .then(list => setVociConfigs(Object.fromEntries(list.map(c => [c.codice, c]))))
+      .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ricalcola dataCompetenzaVoce ogni volta che competenza cambia
@@ -300,7 +322,7 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
                             <p className="text-center py-4 text-slate-500 text-sm">Nessun risultato.</p>
                           ) : vociFiltrate.map(v => (
                             <button key={`${v.codice}-${v.dataIn}`} type="button"
-                              onClick={() => { setVoce(v.codice); setVoceOpen(false) }}
+                              onClick={() => { setVoce(v.codice); setVoceOpen(false); applyVoceConfig(v.codice) }}
                               className="w-full flex items-center gap-3 px-3 py-2 text-left
                                          hover:bg-slate-700/60 transition border-b border-slate-800/50 last:border-0">
                               <span className="font-mono text-indigo-400 text-xs shrink-0 w-14">{v.codice}</span>
@@ -312,6 +334,14 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
                     </div>
                   )}
                 </div>
+
+                {voce && vociConfigs[voce] && (
+                  <p className="text-xs text-indigo-400 mt-1.5 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                    Parametri pre-compilati da config voce
+                    {vociConfigs[voce]!.tagDefault && ` · tag ${vociConfigs[voce]!.tagDefault}`}
+                  </p>
+                )}
 
                 {/* ── CAPITOLO ─────────────────────────── */}
                 <div>

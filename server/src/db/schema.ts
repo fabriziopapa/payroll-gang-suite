@@ -364,6 +364,47 @@ export const templatiPdfRegion = pgTable('templati_pdf_region', {
 ])
 
 // ------------------------------------------------------------
+// VOCI CONFIG (parametri manuali per voce — riferimento cedolino WD/WE)
+// Separata da `voci`: l'import XML fa upsert su (codice, data_in) e
+// cancellerebbe la config. Chiave logica `codice`. Migration 0008.
+// ------------------------------------------------------------
+
+export const vociConfig = pgTable('voci_config', {
+  codice:       varchar('codice', { length: 10 }).primaryKey(),
+  /** Override di csvDefaults.parti — NULL = default globale */
+  parti:        integer('parti'),
+  /** 'none' | 'standard' | 'contoterzi' — NULL = nessun pre-set */
+  tipoScorporo: varchar('tipo_scorporo', { length: 12 }),
+  /** Prefisso tag: 'TL' | 'WD' | 'WE' — NULL = nessuno */
+  tagDefault:   varchar('tag_default', { length: 8 }),
+  /** Se true e tag WE: figlio (FG) più giovane, sempre 1 riga CSV */
+  autoFiglio:   boolean('auto_figlio').notNull().default(false),
+  updatedAt:    timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+// ------------------------------------------------------------
+// FAMILIARI CACHE (figli da CINECA CSA-WS — tag cedolino WE)
+// rapporto_parentela 'FG' = figlio/a. Migration 0008.
+// ------------------------------------------------------------
+
+export const familiariCache = pgTable('familiari_cache', {
+  id:                serial('id').primaryKey(),
+  idAb:              integer('id_ab'),
+  matricola:         varchar('matricola', { length: 10 }),
+  codFisc:           varchar('cod_fisc', { length: 16 }).notNull(),
+  cognome:           varchar('cognome', { length: 100 }),
+  nome:              varchar('nome', { length: 100 }),
+  sesso:             varchar('sesso', { length: 1 }),
+  rapportoParentela: varchar('rapporto_parentela', { length: 4 }).notNull(),
+  dataNasc:          date('data_nasc'),
+  aggiornatoAt:      timestamp('aggiornato_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('idx_familiari_cache_persona_cf').on(t.matricola, t.codFisc),
+  index('idx_familiari_cache_matricola').on(t.matricola),
+  index('idx_familiari_cache_id_ab').on(t.idAb),
+])
+
+// ------------------------------------------------------------
 // TIPI INFERITI (usati nelle repository)
 // ------------------------------------------------------------
 
@@ -378,6 +419,10 @@ export type NewAnagImportLog  = typeof anagImportLog.$inferInsert
 export type Voce              = typeof voci.$inferSelect
 export type Capitolo          = typeof capitoli.$inferSelect
 export type CapitoloAnag      = typeof capitoliAnag.$inferSelect
+export type VoceConfig        = typeof vociConfig.$inferSelect
+export type NewVoceConfig     = typeof vociConfig.$inferInsert
+export type FamiliareCache    = typeof familiariCache.$inferSelect
+export type NewFamiliareCache = typeof familiariCache.$inferInsert
 export type NewCapitoloAnag   = typeof capitoliAnag.$inferInsert
 export type Bozza             = typeof bozze.$inferSelect
 export type NewBozza          = typeof bozze.$inferInsert
