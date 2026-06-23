@@ -17,6 +17,7 @@ import { encrypt, decrypt } from '../services/cryptoService.js'
 import {
   getFamiliari,
   CinecaApiError,
+  CinecaNoIdAbError,
   type FamiliareNorm,
 } from '../services/cinecaService.js'
 import type { FamiliareCacheRow, FamiliareCacheInput } from '../db/IRepository.js'
@@ -77,13 +78,24 @@ export async function cinecaRoutes(app: FastifyInstance): Promise<void> {
     if (!cinecaConfigured) {
       return { familiari: cached.map(cacheToNorm), fromCache: true }
     }
+
+    // L'API familiari v1 richiede idAb (da SGE). Senza, non interrogabile.
+    const idAb = await localIdAb(matricola)
+    if (idAb == null) {
+      app.log.warn({ matricola }, 'CINECA familiari: idAb locale assente — serve import SGE per questa matricola')
+      return { familiari: cached.map(cacheToNorm), fromCache: true }
+    }
+
     try {
-      const idAb      = await localIdAb(matricola)
-      const familiari = await getFamiliari({ idAb, matricola })
+      const familiari = await getFamiliari({ idAb })
       await famRepo.replaceForMatricola(matricola, familiari.map(toCacheInput(matricola, idAb)))
       return { familiari, fromCache: false }
     } catch (err) {
+      if (err instanceof CinecaNoIdAbError) {
+        return { familiari: cached.map(cacheToNorm), fromCache: true }
+      }
       if (!(err instanceof CinecaApiError)) throw err
+      app.log.warn({ matricola, idAb, status: err.status, msg: err.message }, 'CINECA familiari fallita')
       if (cached.length > 0) return { familiari: cached.map(cacheToNorm), fromCache: true }
       throw err
     }
@@ -141,14 +153,19 @@ export async function cinecaRoutes(app: FastifyInstance): Promise<void> {
     audit(request.user?.id, request.ip, { endpoint: 'figli-giovane-bulk', count: matricole.length })
 
     const out: Record<string, FamiliareNorm | null> = {}
+    let risolti = 0, errori = 0
     await mapLimit(matricole, CINECA_CONCURRENCY, async matricola => {
       try {
         const { familiari } = await resolveNucleo(matricola)
-        out[matricola] = figlioPiuGiovane(familiari)
+        const figlio = figlioPiuGiovane(familiari)
+        out[matricola] = figlio
+        if (figlio) risolti++
       } catch {
         out[matricola] = null
+        errori++
       }
     })
+    app.log.info({ totale: matricole.length, risolti, senzaFiglioOrIdAb: matricole.length - risolti - errori, errori }, 'figli-giovane-bulk')
     return reply.send(out)
   })
 
