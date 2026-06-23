@@ -247,6 +247,17 @@ export const anagraficheApi = {
     apiFetch<RuoloAtApiResult[]>(
       `/anagrafiche/ruolo-at?matricola=${encodeURIComponent(matricola)}${data ? `&data=${data}` : ''}`,
     ),
+
+  /**
+   * Versione bulk di ruoloAt: 1 sola richiesta per N matricole.
+   * Ritorna mappa matricola → risultati (matricole senza dati storici assenti dalla mappa).
+   * Usata da "Aggiorna Ruolo" sui gruppi grandi (evita il rate-limit).
+   */
+  ruoloAtBulk: (matricole: string[], data?: string) =>
+    apiFetch<Record<string, RuoloAtApiResult[]>>('/anagrafiche/ruolo-at-bulk', {
+      method: 'POST',
+      body:   JSON.stringify({ matricole, data }),
+    }),
 }
 
 // ── Voci ──────────────────────────────────────────────────────
@@ -312,6 +323,20 @@ export const cinecaApi = {
   figlioGiovane: (matricola: string) =>
     apiFetch<{ matricola: string; figlio: FamiliareApi; fromCache: boolean }>(
       `/cineca/figlio-giovane?matricola=${encodeURIComponent(matricola)}`),
+
+  /** CF dipendente (locale) per N matricole — 1 richiesta (tag WD, recupero gruppo) */
+  cfBulk: (matricole: string[]) =>
+    apiFetch<Record<string, { codFisc: string }>>('/cineca/cf-bulk', {
+      method: 'POST',
+      body:   JSON.stringify({ matricole }),
+    }),
+
+  /** Figlio FG più giovane per N matricole — 1 richiesta (tag WE, recupero gruppo) */
+  figliGiovaneBulk: (matricole: string[]) =>
+    apiFetch<Record<string, FamiliareApi | null>>('/cineca/figli-giovane-bulk', {
+      method: 'POST',
+      body:   JSON.stringify({ matricole }),
+    }),
 }
 
 // ── Capitoli Anagrafica ───────────────────────────────────────

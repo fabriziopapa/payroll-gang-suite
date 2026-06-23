@@ -13,6 +13,7 @@ import { PgAnagraficheRepository } from '../db/repositories/PgAnagraficheReposit
 import { PgFamiliariRepository } from '../db/repositories/PgFamiliariRepository.js'
 import {
   getFamiliari,
+  getFiglioPiuGiovane,
   CinecaApiError,
   type FamiliareNorm,
 } from '../services/cinecaService.js'
@@ -80,6 +81,38 @@ export async function cinecaRoutes(app: FastifyInstance): Promise<void> {
     } catch (err) {
       return cinecaErrorReply(reply, err)
     }
+  })
+
+  // POST /api/v1/cineca/cf-bulk  { matricole[] }  → { [matricola]: { codFisc } }
+  // CF dipendente (locale SGE) per N matricole in 1 richiesta (tag WD).
+  app.post('/cf-bulk', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { matricole } = z.object({
+      matricole: z.array(z.string().min(1)).min(1).max(2000),
+    }).parse(request.body)
+    const map = await anagRepo.getCodFisByMatricole(matricole)
+    const out: Record<string, { codFisc: string }> = {}
+    for (const [mat, codFisc] of Object.entries(map)) out[mat] = { codFisc }
+    return reply.send(out)
+  })
+
+  // POST /api/v1/cineca/figli-giovane-bulk  { matricole[] }  → { [matricola]: figlio | null }
+  // Figlio FG più giovane per N matricole (tag WE). Loop server throttled.
+  app.post('/figli-giovane-bulk', { preHandler: [app.authenticate] }, async (request, reply) => {
+    if (!cinecaConfigured) return reply.code(503).send({ error: 'CINECA_NON_CONFIGURATO' })
+    const { matricole } = z.object({
+      matricole: z.array(z.string().min(1)).min(1).max(500),
+    }).parse(request.body)
+
+    const out: Record<string, FamiliareNorm | null> = {}
+    // Sequenziale: throttle naturale verso CSA-WS, errori per-matricola non bloccano il batch
+    for (const matricola of matricole) {
+      try {
+        out[matricola] = await getFiglioPiuGiovane({ matricola })
+      } catch {
+        out[matricola] = null
+      }
+    }
+    return reply.send(out)
   })
 
   // GET /api/v1/cineca/figlio-giovane?matricola=  — figlio FG più giovane (WE)

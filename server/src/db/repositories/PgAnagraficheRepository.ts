@@ -3,7 +3,7 @@
 // Upsert su (MATRICOLA, DECOR_INQ) — supporta storico ruoli v2
 // ============================================================
 
-import { eq, lte, gte, or, isNull, and, desc, sql } from 'drizzle-orm'
+import { eq, lte, gte, or, isNull, and, desc, sql, inArray } from 'drizzle-orm'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import * as schema from '../schema.js'
 import type {
@@ -136,6 +136,70 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
     }
 
     return rows.map(toRuoloAtResult)
+  }
+
+  /**
+   * Versione bulk di findRuoloAt: UNA sola query con `matricola IN (...)`,
+   * poi raggruppamento per matricola in memoria. Sostituisce le N richieste
+   * HTTP dell'"Aggiorna Ruolo" (evita il rate-limit su gruppi grandi).
+   */
+  async findRuoloAtBulk(matricole: string[], data?: string): Promise<Record<string, RuoloAtResult[]>> {
+    const out: Record<string, RuoloAtResult[]> = {}
+    if (matricole.length === 0) return out
+    const uniq = [...new Set(matricole)]
+
+    const rows = await (data
+      ? this.db.select().from(schema.anagrafiche).where(
+          and(
+            inArray(schema.anagrafiche.matricola, uniq),
+            lte(schema.anagrafiche.decorInq, data),
+            or(
+              isNull(schema.anagrafiche.finRap),
+              sql`${schema.anagrafiche.finRap} >= ${data}`,
+            ),
+          ),
+        ).orderBy(schema.anagrafiche.matricola, desc(schema.anagrafiche.decorInq))
+      : this.db.select().from(schema.anagrafiche).where(
+          and(
+            inArray(schema.anagrafiche.matricola, uniq),
+            isNull(schema.anagrafiche.finRap),
+          ),
+        ).orderBy(schema.anagrafiche.matricola, desc(schema.anagrafiche.decorInq))
+    )
+
+    // Raggruppa per matricola (già ordinata per decorInq desc → [0] = più recente)
+    const byMat = new Map<string, (typeof schema.anagrafiche.$inferSelect)[]>()
+    for (const r of rows) {
+      const list = byMat.get(r.matricola) ?? []
+      list.push(r)
+      byMat.set(r.matricola, list)
+    }
+
+    for (const [mat, rs] of byMat) {
+      // Stesso ruolo su più periodi sovrapposti → tieni il più recente
+      if (rs.length > 1 && new Set(rs.map(r => r.ruolo)).size === 1) {
+        out[mat] = [toRuoloAtResult(rs[0]!)]
+      } else {
+        out[mat] = rs.map(toRuoloAtResult)
+      }
+    }
+
+    return out
+  }
+
+  /** CF locale (da SGE) per N matricole. Una query; tiene il primo CF non nullo. */
+  async getCodFisByMatricole(matricole: string[]): Promise<Record<string, string>> {
+    const out: Record<string, string> = {}
+    if (matricole.length === 0) return out
+    const uniq = [...new Set(matricole)]
+    const rows = await this.db
+      .select({ matricola: schema.anagrafiche.matricola, codFis: schema.anagrafiche.codFis })
+      .from(schema.anagrafiche)
+      .where(inArray(schema.anagrafiche.matricola, uniq))
+    for (const r of rows) {
+      if (r.codFis && !out[r.matricola]) out[r.matricola] = r.codFis
+    }
+    return out
   }
 
   async upsertMany(items: AnagraficaInput[]): Promise<ImportResult> {

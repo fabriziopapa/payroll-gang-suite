@@ -53,6 +53,22 @@ export async function anagraficheRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(results)
   })
 
+  /**
+   * POST /api/v1/anagrafiche/ruolo-at-bulk
+   * Body: { matricole: string[], data?: "YYYY-MM-DD" }
+   * Versione bulk di /ruolo-at: 1 sola richiesta per N matricole.
+   * Usata da "Aggiorna Ruolo" sui gruppi grandi (evita il rate-limit).
+   */
+  app.post('/ruolo-at-bulk', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const { matricole, data } = z.object({
+      matricole: z.array(z.string().min(1)).min(1).max(5000),
+      data:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    }).parse(req.body)
+
+    const results = await repo.findRuoloAtBulk(matricole, data)
+    return reply.send(results)
+  })
+
   // POST /api/v1/anagrafiche/import — upload XML (solo admin)
   // FIX M-3: bodyLimit 5 MB — prevenzione upload di file enormi
   app.post('/import', {

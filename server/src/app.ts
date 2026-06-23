@@ -119,6 +119,23 @@ app.setErrorHandler((error, _req, reply) => {
       issues: error.issues.map(i => ({ path: i.path, message: i.message })),
     })
   }
+  // Errori con statusCode 4xx (es. rate-limit 429): NON sono errori interni.
+  // Vanno restituiti col loro codice — altrimenti il client vede falsi 500
+  // e gli error log si riempiono di rumore (es. RATE_LIMIT_EXCEEDED).
+  const statusCode = (error as { statusCode?: number }).statusCode
+  if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {
+    if (statusCode === 429) {
+      return reply.code(429).send({
+        error:   'RATE_LIMIT_EXCEEDED',
+        message: 'Troppe richieste. Riprova tra poco.',
+      })
+    }
+    return reply.code(statusCode).send({
+      error:   (error as { code?: string }).code ?? 'REQUEST_ERROR',
+      message: (error as Error).message,
+    })
+  }
+  // 5xx reali: log + risposta generica (niente leak di stack/dettagli interni)
   app.log.error(error)
   return reply.code(500).send({ error: 'INTERNAL_SERVER_ERROR' })
 })

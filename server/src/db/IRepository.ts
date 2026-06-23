@@ -56,6 +56,10 @@ export interface IAnagraficheRepository {
   findByMatricola(matricola: string): Promise<AnagraficaRow[]>  // array: storia completa
   findByRuolo(ruolo: string): Promise<AnagraficaRow[]>
   findRuoloAt(matricola: string, data?: string): Promise<RuoloAtResult[]>
+  /** Versione bulk: una sola query per N matricole. Mappa matricola → risultati. */
+  findRuoloAtBulk(matricole: string[], data?: string): Promise<Record<string, RuoloAtResult[]>>
+  /** Codice fiscale locale (da SGE) per N matricole. Mappa matricola → CF. */
+  getCodFisByMatricole(matricole: string[]): Promise<Record<string, string>>
   upsertMany(items: AnagraficaInput[]): Promise<ImportResult>
   getLastImportDate(): Promise<Date | null>
 }

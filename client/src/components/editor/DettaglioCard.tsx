@@ -7,9 +7,10 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useStore } from '../../store/useStore'
 import { showToast } from '../ToastManager'
 import { ConfirmDialog } from '../ConfirmDialog'
-import { calcolaImportoCSV, formatEur, finRapWarn } from '../../utils/biz'
-import type { DettaglioLiquidazione, Nominativo } from '../../types'
-import { anagraficheApi } from '../../api/endpoints'
+import { calcolaImportoCSV, formatEur, finRapWarn, buildCsvRows, serializeCsv, downloadCsv } from '../../utils/biz'
+import type { DettaglioLiquidazione, Nominativo, VoceConfig } from '../../types'
+import { anagraficheApi, cinecaApi, type RuoloAtApiResult } from '../../api/endpoints'
+import ProgressBar from '../ProgressBar'
 import RuoloDisambiguaModal, { type DisambiguaItem } from '../RuoloDisambiguaModal'
 import ConflittoRuoloModal, { type ConflittoItem } from '../ConflittoRuoloModal'
 import ComunicazioneModal from './ComunicazioneModal'
@@ -18,11 +19,12 @@ import BudgetPanel from './BudgetPanel'
 
 interface Props {
   dettaglio:        DettaglioLiquidazione
+  voceConfig?:      VoceConfig
   onEdit:           () => void
   onAddNominativo:  () => void
 }
 
-export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Props) {
+export default function DettaglioCard({ dettaglio, voceConfig, onEdit, onAddNominativo }: Props) {
   const {
     nominativi, removeDettaglio, removeNominativo, addDettaglio,
     updateNominativo, settings,
@@ -40,6 +42,16 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
   const [comunList,    setComunList]    = useState(false)   // mostra lista comunicazioni esistenti
   const comunMenuRef = useRef<HTMLDivElement>(null)
   const cardRef      = useRef<HTMLDivElement>(null)
+
+  // ── Riferimento cedolino: tag della voce + anno competenza ──
+  const tagTipo  = voceConfig?.tagDefault ?? null   // 'TL' | 'WD' | 'WE' | null
+  const isCfTag  = tagTipo === 'WD' || tagTipo === 'WE'
+  const annoComp = (dettaglio.competenzaLiquidazione.split('/')[1] ?? '').trim()
+
+  // ── Recupero CF da CINECA (batch + progress) ──────────────
+  const [recupero, setRecupero] = useState<{ done: number; total: number } | null>(null)
+  const recuperoCancelRef       = useRef(false)
+  const [recuperoConfirmOpen, setRecuperoConfirmOpen] = useState(false)
 
   // ── Ordinamento snapshot (solo vista) ─────────────────────
   // L'ordine viene congelato al click sull'header: le modifiche inline
@@ -229,51 +241,51 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
     const toDisambigua: DisambiguaItem[]  = []
     const toConflitto:  ConflittoItem[]   = []
 
-    const CHUNK = 15
-    for (let c = 0; c < noms.length; c += CHUNK) {
-      const chunk = noms.slice(c, c + CHUNK)
-      await Promise.all(chunk.map(async nom => {
-        try {
-          const results = await anagraficheApi.ruoloAt(nom.matricola, dataDate)
+    // UNA sola richiesta bulk per tutto il gruppo (niente fan-out → niente rate-limit)
+    let bulk: Record<string, RuoloAtApiResult[]> = {}
+    try {
+      bulk = await anagraficheApi.ruoloAtBulk(noms.map(n => n.matricola), dataDate)
+    } catch {
+      showToast("Errore durante l'aggiornamento dei ruoli — riprova", 'error')
+      setAggRuoloLoading(false)
+      return
+    }
 
-          // D) Nessun dato storico — lascia invariato
-          if (results.length === 0) return
+    for (const nom of noms) {
+      const results = bulk[nom.matricola] ?? []
 
-          // C) Ambiguo — serve scelta del periodo
-          if (results.length > 1) {
-            toDisambigua.push({
-              nomId:       nom.id,
-              matricola:   nom.matricola,
-              cognomeNome: nom.cognomeNome,
-              options:     results,
-            })
-            return
-          }
+      // D) Nessun dato storico — lascia invariato
+      if (results.length === 0) continue
 
-          // A / B — un solo risultato
-          const dbRuolo  = results[0]!.ruolo
-          const dbDruolo = results[0]!.druolo ?? null
+      // C) Ambiguo — serve scelta del periodo
+      if (results.length > 1) {
+        toDisambigua.push({
+          nomId:       nom.id,
+          matricola:   nom.matricola,
+          cognomeNome: nom.cognomeNome,
+          options:     results,
+        })
+        continue
+      }
 
-          if (dbRuolo !== nom.ruolo) {
-            // A) Ruolo diverso → mostra conflitto per tutti (manuale o meno)
-            toConflitto.push({
-              nomId:        nom.id,
-              matricola:    nom.matricola,
-              cognomeNome:  nom.cognomeNome,
-              ruoloManuale: nom.ruolo,
-              ruoloDb:      dbRuolo,
-              druoloDb:     dbDruolo,
-            })
-          } else {
-            // B) Già corretto — resetta solo il flag visivo se serve
-            if (nom.ruoloModificato) {
-              updateNominativo(nom.id, { ruoloModificato: false })
-            }
-          }
-        } catch {
-          showToast("Errore durante l'aggiornamento dei ruoli — riprova", 'error')
-        }
-      }))
+      // A / B — un solo risultato
+      const dbRuolo  = results[0]!.ruolo
+      const dbDruolo = results[0]!.druolo ?? null
+
+      if (dbRuolo !== nom.ruolo) {
+        // A) Ruolo diverso → mostra conflitto per tutti (manuale o meno)
+        toConflitto.push({
+          nomId:        nom.id,
+          matricola:    nom.matricola,
+          cognomeNome:  nom.cognomeNome,
+          ruoloManuale: nom.ruolo,
+          ruoloDb:      dbRuolo,
+          druoloDb:     dbDruolo,
+        })
+      } else if (nom.ruoloModificato) {
+        // B) Già corretto — resetta solo il flag visivo se serve
+        updateNominativo(nom.id, { ruoloModificato: false })
+      }
     }
 
     setAggRuoloLoading(false)
@@ -285,6 +297,55 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
     } else if (toDisambigua.length > 0) {
       setDisambiguaItems(toDisambigua)
     }
+  }
+
+  // ── Recupero CF (tag WD/WE) — solo nominativi senza riferimento ──
+  async function runRecuperaCF() {
+    const targets = noms.filter(n => !n.riferimentoCedolino?.trim())
+    if (targets.length === 0) {
+      showToast('Tutti i nominativi hanno già il riferimento cedolino', 'success')
+      return
+    }
+    recuperoCancelRef.current = false
+    setRecupero({ done: 0, total: targets.length })
+    const BATCH = 25
+    let resolved = 0, missing = 0
+    try {
+      for (let i = 0; i < targets.length; i += BATCH) {
+        if (recuperoCancelRef.current) break
+        const batch     = targets.slice(i, i + BATCH)
+        const matricole = batch.map(n => n.matricola)
+        const cfMap = tagTipo === 'WD'
+          ? await cinecaApi.cfBulk(matricole)
+          : await cinecaApi.figliGiovaneBulk(matricole)
+        for (const n of batch) {
+          const cf = cfMap[n.matricola]?.codFisc
+          if (cf) {
+            updateNominativo(n.id, { riferimentoCedolino: `${tagTipo}@${annoComp}${cf}@` })
+            resolved++
+          } else {
+            missing++
+          }
+        }
+        setRecupero({ done: Math.min(i + BATCH, targets.length), total: targets.length })
+      }
+      showToast(
+        `Recupero CF: ${resolved} risolti` +
+        (missing ? `, ${missing} senza CF (inseribili a mano sulla riga)` : ''),
+        missing ? 'warning' : 'success',
+      )
+    } catch {
+      showToast('Errore durante il recupero CF — riprova', 'error')
+    } finally {
+      setRecupero(null)
+    }
+  }
+
+  // ── Scarica CSV HR del solo gruppo selezionato ──
+  function handleDownloadCsvGruppo() {
+    const rows = buildCsvRows([dettaglio], noms, settings.coefficienti, settings.coefficientiContoTerzi)
+    const slug = (dettaglio.nomeDescrittivo || 'gruppo').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40)
+    downloadCsv(serializeCsv(rows), `liquidazione_${slug}.csv`)
   }
 
   // Ref per tenere la coda disambiguation in attesa (aperta dopo conflitti)
@@ -516,6 +577,31 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
                        a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                 </svg>
               </button>
+              {/* Recupera CF da CINECA — solo voci con tag WD/WE */}
+              {isCfTag && (
+                <button
+                  onClick={() => setRecuperoConfirmOpen(true)}
+                  disabled={!!recupero}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-400 hover:bg-slate-800 transition disabled:opacity-40"
+                  title={`Recupera CF da CINECA per il riferimento cedolino (${tagTipo}) — solo nominativi senza riferimento`}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
+                  </svg>
+                </button>
+              )}
+              {/* Scarica CSV HR del solo gruppo */}
+              <button
+                onClick={handleDownloadCsvGruppo}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-800 transition"
+                title="Scarica CSV HR di questo solo gruppo"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                </svg>
+              </button>
             </>
           )}
           <button
@@ -575,6 +661,18 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
           </button>
         </div>
       </div>
+
+      {/* Avanzamento recupero CF */}
+      {recupero && (
+        <div className="px-4 pb-3">
+          <ProgressBar
+            value={recupero.done}
+            max={recupero.total}
+            label={`Recupero CF da CINECA (${tagTipo})…`}
+            onCancel={() => { recuperoCancelRef.current = true }}
+          />
+        </div>
+      )}
 
       {/* ── Lista nominativi ───────────────────────────────── */}
       {!collapsed && (
@@ -658,6 +756,8 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
                     key={nom.id}
                     nom={nom}
                     dettaglio={dettaglio}
+                    cfTag={isCfTag ? (tagTipo as 'WD' | 'WE') : null}
+                    annoComp={annoComp}
                     coefficienti={settings.coefficienti}
                     coefficientiContoTerzi={settings.coefficientiContoTerzi}
                     searchHit={nom.id === currentId ? 'current' : matchSet.has(nom.id) ? 'match' : null}
@@ -712,17 +812,34 @@ export default function DettaglioCard({ dettaglio, onEdit, onAddNominativo }: Pr
       onConfirm={() => { if (removeConfirmId) removeNominativo(removeConfirmId); setRemoveConfirmId(null) }}
       onCancel={() => setRemoveConfirmId(null)}
     />
+    <ConfirmDialog
+      open={recuperoConfirmOpen}
+      title="Recupera CF da CINECA"
+      message={(() => {
+        const vuoti = noms.filter(n => !n.riferimentoCedolino?.trim()).length
+        const pieni = noms.length - vuoti
+        return `Recupero il riferimento cedolino (${tagTipo}) da CINECA per i ${vuoti} nominativi senza riferimento`
+          + (pieni ? `. I ${pieni} già valorizzati non vengono toccati` : '')
+          + '. I CF non trovati restano inseribili a mano sulla riga.'
+      })()}
+      confirmLabel="Recupera"
+      onConfirm={() => { setRecuperoConfirmOpen(false); runRecuperaCF() }}
+      onCancel={() => setRecuperoConfirmOpen(false)}
+    />
     </>
   )
 }
 
 // ── Riga nominativo ───────────────────────────────────────────
 
-function NominativoRow({ nom, dettaglio, coefficienti, coefficientiContoTerzi, searchHit, onRemove,
+function NominativoRow({ nom, dettaglio, cfTag, annoComp, coefficienti, coefficientiContoTerzi, searchHit, onRemove,
   isEditingImporto, onStartEditImporto, onStopEditImporto, onCommitAndNext,
 }: {
   nom:                       Nominativo
   dettaglio:                 DettaglioLiquidazione
+  /** Tag CF della voce ('WD'|'WE') o null se la voce non usa CF per-nominativo */
+  cfTag:                     'WD' | 'WE' | null
+  annoComp:                  string
   coefficienti:              ReturnType<typeof useStore.getState>['settings']['coefficienti']
   coefficientiContoTerzi?:   ReturnType<typeof useStore.getState>['settings']['coefficientiContoTerzi']
   searchHit?:                'match' | 'current' | null
@@ -735,6 +852,15 @@ function NominativoRow({ nom, dettaglio, coefficienti, coefficientiContoTerzi, s
   const { updateNominativo } = useStore()
   const importoCSV = calcolaImportoCSV(nom, dettaglio, coefficienti, coefficientiContoTerzi)
   const scorporato = dettaglio.flagScorporo && importoCSV !== nom.importoLordo
+
+  // Riferimento cedolino della riga: presente e diverso dal gruppo, oppure
+  // mancante su una voce WD/WE → inseribile a mano (CF proprio/figlio).
+  const rifDiverso  = !!nom.riferimentoCedolino && nom.riferimentoCedolino !== dettaglio.riferimentoCedolino
+  const rifMancante = !nom.riferimentoCedolino?.trim() && !!cfTag
+  const [editingRif, setEditingRif] = useState(false)
+  const [tempCf, setTempCf]         = useState('')
+  // Numero colonne per il colSpan della sotto-riga
+  const colSpan = 4 + (dettaglio.flagScorporo ? 1 : 0) + 1
 
   const [tempImporto, setTempImporto] = useState(String(nom.importoLordo))
   const [budgetAnchorEl, setBudgetAnchorEl] = useState<HTMLElement | null>(null)
@@ -774,6 +900,7 @@ function NominativoRow({ nom, dettaglio, coefficienti, coefficientiContoTerzi, s
   const cessatoWarn = finRapWarn(nom.finRap, dettaglio.dataCompetenzaVoce || undefined)
 
   return (
+    <>
     <tr
       data-nom-id={nom.id}
       className={`border-b border-slate-800/30 group transition
@@ -904,6 +1031,54 @@ function NominativoRow({ nom, dettaglio, coefficienti, coefficientiContoTerzi, s
         </button>
       </td>
     </tr>
+    {(rifDiverso || rifMancante) && (
+      <tr className="border-b border-slate-800/30">
+        <td colSpan={colSpan} className="px-4 pb-1.5 pt-0">
+          {rifMancante && cfTag ? (
+            editingRif ? (
+              <span className="inline-flex items-center gap-1.5">
+                <span className="text-[11px] text-slate-500 font-mono shrink-0">↳ {cfTag}@{annoComp}</span>
+                <input
+                  autoFocus
+                  value={tempCf}
+                  onChange={e => setTempCf(e.target.value.toUpperCase())}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      const cf = tempCf.trim().toUpperCase()
+                      if (cf) updateNominativo(nom.id, { riferimentoCedolino: `${cfTag}@${annoComp}${cf}@` })
+                      setEditingRif(false)
+                    }
+                    if (e.key === 'Escape') setEditingRif(false)
+                  }}
+                  onBlur={() => {
+                    const cf = tempCf.trim().toUpperCase()
+                    if (cf) updateNominativo(nom.id, { riferimentoCedolino: `${cfTag}@${annoComp}${cf}@` })
+                    setEditingRif(false)
+                  }}
+                  placeholder="codice fiscale"
+                  className="w-44 px-1.5 py-0.5 rounded bg-slate-700 border border-indigo-500
+                             text-white text-[11px] font-mono uppercase outline-none"
+                />
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { setTempCf(''); setEditingRif(true) }}
+                className="text-[11px] text-slate-600 hover:text-indigo-400 transition"
+                title="Inserisci a mano il codice fiscale (proprio o del figlio)"
+              >
+                ↳ rif. {cfTag} mancante — inserisci CF a mano
+              </button>
+            )
+          ) : (
+            <span className="text-[11px] text-slate-600 font-mono break-all">
+              ↳ rif. {nom.riferimentoCedolino}
+            </span>
+          )}
+        </td>
+      </tr>
+    )}
+    </>
   )
 }
 

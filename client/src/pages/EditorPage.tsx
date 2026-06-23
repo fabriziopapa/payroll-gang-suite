@@ -4,15 +4,15 @@
 // salvataggio bozza, export CSV HR
 // ============================================================
 
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useStore } from '../store/useStore'
-import { bozzeApi } from '../api/endpoints'
+import { bozzeApi, vociConfigApi } from '../api/endpoints'
 import { buildCsvRows, serializeCsv, downloadCsv } from '../utils/biz'
 import DettaglioCard       from '../components/editor/DettaglioCard'
 import DettaglioFormModal  from '../components/editor/DettaglioFormModal'
 import NominativoFormModal from '../components/editor/NominativoFormModal'
 import TotaliSidebar       from '../components/editor/TotaliSidebar'
-import type { DettaglioLiquidazione } from '../types'
+import type { DettaglioLiquidazione, VoceConfig } from '../types'
 
 export default function EditorPage() {
   const {
@@ -40,6 +40,14 @@ export default function EditorPage() {
   const [editingNome, setEditingNome] = useState(false)
   const [tempNome, setTempNome]     = useState(currentBozzaNome)
   const savingRef                   = useRef(false)
+
+  // Config voci (tag riferimento cedolino) — caricate una volta, passate alle card
+  const [vociConfigs, setVociConfigs] = useState<Record<string, VoceConfig>>({})
+  useEffect(() => {
+    vociConfigApi.list()
+      .then(list => setVociConfigs(Object.fromEntries(list.map(c => [c.codice, c]))))
+      .catch(() => {})
+  }, [])
 
   // ── Salva bozza ───────────────────────────────────────────
   async function handleSave() {
@@ -271,6 +279,7 @@ export default function EditorPage() {
               <DettaglioCard
                 key={det.id}
                 dettaglio={det}
+                voceConfig={vociConfigs[det.voce]}
                 onEdit={() => setDettaglioModal({ open: true, existing: det })}
                 onAddNominativo={() => setNominativoModal({ open: true, dettaglio: det })}
               />
