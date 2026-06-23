@@ -20,6 +20,7 @@ export default function EditorPage() {
     currentBozzaId, currentBozzaNome, protocolloDisplay, isDirty,
     upsertBozza, markSaved,
     setCurrentBozzaNome,
+    vociConfigs, setVociConfigs,
   } = useStore()
 
   // ── Modal state ───────────────────────────────────────────
@@ -41,13 +42,14 @@ export default function EditorPage() {
   const [tempNome, setTempNome]     = useState(currentBozzaNome)
   const savingRef                   = useRef(false)
 
-  // Config voci (tag riferimento cedolino) — caricate una volta, passate alle card
-  const [vociConfigs, setVociConfigs] = useState<Record<string, VoceConfig>>({})
+  // Config voci (tag riferimento cedolino) — caricate UNA volta nello store
   useEffect(() => {
-    vociConfigApi.list()
-      .then(list => setVociConfigs(Object.fromEntries(list.map(c => [c.codice, c]))))
-      .catch(() => {})
-  }, [])
+    if (vociConfigs.length === 0) vociConfigApi.list().then(setVociConfigs).catch(() => {})
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const vociConfigMap = useMemo(
+    () => Object.fromEntries(vociConfigs.map(c => [c.codice, c])) as Record<string, VoceConfig>,
+    [vociConfigs],
+  )
 
   // ── Salva bozza ───────────────────────────────────────────
   async function handleSave() {
@@ -279,7 +281,7 @@ export default function EditorPage() {
               <DettaglioCard
                 key={det.id}
                 dettaglio={det}
-                voceConfig={vociConfigs[det.voce]}
+                voceConfig={vociConfigMap[det.voce]}
                 onEdit={() => setDettaglioModal({ open: true, existing: det })}
                 onAddNominativo={() => setNominativoModal({ open: true, dettaglio: det })}
               />

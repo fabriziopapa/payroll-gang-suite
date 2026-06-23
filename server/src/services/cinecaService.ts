@@ -37,6 +37,9 @@ export interface FamiliareNorm {
 let cachedToken: string | null = null
 let tokenExpiresAt = 0   // epoch ms
 
+// Timeout per ogni chiamata verso CSA-WS — evita hang illimitati (DoS/UX).
+const FETCH_TIMEOUT_MS = 8000
+
 function baseUrl(): string {
   // base + tenant, senza slash doppi
   return `${env.CINECA_BASE_URL!.replace(/\/+$/, '')}/${env.CINECA_TENANT}`
@@ -65,15 +68,21 @@ export async function authenticate(): Promise<string> {
   const now = Date.now()
   if (cachedToken && now < tokenExpiresAt) return cachedToken
 
-  const res = await fetch(`${baseUrl()}/authentication`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({
-      username: env.CINECA_USER,
-      password: env.CINECA_PASSWORD,
-      group:    env.CINECA_GROUPS,
-    }),
-  })
+  let res: Response
+  try {
+    res = await fetch(`${baseUrl()}/authentication`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        username: env.CINECA_USER,
+        password: env.CINECA_PASSWORD,
+        group:    env.CINECA_GROUPS,
+      }),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    })
+  } catch {
+    throw new CinecaApiError('Autenticazione CINECA non raggiungibile (timeout)')
+  }
 
   const text = await res.text()
   if (!res.ok) {
@@ -105,16 +114,26 @@ export function resetTokenCache(): void {
 
 /** GET autenticato con un retry su 401 (token scaduto/revocato). */
 async function authedGet(path: string): Promise<Response> {
+  const doFetch = (token: string) =>
+    fetch(`${baseUrl()}${path}`, {
+      headers: { Authorization: `bearer ${token}`, Accept: 'application/json' },
+      signal:  AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    })
   let token = await authenticate()
-  let res = await fetch(`${baseUrl()}${path}`, {
-    headers: { Authorization: `bearer ${token}`, Accept: 'application/json' },
-  })
+  let res: Response
+  try {
+    res = await doFetch(token)
+  } catch {
+    throw new CinecaApiError(`CSA-WS non raggiungibile (timeout) su ${path}`)
+  }
   if (res.status === 401) {
     resetTokenCache()
     token = await authenticate()
-    res = await fetch(`${baseUrl()}${path}`, {
-      headers: { Authorization: `bearer ${token}`, Accept: 'application/json' },
-    })
+    try {
+      res = await doFetch(token)
+    } catch {
+      throw new CinecaApiError(`CSA-WS non raggiungibile (timeout) su ${path}`)
+    }
   }
   return res
 }

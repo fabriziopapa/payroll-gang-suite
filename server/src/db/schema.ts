@@ -391,7 +391,8 @@ export const familiariCache = pgTable('familiari_cache', {
   id:                serial('id').primaryKey(),
   idAb:              integer('id_ab'),
   matricola:         varchar('matricola', { length: 10 }),
-  codFisc:           varchar('cod_fisc', { length: 16 }).notNull(),
+  /** cod_fisc CIFRATO (AES-256-GCM iv:tag:cipher base64) → serve colonna larga */
+  codFisc:           varchar('cod_fisc', { length: 255 }).notNull(),
   cognome:           varchar('cognome', { length: 100 }),
   nome:              varchar('nome', { length: 100 }),
   sesso:             varchar('sesso', { length: 1 }),

@@ -6,6 +6,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requireAdmin } from '../middleware/authenticate.js'
 import { PgVociConfigRepository } from '../db/repositories/PgVociConfigRepository.js'
 
 const upsertSchema = z.object({
@@ -24,16 +25,16 @@ export async function vociConfigRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(await repo.findAll())
   })
 
-  // PUT /api/v1/voci-config/:codice — upsert config voce
-  app.put('/:codice', { preHandler: [app.authenticate] }, async (req, reply) => {
+  // PUT /api/v1/voci-config/:codice — upsert config voce (solo admin)
+  app.put('/:codice', { preHandler: [app.authenticate, requireAdmin] }, async (req, reply) => {
     const { codice } = z.object({ codice: z.string().min(1).max(10) }).parse(req.params)
     const body = upsertSchema.parse(req.body)
     const row = await repo.upsert({ codice, ...body })
     return reply.send(row)
   })
 
-  // DELETE /api/v1/voci-config/:codice — rimuove la config (torna ai default)
-  app.delete('/:codice', { preHandler: [app.authenticate] }, async (req, reply) => {
+  // DELETE /api/v1/voci-config/:codice — rimuove la config (solo admin)
+  app.delete('/:codice', { preHandler: [app.authenticate, requireAdmin] }, async (req, reply) => {
     const { codice } = z.object({ codice: z.string().min(1).max(10) }).parse(req.params)
     await repo.delete(codice)
     return reply.send({ success: true })

@@ -170,6 +170,7 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
   const {
     anagrafiche, setAnagrafiche,
     setBozze,
+    vociConfigs, setVociConfigs,
     nominativi, dettagli: dettagliCorrente, addNominativo,
     currentBozzaId, currentBozzaNome,
   } = useStore()
@@ -261,22 +262,19 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
   const [disambiguaItems, setDisambiguaItems] = useState<DisambiguaItem[]>([])
 
   // ── Riferimento cedolino per-nominativo (tag WD/WE) ───────
-  const [voceConfig, setVoceConfig]   = useState<VoceConfig | null>(null)
   const [mRiferimento, setMRiferimento] = useState('')
   const [rifLoading, setRifLoading]   = useState(false)
   const [figli, setFigli]             = useState<FamiliareApi[]>([])
 
+  // Config voci dallo store (caricata una volta); voce del gruppo corrente
+  const voceConfig: VoceConfig | null = vociConfigs.find(c => c.codice === dettaglio.voce) ?? null
   // anno competenza (da "MM/YYYY") per il segmento <anno> del riferimento
   const annoComp = (dettaglio.competenzaLiquidazione.split('/')[1] ?? '').trim()
   const tagTipo  = voceConfig?.tagDefault ?? null   // 'TL' | 'WD' | 'WE' | null
 
-  // Carica la config della voce del gruppo (per sapere il tag)
   useEffect(() => {
-    if (!dettaglio.voce) return
-    vociConfigApi.list()
-      .then(list => setVoceConfig(list.find(c => c.codice === dettaglio.voce) ?? null))
-      .catch(() => {})
-  }, [dettaglio.voce])
+    if (vociConfigs.length === 0) vociConfigApi.list().then(setVociConfigs).catch(() => {})
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function buildRiferimentoWD() {
     if (!mMatricola.trim()) { showToast('Inserisci prima la matricola', 'error'); return }

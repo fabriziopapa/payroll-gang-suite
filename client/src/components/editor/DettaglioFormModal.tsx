@@ -26,6 +26,7 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
     addDettaglio, updateDettaglio, settings,
     voci, setVoci,
     capitoliAnag, setCapitoliAnag,
+    vociConfigs: vociConfigsArr, setVociConfigs,
   } = useStore()
   const titleId   = useId()
   const dialogRef = useRef<HTMLDivElement>(null)
@@ -92,7 +93,10 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
   }
 
   // ── Config voci (pre-compilazione alla selezione voce) ────
-  const [vociConfigs, setVociConfigs] = useState<Record<string, VoceConfig>>({})
+  const vociConfigs = useMemo(
+    () => Object.fromEntries(vociConfigsArr.map(c => [c.codice, c])) as Record<string, VoceConfig>,
+    [vociConfigsArr],
+  )
 
   function applyVoceConfig(codice: string) {
     const cfg = vociConfigs[codice]
@@ -124,9 +128,7 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
     if (capitoliAnag.length === 0) {
       capitoliApi.list().then(data => setCapitoliAnag(data)).catch(() => {})
     }
-    vociConfigApi.list()
-      .then(list => setVociConfigs(Object.fromEntries(list.map(c => [c.codice, c]))))
-      .catch(() => {})
+    if (vociConfigsArr.length === 0) vociConfigApi.list().then(setVociConfigs).catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ricalcola dataCompetenzaVoce ogni volta che competenza cambia

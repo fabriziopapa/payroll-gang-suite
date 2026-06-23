@@ -308,26 +308,31 @@ export default function DettaglioCard({ dettaglio, voceConfig, onEdit, onAddNomi
     }
     recuperoCancelRef.current = false
     setRecupero({ done: 0, total: targets.length })
-    const BATCH = 25
     let resolved = 0, missing = 0
     try {
-      for (let i = 0; i < targets.length; i += BATCH) {
-        if (recuperoCancelRef.current) break
-        const batch     = targets.slice(i, i + BATCH)
-        const matricole = batch.map(n => n.matricola)
-        const cfMap = tagTipo === 'WD'
-          ? await cinecaApi.cfBulk(matricole)
-          : await cinecaApi.figliGiovaneBulk(matricole)
-        for (const n of batch) {
+      if (tagTipo === 'WD') {
+        // WD: cf-bulk è una sola query locale (no CINECA) → UNA chiamata
+        const cfMap = await cinecaApi.cfBulk(targets.map(n => n.matricola))
+        for (const n of targets) {
           const cf = cfMap[n.matricola]?.codFisc
-          if (cf) {
-            updateNominativo(n.id, { riferimentoCedolino: `${tagTipo}@${annoComp}${cf}@` })
-            resolved++
-          } else {
-            missing++
-          }
+          if (cf) { updateNominativo(n.id, { riferimentoCedolino: `WD@${annoComp}${cf}@` }); resolved++ }
+          else missing++
         }
-        setRecupero({ done: Math.min(i + BATCH, targets.length), total: targets.length })
+        setRecupero({ done: targets.length, total: targets.length })
+      } else {
+        // WE: batch piccoli verso CINECA (server cache-first + concorrenza) con progress
+        const BATCH = 15
+        for (let i = 0; i < targets.length; i += BATCH) {
+          if (recuperoCancelRef.current) break
+          const batch = targets.slice(i, i + BATCH)
+          const cfMap = await cinecaApi.figliGiovaneBulk(batch.map(n => n.matricola))
+          for (const n of batch) {
+            const cf = cfMap[n.matricola]?.codFisc
+            if (cf) { updateNominativo(n.id, { riferimentoCedolino: `WE@${annoComp}${cf}@` }); resolved++ }
+            else missing++
+          }
+          setRecupero({ done: Math.min(i + BATCH, targets.length), total: targets.length })
+        }
       }
       showToast(
         `Recupero CF: ${resolved} risolti` +

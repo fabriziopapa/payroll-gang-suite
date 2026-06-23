@@ -10,6 +10,7 @@ import type {
   DettaglioLiquidazione,
   AppSettings,
   Comunicazione,
+  VoceConfig,
 } from '../types'
 import { DEFAULT_BOLLO_OPZIONI } from '../types'
 import type { UserApi, AnagraficaApi, VoceApi, BozzaApi, CapitoloAnagApi } from '../api/endpoints'
@@ -92,6 +93,7 @@ interface AppStore {
   anagrafiche:  AnagraficaApi[]
   voci:         VoceApi[]
   capitoliAnag: CapitoloAnagApi[]
+  vociConfigs:  VoceConfig[]
 
   // ── Impostazioni
   settings: AppSettings
@@ -134,6 +136,7 @@ interface AppStore {
   setAnagrafiche:   (items: AnagraficaApi[]) => void
   setVoci:          (items: VoceApi[]) => void
   setCapitoliAnag:  (items: CapitoloAnagApi[]) => void
+  setVociConfigs:   (items: VoceConfig[]) => void
   setSettings:      (s: AppSettings) => void
 
   // ── Actions UI
@@ -162,6 +165,7 @@ export const useStore = create<AppStore>()(
     anagrafiche:       [],
     voci:              [],
     capitoliAnag:      [],
+    vociConfigs:       [],
     settings:          DEFAULT_SETTINGS,
     isLoading:         false,
     globalError:       null,
@@ -341,6 +345,7 @@ export const useStore = create<AppStore>()(
     setAnagrafiche:  (items)  => set(s => { s.anagrafiche = items }),
     setVoci:         (items)  => set(s => { s.voci = items }),
     setCapitoliAnag: (items)  => set(s => { s.capitoliAnag = items }),
+    setVociConfigs:  (items)  => set(s => { s.vociConfigs = items }),
     setSettings:     (cfg)    => set(s => {
       s.settings = { ...cfg, coefficientiContoTerzi: cfg.coefficientiContoTerzi ?? {} }
     }),

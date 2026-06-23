@@ -130,9 +130,10 @@ app.setErrorHandler((error, _req, reply) => {
         message: 'Troppe richieste. Riprova tra poco.',
       })
     }
+    // Solo il codice d'errore — MAI error.message grezzo (può contenere
+    // dettagli interni: path, query, matricola/PII, frammenti SQL).
     return reply.code(statusCode).send({
-      error:   (error as { code?: string }).code ?? 'REQUEST_ERROR',
-      message: (error as Error).message,
+      error: (error as { code?: string }).code ?? 'REQUEST_ERROR',
     })
   }
   // 5xx reali: log + risposta generica (niente leak di stack/dettagli interni)
@@ -227,6 +228,38 @@ app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOStrin
     if (cleanupInterval !== undefined) {
       clearInterval(cleanupInterval)
       cleanupInterval = undefined
+    }
+  })
+}
+
+// ------------------------------------------------------------
+// H1: retention cache familiari (PII) — purge righe oltre 30 giorni.
+// La cache (cod_fisc cifrato) non deve crescere/persistere illimitatamente.
+// ------------------------------------------------------------
+{
+  const { familiariCache } = await import('./db/schema.js')
+  const { lt } = await import('drizzle-orm')
+  const PII_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+
+  const purgeFamiliariCache = async (): Promise<void> => {
+    try {
+      const cutoff = new Date(Date.now() - PII_RETENTION_MS)
+      await db.delete(familiariCache).where(lt(familiariCache.aggiornatoAt, cutoff))
+    } catch (err) {
+      app.log.warn({ err }, 'Purge familiari_cache fallito')
+    }
+  }
+
+  let purgeInterval: ReturnType<typeof setInterval> | undefined
+  setTimeout(() => {
+    void purgeFamiliariCache()
+    purgeInterval = setInterval(() => { void purgeFamiliariCache() }, 6 * 60 * 60 * 1000)
+  }, 90 * 1000)
+
+  app.addHook('onClose', async () => {
+    if (purgeInterval !== undefined) {
+      clearInterval(purgeInterval)
+      purgeInterval = undefined
     }
   })
 }
