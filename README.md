@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.06.06-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.06.23-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -210,10 +210,13 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 | `JWT_PUBLIC_KEY_BASE64` | Chiave pubblica ES256 (Base64) |
 | `JWT_ACCESS_EXPIRES` | Scadenza access token (default `15m`) |
 | `JWT_REFRESH_EXPIRES` | Scadenza refresh token (default `7d`) |
-| `ENCRYPTION_KEY` | 32 byte hex — AES-256-GCM per TOTP secret |
+| `ENCRYPTION_KEY` | 32 byte hex — AES-256-GCM per TOTP secret e cache CF familiari |
 | `CLIENT_ORIGIN` | URL frontend, virgola-separati per multi-origine (CORS) |
 | `SMTP_HOST/PORT/USER/PASS` | Credenziali server email (opzionale) |
 | `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile (opzionale) |
+| `CINECA_BASE_URL/TENANT/USER/PASSWORD` | Integrazione CINECA CSA-WS (opzionale — le route `/cineca/*` rispondono `503` se assenti) |
+| `CINECA_GROUPS` | Gruppi richiesti nel token CSA-WS (default `familiari,sge`) |
+| `PARENTELA_FIGLIO` | Codice `rapportoParentela` per figlio/figlia (default `FG`) |
 
 ---
 
@@ -252,6 +255,29 @@ CREATE INDEX IF NOT EXISTS idx_voci_illimitata
 ---
 
 ## Changelog
+
+### 26.06.23
+**Feature — Integrazione CINECA CSA-WS + riferimento cedolino per-nominativo (WD/WE)**
+- Nuovo **proxy server-side CINECA CSA-WS** (`server/src/services/cinecaService.ts`): autenticazione JWT con cache token, recupero codici fiscali dipendenti e familiari (figli) per costruire il campo *riferimento cedolino* nel formato `WD@<anno><CF>@` (CF dipendente) / `WE@<anno><CF_figlio>@` (CF figlio più giovane, `rapportoParentela=FG`). Doc tenant: `prod.csa-ws.cineca.it/{tenant}`.
+- **Config voci** (`voci_config`, tabella separata dall'import XML → sopravvive ai reimport): per ogni voce HR si impostano a mano *parti*, *tipo scorporo* e il *tag riferimento cedolino* (`TL` testo libero / `WD` CF dipendente / `WE` CF figlio + flag "scelta automatica figlio"). Pre-compila il gruppo liquidazione alla selezione della voce. UI: ingranaggio per riga in *Voci HR* (`VoceConfigModal`).
+- **Riferimento per-nominativo**: il campo passa da unico-per-gruppo a per-nominativo (`Nominativo.riferimentoCedolino`, vince sul gruppo nel CSV). Sotto-riga discreta sotto ogni nominativo che mostra il riferimento se diverso dal gruppo; se mancante su voce WD/WE → **inserimento CF a mano inline** (proprio o del figlio).
+- **Tasti sul gruppo liquidazione**: *Recupera CF* (solo voci WD/WE — recupero da CINECA dei soli nominativi senza riferimento, con **barra di avanzamento** annullabile) e *CSV HR del solo gruppo* selezionato.
+- Migrazione `0008_cineca_riferimento.sql` (tabelle `voci_config` + `familiari_cache`).
+
+**Performance / economia di scala — endpoint bulk (eliminazione fan-out HTTP)**
+- **Aggiorna Ruolo**: da **N richieste** (1 per nominativo, che su gruppi grandi saturava il rate-limit 100/60s) a **1 sola query** `POST /anagrafiche/ruolo-at-bulk` (`matricola IN (...)`, dedup server-side). `PgAnagraficheRepository.findRuoloAtBulk`.
+- **Recupero CF**: endpoint bulk `POST /cineca/cf-bulk` (WD, query locale SGE — 1 chiamata) e `POST /cineca/figli-giovane-bulk` (WE) con **cache-first** (TTL 7gg su `familiari_cache`) + **concorrenza limitata** verso CSA-WS, invece del loop sequenziale che mandava la richiesta in timeout.
+- `vociConfigs` centralizzato nello store Zustand — eliminati i fetch ridondanti ad ogni apertura dei modal editor.
+
+**Fix**
+- *Aggiungi nominativo → Copia nominativi*: la lista bozze non includeva il campo `dati` (FIX H-1) → gruppi e nominativi non mostrati/copiabili. Ora carica `GET /bozze/all-with-data`.
+- `setErrorHandler`: il `429` del rate-limit veniva mascherato da `500` (forzava `reply.code(500)` ignorando `statusCode`) e finiva negli error log. Ora rispetta lo `statusCode` 4xx (429 resta 429).
+
+**Security — hardening (post review multi-agente sicurezza + efficienza)**
+- **Autorizzazione PII**: tutte le route `/cineca/*` (CF dipendenti/figli) richiedono ora `requireAdmin` + **audit log** (`CINECA_CF_LOOKUP`) di ogni lookup. `/voci-config` scrittura solo admin. *(Nota: il recupero CF e il lookup figli diventano admin-only.)*
+- **Cache familiari cifrata + retention**: `familiari_cache.cod_fisc` (PII, anche di minori) cifrato a riposo con AES-256-GCM (`cryptoService`) + **purge periodico** (righe > 30 giorni, ogni 6h, pattern jwt_blocklist). Migrazione `0009_familiari_cf_encrypted.sql` (allarga `cod_fisc` a `varchar(255)`).
+- **Anti-hang / anti-amplificazione**: `AbortSignal.timeout(8s)` su tutte le `fetch` verso CSA-WS; bulk figli con concorrenza limitata e cap ridotto (500 → 200).
+- **No message-leak**: il ramo 4xx di `setErrorHandler` non rimanda più `error.message` grezzo (poteva contenere path/matricola/PII), solo il codice d'errore; errori CINECA mappati a codice generico.
 
 ### 26.06.06
 **Feature — PDF Region Editor** *(in rollout, kill-switch off — non ancora attivo in produzione)*
