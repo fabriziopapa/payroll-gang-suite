@@ -23,7 +23,11 @@ const NominativoSchema = z.object({
   importoLordo:    z.number().finite(),
   origine:         z.enum(['pdf', 'manuale']),
   ruoloModificato: z.boolean().optional(),
+  finRap:          z.string().max(20).nullable().optional(),
   importoBudget:   z.array(ImportoBudgetItemSchema).max(100).optional(),
+  // Riferimento cedolino per-nominativo (tag WD/WE con CF). Senza questo campo
+  // lo strip-mode lo rimuoveva al salvataggio → CF persi al reload.
+  riferimentoCedolino: z.string().max(500).optional(),
 })
 
 const DettaglioSchema = z.object({
