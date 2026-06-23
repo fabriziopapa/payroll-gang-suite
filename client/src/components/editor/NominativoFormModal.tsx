@@ -8,7 +8,7 @@
 
 import { useState, useMemo, useRef, useEffect, useId, cloneElement, isValidElement, Children } from 'react'
 import { useStore, type BozzaDati } from '../../store/useStore'
-import { anagraficheApi, bozzeApi, vociConfigApi, cinecaApi, type AnagraficaApi, type FamiliareApi } from '../../api/endpoints'
+import { anagraficheApi, bozzeApi, vociConfigApi, cinecaApi, type AnagraficaApi, type FamiliareApi, type BozzaApi } from '../../api/endpoints'
 import type { DettaglioLiquidazione, Nominativo, ImportoBudgetItem, VoceConfig } from '../../types'
 import RuoloDisambiguaModal, { type DisambiguaItem } from '../RuoloDisambiguaModal'
 import { showToast } from '../ToastManager'
@@ -169,7 +169,7 @@ function searchAnagGrouped(query: string, anagrafiche: AnagraficaApi[]): Grouped
 export default function NominativoFormModal({ dettaglio, onClose }: Props) {
   const {
     anagrafiche, setAnagrafiche,
-    bozze, setBozze,
+    setBozze,
     nominativi, dettagli: dettagliCorrente, addNominativo,
     currentBozzaId, currentBozzaNome,
   } = useStore()
@@ -186,18 +186,22 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
     [nominativi, dettaglio.id],
   )
 
-  // Lazy load anagrafiche e bozze se non in store
+  // Bozze salvate CON dati (per il tab Copia): la lista normale non
+  // include `dati` (FIX H-1), quindi gruppi/nominativi sarebbero vuoti.
+  const [bozzeData, setBozzeData] = useState<BozzaApi[]>([])
+
+  // Lazy load anagrafiche + bozze complete (con dati) per la copia
   useEffect(() => {
     let cancelled = false
     const promises: Promise<unknown>[] = []
     if (anagrafiche.length === 0)
       promises.push(anagraficheApi.list().then(d => { if (!cancelled) setAnagrafiche(d) }))
-    if (bozze.length === 0)
-      promises.push(bozzeApi.list().then(d => { if (!cancelled) setBozze(d) }))
-    if (promises.length > 0) {
-      setLoading(true)
-      Promise.all(promises).finally(() => { if (!cancelled) setLoading(false) })
-    }
+    // Sempre: serve `dati` per mostrare gruppi e nominativi nel tab Copia
+    promises.push(bozzeApi.listWithData().then(d => {
+      if (!cancelled) { setBozzeData(d); setBozze(d) }
+    }))
+    setLoading(true)
+    Promise.all(promises).finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -551,7 +555,7 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
     }
 
     // Bozze salvate (escludi quella corrente se già mostrata sopra)
-    for (const b of bozze) {
+    for (const b of bozzeData) {
       if (b.id === currentBozzaId) continue
       const dati = (b.dati ?? {}) as Partial<BozzaDati>
       sources.push({
@@ -564,7 +568,7 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
     }
 
     return sources
-  }, [bozze, currentBozzaId, currentBozzaNome, dettagliCorrente, nominativi])
+  }, [bozzeData, currentBozzaId, currentBozzaNome, dettagliCorrente, nominativi])
 
   const bozzeFiltrate = useMemo(() => {
     if (!bozzaSearch.trim()) return bozzeSources
