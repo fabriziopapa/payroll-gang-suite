@@ -186,6 +186,7 @@ export default function App() {
           bolloOpzioni:         Array.isArray(raw?.bolloOpzioni) && (raw.bolloOpzioni as unknown[]).length
             ? (raw.bolloOpzioni as string[]).filter(x => typeof x === 'string')
             : DEFAULT_BOLLO_OPZIONI,
+          cinecaUseProxy:       raw?.cinecaUseProxy === true,
         })
       })
       .catch(() => { /* usa defaults locali già nello store */ })

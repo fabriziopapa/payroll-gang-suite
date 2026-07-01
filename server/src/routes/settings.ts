@@ -7,6 +7,8 @@ import { z } from 'zod'
 import { requireAdmin } from '../middleware/authenticate.js'
 import { PgSettingsRepository } from '../db/repositories/PgSettingsRepository.js'
 import { PgAuditRepository } from '../db/repositories/PgAuditRepository.js'
+import { setCinecaProxyMode } from '../services/cinecaService.js'
+import { cinecaProxyConfigured } from '../config/env.js'
 
 // SEC-H04: whitelist delle chiavi consentite in app_settings.
 // Chiavi scritte dal server (import): last_import_*
@@ -28,7 +30,23 @@ const ALLOWED_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   'turnstileEnabled',
   'pdfRegionEditorEnabled',
   'bolloOpzioni',
+  'cinecaUseProxy',
 ])
+
+/**
+ * Applica a runtime le chiavi con effetto lato server.
+ * cinecaUseProxy: instrada le chiamate CSA-WS via proxy Italia (geo-block extra-UE).
+ * Ritorna un messaggio d'errore se il valore non è applicabile, altrimenti null.
+ */
+function applyServerSideSetting(chiave: string, valore: unknown): string | null {
+  if (chiave === 'cinecaUseProxy') {
+    if (valore === true && !cinecaProxyConfigured) {
+      return 'Proxy CINECA non configurato sul server (CINECA_PROXY_URL / CINECA_PROXY_SECRET in .env)'
+    }
+    setCinecaProxyMode(valore === true)
+  }
+  return null
+}
 
 // Chiavi esposte senza autenticazione (solo valori non sensibili)
 const PUBLIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
@@ -69,6 +87,8 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       if (!ALLOWED_SETTINGS_KEYS.has(chiave)) {
         return reply.status(400).send({ error: 'Chiave non consentita' })
       }
+      const err = applyServerSideSetting(chiave, valore)
+      if (err) return reply.status(400).send({ error: err })
       await repo.set(chiave, valore)
     }
     await auditRepo.log({
@@ -89,6 +109,8 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: 'Chiave non consentita' })
     }
     const { valore } = z.object({ valore: z.unknown() }).parse(req.body)
+    const applyErr = applyServerSideSetting(chiave, valore)
+    if (applyErr) return reply.status(400).send({ error: applyErr })
     await repo.set(chiave, valore)
     await auditRepo.log({
       userId:   req.user!.id,

@@ -6,7 +6,7 @@
 // Mai chiamato dal client: credenziali in .env, CF = dati personali.
 // ============================================================
 
-import { env, cinecaConfigured } from '../config/env.js'
+import { env, cinecaConfigured, cinecaProxyConfigured } from '../config/env.js'
 
 export class CinecaNotConfiguredError extends Error {
   constructor() {
@@ -48,9 +48,31 @@ let tokenExpiresAt = 0   // epoch ms
 // Timeout per ogni chiamata verso CSA-WS — evita hang illimitati (DoS/UX).
 const FETCH_TIMEOUT_MS = 8000
 
+// ── Modalità proxy (runtime, toggle 'cinecaUseProxy' in Impostazioni) ─
+// CSA-WS geo-blocca gli IP extra-UE: con proxy attivo le chiamate passano
+// dal reverse proxy in Italia (CINECA_PROXY_URL + header X-Proxy-Auth).
+let useProxy = false
+
+/** Attiva/disattiva il proxy. No-op (con warn del chiamante) se il proxy non è in .env. */
+export function setCinecaProxyMode(on: boolean): void {
+  useProxy = on && cinecaProxyConfigured
+  resetTokenCache()   // il token va richiesto dal nuovo percorso di rete
+}
+
+/** true se le chiamate CSA-WS stanno passando dal proxy. */
+export function cinecaProxyActive(): boolean {
+  return useProxy
+}
+
 function baseUrl(): string {
   // base + tenant, senza slash doppi
-  return `${env.CINECA_BASE_URL!.replace(/\/+$/, '')}/${env.CINECA_TENANT}`
+  const base = useProxy ? env.CINECA_PROXY_URL! : env.CINECA_BASE_URL!
+  return `${base.replace(/\/+$/, '')}/${env.CINECA_TENANT}`
+}
+
+/** Header aggiuntivi quando si passa dal proxy (auth verso il Caddy italiano). */
+function proxyHeaders(): Record<string, string> {
+  return useProxy ? { 'X-Proxy-Auth': env.CINECA_PROXY_SECRET! } : {}
 }
 
 /** Estrae l'exp (ms) da un JWT; null se non decodificabile. */
@@ -80,7 +102,7 @@ export async function authenticate(): Promise<string> {
   try {
     res = await fetch(`${baseUrl()}/authentication`, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...proxyHeaders() },
       body: JSON.stringify({
         username: env.CINECA_USER,
         password: env.CINECA_PASSWORD,
@@ -124,7 +146,7 @@ export function resetTokenCache(): void {
 async function authedGet(path: string): Promise<Response> {
   const doFetch = (token: string) =>
     fetch(`${baseUrl()}${path}`, {
-      headers: { Authorization: `bearer ${token}`, Accept: 'application/json' },
+      headers: { Authorization: `bearer ${token}`, Accept: 'application/json', ...proxyHeaders() },
       signal:  AbortSignal.timeout(FETCH_TIMEOUT_MS),
     })
   let token = await authenticate()

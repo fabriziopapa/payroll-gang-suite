@@ -8,7 +8,7 @@
 // ------------------------------------------------------------
 
 export const APP_NAME = 'Payroll Gang Suite' as const;
-export const APP_VERSION = '26.06.23' as const;
+export const APP_VERSION = '26.07.01' as const;
 
 // ------------------------------------------------------------
 // RUOLI
@@ -350,6 +350,9 @@ export interface AppSettings {
   /** Modalità di assolvimento marca da bollo per i certificati — lista
    *  modificabile da Impostazioni; alla generazione l'operatore ne sceglie una. */
   bolloOpzioni?:            string[];
+  /** Instrada le chiamate CSA-WS via reverse proxy in Italia (CINECA geo-blocca
+   *  gli IP extra-UE). Richiede CINECA_PROXY_URL/SECRET nel .env del server. */
+  cinecaUseProxy?:          boolean;
 }
 
 /** Default modalità assolvimento marca da bollo (seed lista bolloOpzioni). */

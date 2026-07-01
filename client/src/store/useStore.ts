@@ -56,6 +56,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   turnstileEnabled:        true,
   pdfRegionEditorEnabled:  false,
   bolloOpzioni:            DEFAULT_BOLLO_OPZIONI,
+  cinecaUseProxy:          false,
 }
 
 // ── Helpers ───────────────────────────────────────────────────

@@ -198,6 +198,26 @@ await app.register(vociConfigRoutes,  { prefix: '/api/v1/voci-config' })
 app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
 
 // ------------------------------------------------------------
+// Proxy CINECA — ripristina al boot il toggle 'cinecaUseProxy' salvato
+// in app_settings (le PUT successive lo aggiornano a runtime in settings.ts).
+// ------------------------------------------------------------
+{
+  const { PgSettingsRepository } = await import('./db/repositories/PgSettingsRepository.js')
+  const { setCinecaProxyMode }   = await import('./services/cinecaService.js')
+  const { cinecaProxyConfigured } = await import('./config/env.js')
+  try {
+    const saved = await new PgSettingsRepository(db).get('cinecaUseProxy')
+    const wanted = saved === true
+    setCinecaProxyMode(wanted)
+    if (wanted && !cinecaProxyConfigured) {
+      app.log.warn('cinecaUseProxy=true in DB ma CINECA_PROXY_URL/SECRET assenti in .env — chiamate CSA-WS restano dirette')
+    }
+  } catch (err) {
+    app.log.warn({ err }, 'Lettura cinecaUseProxy fallita — chiamate CSA-WS dirette')
+  }
+}
+
+// ------------------------------------------------------------
 // SEC-C02: pulizia periodica jwt_blocklist — ogni ora
 // Rimuove i record scaduti per evitare crescita illimitata della tabella
 // ------------------------------------------------------------

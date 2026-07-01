@@ -71,6 +71,12 @@ const envSchema = z.object({
   CINECA_PASSWORD: z.string().optional(),
   // Gruppi richiesti nel token (CSV). 'familiari'=figli (WE), 'sge'=stato giuridico (CF dip.)
   CINECA_GROUPS:   z.string().default('familiari,sge'),
+  // Reverse proxy in Italia per CSA-WS (opzionale) — CINECA geo-blocca gli IP
+  // extra-UE (VPS a Hong Kong: TCP timeout). Il proxy inoltra a prod.csa-ws.cineca.it
+  // e richiede header X-Proxy-Auth. Attivazione runtime: toggle 'cinecaUseProxy'
+  // in Impostazioni (admin). Vedi CINECA_PROXY.md.
+  CINECA_PROXY_URL:    z.string().url().optional(),   // es. https://cineca-proxy.tuodominio.it
+  CINECA_PROXY_SECRET: z.string().min(32).optional(), // condiviso con il Caddy del proxy
   // Codice rapportoParentela per figlio/figlia (da screen CSA: "FG")
   PARENTELA_FIGLIO: z.string().default('FG'),
 })
@@ -119,3 +125,7 @@ export const REFRESH_TOKEN_MS = parseDurationMs(env.JWT_REFRESH_EXPIRES)
 /** true se tutte le credenziali CINECA CSA-WS sono presenti */
 export const cinecaConfigured =
   !!(env.CINECA_BASE_URL && env.CINECA_TENANT && env.CINECA_USER && env.CINECA_PASSWORD)
+
+/** true se il reverse proxy CINECA è configurato (URL + secret in .env) */
+export const cinecaProxyConfigured =
+  !!(env.CINECA_PROXY_URL && env.CINECA_PROXY_SECRET)

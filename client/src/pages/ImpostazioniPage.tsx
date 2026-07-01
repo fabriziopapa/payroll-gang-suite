@@ -33,6 +33,7 @@ export default function ImpostazioniPage() {
   const [error,          setError]          = useState<string | null>(null)
   const [savingTurnstile, setSavingTurnstile] = useState(false)
   const [savingPdfRegion, setSavingPdfRegion] = useState(false)
+  const [savingCinecaProxy, setSavingCinecaProxy] = useState(false)
 
   // form aggiunta riga scorporo standard
   const [newRuolo,    setNewRuolo]    = useState('')
@@ -116,6 +117,25 @@ export default function ImpostazioniPage() {
       showToast('Errore nel salvataggio', 'error')
     } finally {
       setSavingPdfRegion(false)
+    }
+  }
+
+  async function handleToggleCinecaProxy(enabled: boolean) {
+    setSavingCinecaProxy(true)
+    try {
+      await settingsApi.update({ cinecaUseProxy: enabled })
+      setSettings({ ...settings, cinecaUseProxy: enabled })
+      showToast(
+        enabled ? 'Chiamate CINECA instradate via proxy Italia' : 'Chiamate CINECA dirette',
+        'success',
+      )
+    } catch (e) {
+      // Il server risponde 400 con messaggio se CINECA_PROXY_URL/SECRET mancano in .env
+      showToast(e instanceof Error && e.message && !e.message.startsWith('HTTP_')
+        ? e.message
+        : 'Errore nel salvataggio', 'error')
+    } finally {
+      setSavingCinecaProxy(false)
     }
   }
 
@@ -505,6 +525,35 @@ export default function ImpostazioniPage() {
                     className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white
                       shadow transform transition duration-200
                       ${(settings.pdfRegionEditorEnabled ?? false) ? 'translate-x-5' : 'translate-x-0'}`}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between gap-4 mt-5 pt-5 border-t border-slate-800">
+                <div className="min-w-0">
+                  <p className="text-sm text-slate-300 font-medium">Proxy Italia per API CINECA</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Instrada le chiamate CSA-WS (recupero CF e familiari) attraverso il
+                    reverse proxy in Italia. Necessario se il server è fuori UE:
+                    CINECA blocca gli IP esteri. Richiede proxy configurato nel .env del server.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={savingCinecaProxy}
+                  onClick={() => handleToggleCinecaProxy(!(settings.cinecaUseProxy ?? false))}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full
+                    border-2 border-transparent transition-colors duration-200
+                    focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2
+                    focus:ring-offset-slate-900 disabled:opacity-50
+                    ${(settings.cinecaUseProxy ?? false) ? 'bg-indigo-600' : 'bg-slate-700'}`}
+                  role="switch"
+                  aria-checked={settings.cinecaUseProxy ?? false}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white
+                      shadow transform transition duration-200
+                      ${(settings.cinecaUseProxy ?? false) ? 'translate-x-5' : 'translate-x-0'}`}
                   />
                 </button>
               </div>
