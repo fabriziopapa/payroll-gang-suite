@@ -292,6 +292,15 @@ export const certificatoProgressivi = pgTable('certificato_progressivi', {
 // protocollo: calcolato in app (AAAA/NNN) — Drizzle non supporta GENERATED
 // datiJson: output parser cedolino (audit + rigenerazione DOCX senza ri-parsing)
 // NB: per scelta privacy (opzione A) datiJson NON contiene iban né CF nucleo
+//
+// CIFRATURA A RIPOSO (PGS-04): `cf` e `datiJson` contengono PII retributiva
+// (codice fiscale + lordo/netto/ritenute). Sono cifrati AES-256-GCM nel
+// repository (PgCertificatiRepository) prima dell'insert e decifrati in lettura:
+//  - cf: stringa "iv:tag:cipher" base64 (come familiari_cache) → serve col. larga
+//  - datiJson: envelope jsonb { v:1, enc:"iv:tag:cipher" } (payload cifrato opaco)
+// Le colonne di lista/ricerca (matricola, nominativo, protocollo, periodo)
+// restano in chiaro: la lista NON legge cf/datiJson → nessun impatto prestazioni.
+// Righe legacy (pre-cifratura) sono lette in modo trasparente (fallback al grezzo).
 // ------------------------------------------------------------
 
 export const certificati = pgTable('certificati', {
@@ -301,7 +310,8 @@ export const certificati = pgTable('certificati', {
   /** Derivato AAAA/NNN (zero-pad 3) — calcolato in app al momento dell'insert */
   protocollo:     varchar('protocollo', { length: 20 }).notNull(),
   matricola:      varchar('matricola', { length: 10 }),
-  cf:             varchar('cf', { length: 16 }),
+  /** CF CIFRATO (AES-256-GCM iv:tag:cipher base64) → colonna larga come familiari_cache */
+  cf:             varchar('cf', { length: 255 }),
   /** Periodo retribuzione del cedolino, es. "MAGGIO 2026" */
   periodo:        varchar('periodo', { length: 50 }),
   /** Nominativo per ricerca rapida, es. "PINO Vincenzo" */
@@ -309,7 +319,7 @@ export const certificati = pgTable('certificati', {
   siglaOperatore: varchar('sigla_operatore', { length: 20 }).notNull(),
   dirigente:      varchar('dirigente', { length: 200 }),
   templateId:     uuid('template_id').references(() => templatiCertificato.id, { onDelete: 'set null' }),
-  /** Output del parser (anagrafica senza PII bancaria, voci, certificato calcolato) */
+  /** Output del parser CIFRATO — envelope { v:1, enc:"iv:tag:cipher" } (AES-256-GCM) */
   datiJson:       jsonb('dati_json').notNull(),
   createdBy:      uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   createdAt:      timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

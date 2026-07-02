@@ -7,11 +7,50 @@
 import { eq, and, desc, or, ilike, sql } from 'drizzle-orm'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import * as schema from '../schema.js'
+import { encrypt, decrypt } from '../../services/cryptoService.js'
 import type {
   ICertificatiRepository, CertificatoInput, CertificatoRow, CertificatoSummaryRow,
 } from '../IRepository.js'
 
 type DB = PostgresJsDatabase<typeof schema>
+
+// ------------------------------------------------------------
+// PGS-04 — Cifratura a riposo di cf + datiJson (AES-256-GCM).
+// La lista/ricerca NON legge queste colonne → cifratura confinata a
+// create()/findById(). Le righe legacy (pre-cifratura) sono lette in modo
+// trasparente: se la decifratura fallisce si usa il valore grezzo.
+// ------------------------------------------------------------
+
+interface DatiJsonEnvelope { v: number; enc: string }
+
+function isEnvelope(x: unknown): x is DatiJsonEnvelope {
+  return typeof x === 'object' && x !== null &&
+    typeof (x as { enc?: unknown }).enc === 'string'
+}
+
+/** Cifra il CF (null-safe). No-op se già cifrato (formato iv:tag:cipher). */
+function encCf(cf: string | null | undefined): string | null {
+  if (cf == null || cf === '') return cf ?? null
+  if (cf.split(':').length === 3) return cf   // già cifrato (idempotenza backfill)
+  return encrypt(cf)
+}
+
+/** Decifra il CF; fallback al grezzo per righe legacy pre-cifratura. */
+function decCf(cf: string | null): string | null {
+  if (cf == null) return null
+  try { return decrypt(cf) } catch { return cf }
+}
+
+/** Avvolge il payload parser in un envelope cifrato jsonb. */
+function encDatiJson(dati: unknown): DatiJsonEnvelope {
+  return { v: 1, enc: encrypt(JSON.stringify(dati ?? null)) }
+}
+
+/** Estrae il payload dall'envelope cifrato; passthrough per righe legacy. */
+function decDatiJson(raw: unknown): unknown {
+  if (!isEnvelope(raw)) return raw   // riga legacy (payload in chiaro)
+  try { return JSON.parse(decrypt(raw.enc)) } catch { return null }
+}
 
 export class PgCertificatiRepository implements ICertificatiRepository {
   constructor(private readonly db: DB) {}
@@ -40,13 +79,13 @@ export class PgCertificatiRepository implements ICertificatiRepository {
           progressivo,
           protocollo,
           matricola:      data.matricola      ?? null,
-          cf:             data.cf             ?? null,
+          cf:             encCf(data.cf),
           periodo:        data.periodo        ?? null,
           nominativo:     data.nominativo     ?? null,
           siglaOperatore: data.siglaOperatore,
           dirigente:      data.dirigente      ?? null,
           templateId:     data.templateId     ?? null,
-          datiJson:       data.datiJson       as Record<string, unknown>,
+          datiJson:       encDatiJson(data.datiJson) as unknown as Record<string, unknown>,
           createdBy:      data.createdBy      ?? null,
         })
         .returning({ id: schema.certificati.id })
@@ -153,12 +192,14 @@ type RowShape = {
 }
 
 function toRow(r: RowShape): CertificatoRow {
+  // datiJson arriva come stringa (::text) → ri-parsa preservando snake_case,
+  // poi decifra l'envelope (PGS-04). cf: decifrato con fallback al grezzo.
+  const rawDati = typeof r.datiJson === 'string' ? safeParse(r.datiJson) : r.datiJson
   return {
     id: r.id, anno: r.anno, progressivo: r.progressivo, protocollo: r.protocollo,
-    matricola: r.matricola, cf: r.cf, periodo: r.periodo, nominativo: r.nominativo,
+    matricola: r.matricola, cf: decCf(r.cf), periodo: r.periodo, nominativo: r.nominativo,
     siglaOperatore: r.siglaOperatore, dirigente: r.dirigente, templateId: r.templateId,
-    // datiJson arriva come stringa (::text) → ri-parsa preservando snake_case
-    datiJson: typeof r.datiJson === 'string' ? safeParse(r.datiJson) : r.datiJson,
+    datiJson: decDatiJson(rawDati),
     createdBy: r.createdBy,
     createdByUsername: r.createdByUsername ?? null, createdAt: r.createdAt,
   }
