@@ -288,6 +288,30 @@ Nuova VPS in UE ⇒ niente geo-block: chiamate dirette a `prod.csa-ws.cineca.it`
 
 ---
 
+## Cron — cosa replicare dalla vecchia VPS
+
+Censimento VPS attuale (2026-07-02) — 8 cron attivi, quasi tutti interni aaPanel:
+
+| Cron vecchia VPS | Replicare? | Come |
+|---|---|---|
+| Database di backup [pgsql] | **SÌ** | ricrea da pannello → Cron → Backup database, o cron manuale sotto |
+| Sito di backup [ALL] | NO | codice su git; basta backup di `.env` (vedi sotto) |
+| SSL Renew Let's Encrypt | auto | aaPanel lo ricrea da solo se usi LE; con Origin CA non serve |
+| Website statistics / Nginx firewall scan (btwaf) | auto | interni aaPanel, si ricreano con i plugin |
+| RAM GRATUITO (memory cleaner) | NO | cosmetico, inutile |
+| Keep live supabase (`149.88.86.56/supabase_keepalive.php`) | ⚠️ altro progetto | appartiene al secondo sito PHP sulla VPS — fuori scope Payroll, decidere a parte |
+
+Backup `.env` (contiene ENCRYPTION_KEY — perderlo = perdere i dati cifrati):
+
+```bash
+cp /www/wwwroot/payroll-gang-suite/.env /www/backup/payroll/env_$(date +%Y%m%d)
+chmod 600 /www/backup/payroll/env_*
+```
+
+Copia periodicamente un backup di DB + `.env` **fuori** dalla VPS (PC locale via scp).
+
+---
+
 ## Backup automatico DB (consigliato)
 
 ```bash

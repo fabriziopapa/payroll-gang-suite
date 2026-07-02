@@ -73,7 +73,7 @@ sudo dpkg-reconfigure -plow unattended-upgrades   # Yes
 ```bash
 sudo apt install -y nginx postgresql postgresql-contrib git
 
-# Node 22 LTS via NodeSource
+# Node 22 LTS via NodeSource (prod attuale gira su Node 24: entrambe ok, requisito ≥ 20)
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
 sudo npm install -g pm2
