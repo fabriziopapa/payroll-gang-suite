@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.06.23-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.07.01-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -217,6 +217,8 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 | `CINECA_BASE_URL/TENANT/USER/PASSWORD` | Integrazione CINECA CSA-WS (opzionale — le route `/cineca/*` rispondono `503` se assenti) |
 | `CINECA_GROUPS` | Gruppi richiesti nel token CSA-WS (default `familiari,sge`) |
 | `PARENTELA_FIGLIO` | Codice `rapportoParentela` per figlio/figlia (default `FG`) |
+| `CINECA_PROXY_URL` | Reverse proxy in Italia per CSA-WS (opzionale) — necessario se il server è fuori UE (CINECA geo-blocca gli IP extra-UE). Attivazione runtime dal toggle *Proxy Italia per API CINECA* in Impostazioni → Moduli. Vedi [`CINECA_PROXY.md`](CINECA_PROXY.md) |
+| `CINECA_PROXY_SECRET` | Secret condiviso (≥32 char) inviato al proxy come header `X-Proxy-Auth` |
 
 ---
 
@@ -255,6 +257,14 @@ CREATE INDEX IF NOT EXISTS idx_voci_illimitata
 ---
 
 ## Changelog
+
+### 26.07.01
+**Feature — Proxy Italia per API CINECA (aggiramento geo-block IP extra-UE)**
+- CINECA CSA-WS **geo-blocca gli IP fuori UE** (verificato: da IP italiano `200 OK`, da VPS Hong Kong TCP timeout su `130.186.10.68:443`). Con il server ospitato fuori UE le route `/cineca/*` andavano tutte in timeout.
+- Nuovo **reverse proxy in Italia** opzionale: le chiamate a CSA-WS (autenticazione, recupero CF e familiari) possono passare da un proxy con IP italiano invece che direttamente. `cinecaService.baseUrl()` sceglie proxy/diretto in base a un flag runtime; in modalità proxy aggiunge l'header `X-Proxy-Auth` (secret condiviso) su ogni chiamata.
+- **Toggle admin** *Proxy Italia per API CINECA* in Impostazioni → Moduli (chiave `cinecaUseProxy` in `AppSettings`, pattern identico a `turnstileEnabled`/`pdfRegionEditorEnabled`). Applicato **a runtime** senza restart (`applyServerSideSetting` in `routes/settings.ts`, resetta la cache token); rifiutato con `400` se abilitato senza `CINECA_PROXY_URL`/`CINECA_PROXY_SECRET` nel `.env`. Ripristinato al boot da `app_settings`.
+- Nuove variabili ambiente opzionali `CINECA_PROXY_URL` / `CINECA_PROXY_SECRET`.
+- **Setup proxy documentato** in [`CINECA_PROXY.md`](CINECA_PROXY.md): micro-VPS in Italia (es. Oracle Cloud Milano free tier) con **Caddy** — Caddyfile con match `X-Proxy-Auth`, `header_up -X-Proxy-Auth` (il secret non raggiunge CINECA), TLS Let's Encrypt automatico, nessun log dei body (GDPR: TLS end-to-end su entrambe le tratte, proxy in datacenter UE).
 
 ### 26.06.23
 **Feature — Integrazione CINECA CSA-WS + riferimento cedolino per-nominativo (WD/WE)**
