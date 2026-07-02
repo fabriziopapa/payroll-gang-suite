@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.07.01-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.07.02-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -41,24 +41,47 @@ gestisce comunicazioni ai destinatari e archivia le liquidazioni per ateneo.
 
 ```
 payroll-gang-suite/
-├── client/          # SPA React/Vite
+├── client/                      # SPA React/Vite
 │   └── src/
-│       ├── api/         # Client API tipizzati (endpoints.ts, client.ts)
-│       ├── components/  # Componenti React (BudgetPanel, Layout, …)
-│       ├── hooks/       # Hook personalizzati (useDebounce)
-│       ├── pages/       # Dashboard, Editor, Viewer, Ricerca, Anagrafiche, …
-│       ├── store/       # Stato globale Zustand
-│       ├── types/       # Interfacce TypeScript condivise
-│       └── utils/       # CSV / PDF / EML builder, calcoli scorporo
-├── server/          # API REST Fastify
+│       ├── api/                 # Client API tipizzati (endpoints.ts, client.ts — JWT + auto-refresh)
+│       ├── components/          # Componenti React (ConfirmDialog, ToastManager, Layout, …)
+│       │   ├── editor/          #   DettaglioCard, DettaglioFormModal, ComunicazioneModal
+│       │   └── certificatoTemplate/  # Editor template certificato
+│       ├── constants/           # csvDefaults, scorporoCoefficients, palette gruppi
+│       ├── hooks/               # useDebounce, usePdfDocument, …
+│       ├── pages/               # Dashboard, Editor, Viewer, Ricerca, Anagrafiche, Voci,
+│       │                        # Capitoli, Certificati, PdfRegionEditor, Impostazioni, Utenti
+│       ├── store/               # Stato globale Zustand (useStore.ts)
+│       ├── types/               # Interfacce TypeScript + APP_VERSION
+│       └── utils/               # CSV / PDF / EML builder, calcoli scorporo (biz.ts)
+├── server/                      # API REST Fastify
+│   ├── sql/
+│   │   └── setup.sql            # ★ Setup DB CONSOLIDATO: unico file per installazione da zero
+│   │                            #   (ruolo + database + 17 tabelle + indici + grants + seed)
 │   └── src/
-│       ├── auth/        # TOTP + JWT ES256 + refresh rotante Argon2id
-│       ├── db/          # Schema Drizzle + Repository pattern
-│       ├── middleware/  # Autenticazione JWT
-│       ├── routes/      # Endpoint REST versionate /api/v1
-│       ├── schemas/     # Zod schemas validazione (BozzaDatiSchema)
-│       └── services/    # Business logic (crypto, import XML/XLSX, mailer)
-└── shared/          # Tipi condivisi client ↔ server
+│       ├── config/              # env.ts — variabili ambiente validate Zod (fail-fast)
+│       ├── auth/                # TOTP (RFC 6238) + JWT ES256 + refresh rotante Argon2id
+│       ├── db/
+│       │   ├── schema.ts        # ★ Schema Drizzle — fonte di verità del DB
+│       │   ├── migrations/      # 0001…0009 — SOLO storico del DB di produzione esistente
+│       │   │                    #   (già incluse in setup.sql: NON eseguire su install nuova)
+│       │   └── repositories/    # Repository pattern (PgBozze, PgUsers, PgCertificati, …)
+│       ├── middleware/          # authenticate.ts (JWT preHandler)
+│       ├── routes/              # /api/v1: auth, bozze, anagrafiche, voci, capitoli,
+│       │                        # settings, users, certificati, pdf-region, cineca
+│       ├── schemas/             # Zod validazione (BozzaDatiSchema, …)
+│       └── services/            # cryptoService, importService, mailerService, cinecaService
+│           ├── cedolino/        #   parser PDF cedolino + calculator
+│           ├── certificato/     #   stampa unione DOCX (+ assets)
+│           └── pdfRegion/       #   estrazione via template regioni
+├── shared/                      # Tipi condivisi client ↔ server
+├── ecosystem.config.cjs         # PM2 (produzione)
+├── nginx.conf.example           # Vhost nginx (variante aaPanel)
+├── INSTALL_VPS.md               # ★ Indice guide installazione/migrazione VPS
+├── INSTALL_VPS_AAPANEL.md       #   Guida completa aaPanel (+ hardening + Progetto 2)
+├── INSTALL_VPS_NATIVE.md        #   Guida completa Ubuntu nativa (nginx/PM2/PG da apt)
+├── CINECA_PROXY.md              # Setup proxy Italia per CSA-WS (Caddy)
+└── DEPLOY_AAPANEL.md            # (legacy — sostituito dalle guide INSTALL_VPS_*)
 ```
 
 ---
@@ -96,7 +119,7 @@ Genera certificati a partire dai cedolini Cineca, replicando le regole di calcol
 
 **API** (tutte sotto `/api/v1`, JWT): `POST /certificati/parse` (PDF base64, validazione magic bytes `%PDF`, mai su disco), `POST /certificati` (crea + DOCX), `GET /certificati`, `GET /certificati/:id/docx`, CRUD `/templati-certificato` (scrittura admin).
 
-**Migrazione**: `server/src/db/migrations/0005_certificati.sql` (3 tabelle + seed template di default). Applicare con `psql "$DATABASE_URL" -f server/src/db/migrations/0005_certificati.sql`.
+**Schema DB**: tabelle e seed template inclusi in `server/sql/setup.sql` (consolidato). La migrazione storica `0005_certificati.sql` resta solo come riferimento del DB di produzione esistente.
 
 **Test parser**: il test end-to-end è gated da env (il cedolino contiene PII e non è committato):
 ```bash
@@ -120,30 +143,39 @@ Strumento admin per costruire **template di riconoscimento layout** dei cedolini
 
 **API** (tutte sotto `/api/v1/pdf-region-templates`, JWT): `GET /` (lista, `?all=true` per includere versioni storiche), `GET /:id`, `POST /` (nuova famiglia), `PUT /:id` (nuova versione), `DELETE /:id` (admin, header `X-Confirm-Delete` — se elimini la versione attiva riattiva automaticamente quella restante con numero più alto, mai famiglie orfane), `POST /:id/extract` (preview, nessuna persistenza).
 
-**Migrazioni**: `0006_pdf_region_templates.sql` (tabella + seed template "slim") e `0007_pdf_region_one_active.sql` (indice unico parziale — usa `CREATE UNIQUE INDEX CONCURRENTLY`, va eseguito **fuori da una transazione**: incollare lo statement da solo in Adminer/psql, non wrappato in `BEGIN`/`COMMIT`).
+**Schema DB**: tabella, indici (incluso l'unico parziale "1 versione attiva per famiglia") e seed inclusi in `server/sql/setup.sql` (consolidato). Le migrazioni storiche `0006`/`0007` restano come riferimento del DB di produzione (nota: la `0007` usava `CREATE UNIQUE INDEX CONCURRENTLY`, da eseguire fuori transazione — irrilevante su installazione nuova).
 
 **Nginx (deploy)**: il rendering PDF carica un Web Worker da `pdfjs-dist` — la CSP servita da Nginx per la SPA deve includere `worker-src 'self';` (assente di default, va aggiunta manualmente alla direttiva `Content-Security-Policy` nel vhost — il CSP di `@fastify/helmet` lato server **non** governa gli asset statici serviti da Nginx).
 
 ---
 
-## Setup sviluppo
+## Setup sviluppo (da zero al `dev` in 5 passi)
 
 **Prerequisiti:** Node.js ≥ 20, PostgreSQL ≥ 15
 
 ```bash
-# 1. Installa dipendenze (tutti i workspaces)
+# 1. Clone + dipendenze (tutti i workspaces)
+git clone <repo-url> payroll-gang-suite && cd payroll-gang-suite
 npm install
 
-# 2. Configura ambiente
+# 2. Database — UN SOLO comando (setup.sql consolidato: ruolo, DB, 17 tabelle, seed)
+psql -U postgres -v app_password='<password-sicura>' -f server/sql/setup.sql
+
+# 3. Configura ambiente
 cp .env.example .env
-# Edita .env — vedi sezione Variabili Ambiente
+# compila: DB_PASSWORD (quella del passo 2), chiavi JWT, ENCRYPTION_KEY
+# → generazione chiavi: sezione sotto. DB_SSL=false in locale.
 
-# 3. Migrazione DB
-npm run db:migrate
+# 4. Primo utente admin (genera admin-qr.html → scansiona → elimina il file)
+npm run db:seed
 
-# 4. Avvia (client :5173 + server :3001)
+# 5. Avvia (client :5173 + server :3001)
 npm run dev
 ```
+
+> Le migrazioni in `server/src/db/migrations/` sono **storico** del DB di produzione:
+> già incluse in `setup.sql`, NON vanno eseguite su un'installazione nuova.
+> (`npm run db:migrate` è deprecato: drizzle-kit non è configurato — il flusso è `setup.sql`.)
 
 ### Generazione chiavi
 
@@ -176,13 +208,20 @@ npm run typecheck       # TypeScript check (no emit)
 
 ---
 
-## Deploy (VPS — aaPanel + PM2)
+## Deploy / Installazione VPS
 
-Vedere [`DEPLOY_AAPANEL.md`](DEPLOY_AAPANEL.md) per procedura completa.
+Guide complete (clone → avvio → hardening → migrazione dati): **[`INSTALL_VPS.md`](INSTALL_VPS.md)**
+
+| Percorso | Guida |
+|---|---|
+| aaPanel (come produzione attuale) | [`INSTALL_VPS_AAPANEL.md`](INSTALL_VPS_AAPANEL.md) |
+| Ubuntu 24.04 nativo (senza pannello) | [`INSTALL_VPS_NATIVE.md`](INSTALL_VPS_NATIVE.md) |
+
+Sequenza (dettagli nelle guide): hardening SSH/firewall → clone → `setup.sql` → `.env` → build → seed admin → PM2 → nginx+SSL → verifica. Scenario migrazione: `pg_dump`/`pg_restore` + `.env` originale (stessa `ENCRYPTION_KEY` — obbligatoria per i dati cifrati).
 
 ```bash
 # Avvio
-pm2 start ecosystem.config.cjs
+pm2 start ecosystem.config.cjs --env production
 
 # Aggiornamento
 git pull && npm install && npm run build:server && npm run build:client && pm2 restart payroll-gang-suite
@@ -240,23 +279,15 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 ---
 
-## Indici DB aggiuntivi (post-setup)
-
-Da eseguire una volta sul database di produzione dopo il deploy iniziale:
-
-```sql
--- Ottimizza findActive() su voci di bilancio
-CREATE INDEX IF NOT EXISTS idx_voci_active_range
-  ON voci(data_in, data_fin);
-
-CREATE INDEX IF NOT EXISTS idx_voci_illimitata
-  ON voci(codice, data_in)
-  WHERE data_fin = '22220202';
-```
-
----
-
 ## Changelog
+
+### 26.07.02
+**Infrastruttura — consolidamento DB + guide migrazione VPS**
+- **`server/sql/setup.sql` consolidato**: unico file idempotente per installazione su DB vuoto (ruolo via `psql -v app_password=…`, database, tutte le 17 tabelle, indici, grants least-privilege, seed template certificato). **Verificato 1:1 contro il DB di produzione** (colonne, tipi, FK, indici — inclusi `idx_anag_hash`, `idx_voci_active_range`, `idx_voci_illimitata` mai censiti prima in SQL). Rimossi i 5 file SQL obsoleti in `server/sql/`; la vecchia sezione "Indici DB aggiuntivi post-setup" di questo README è ora inclusa nel setup.
+- **Fix DB produzione**: revocato `TRUNCATE` su `audit_log` a `payroll_user` (immutabilità completa); ripulite chiavi `app_settings` morte (`coefficienti_scorporo`, `csv_defaults` — il seed usava chiavi snake_case mai lette dall'app); droppata `anagrafiche_backup_pre_sge` (leftover import SGE).
+- **Guide installazione/migrazione VPS**: [`INSTALL_VPS.md`](INSTALL_VPS.md) (indice) + [`INSTALL_VPS_AAPANEL.md`](INSTALL_VPS_AAPANEL.md) + [`INSTALL_VPS_NATIVE.md`](INSTALL_VPS_NATIVE.md) — hardening avanzato (SSH key-only, ufw Cloudflare-only, fail2ban, unattended-upgrades), scenario migrazione dati (`pg_dump -Fc` + restore + re-grant), checklist cambio dominio (Turnstile site key inglobata nel bundle → rebuild client), censimento cron, sezione Progetto 2 (keepalive Supabase + storage Cubbit/JuiceFS con procedura `juicefs dump --keep-secret-key`/`load` **verificata end-to-end**).
+
+
 
 ### 26.07.01
 **Feature — Proxy Italia per API CINECA (aggiramento geo-block IP extra-UE)**
