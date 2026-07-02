@@ -331,6 +331,22 @@ Rotazione automatica su 7 file (uno per giorno della settimana).
 
 ---
 
+## Progetto 2 — Keepalive Supabase + storage Cubbit (JuiceFS)
+
+Identico al percorso aaPanel — vedi sezione completa in [INSTALL_VPS_AAPANEL.md](INSTALL_VPS_AAPANEL.md#progetto-2--keepalive-supabase--storage-cubbit-juicefs). Differenze sul percorso nativo:
+
+```bash
+sudo apt install -y php8.3-cli php8.3-curl redis-server
+# redis: imposta requirepass NUOVA in /etc/redis/redis.conf (bind 127.0.0.1 già default), restart
+curl -sSL https://d.juicefs.com/install | sh -
+```
+
+Poi identico: `juicefs dump --keep-secret-key` sulla vecchia → copia `/www/wwwroot/149.88.86.56` + `/www/keepalive_private` (stessi path: hardcoded nello script) → `juicefs load` → systemd unit → cron in `/etc/cron.d/supabase-keepalive`.
+
+**Non servono sulla nuova VPS:** MariaDB (vuoto), Docker/containerd (inutilizzati), vhost nginx del sito 2 (fermato — gira solo il cron CLI).
+
+---
+
 ## Troubleshooting
 
 | Sintomo | Causa/Fix |

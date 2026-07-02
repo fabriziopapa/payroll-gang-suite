@@ -325,6 +325,65 @@ Rotazione settimanale automatica (7 file, uno per giorno). In alternativa: aaPan
 
 ---
 
+## Progetto 2 — Keepalive Supabase + storage Cubbit (JuiceFS)
+
+Sulla VPS attuale convive un secondo micro-progetto (censito 2026-07-02). Componenti reali:
+
+| Componente | Cosa fa | Migrare? |
+|---|---|---|
+| `/www/wwwroot/149.88.86.56/` (1.2 MB) | `supabase_keepalive.php` (tiene vivo Supabase free-tier, notifiche Telegram) + script upload Cubbit | **SÌ** — copia diretta |
+| `/www/keepalive_private/` | config con token Telegram + chiavi Supabase | **SÌ** — copia diretta, permessi `640 www:www` |
+| Redis 127.0.0.1:6379 (db 0) | **metadata engine JuiceFS** — i metadati SONO il filesystem Cubbit | **SÌ** — via `juicefs dump/load` (sotto) |
+| JuiceFS 1.3.1 (`juicefs-mount.service`) | monta bucket Cubbit su `/mnt/cubbit-media` (oggi: 6 file, 12 KB) | **SÌ** |
+| Vhost nginx `149.88.86.56` | sito **fermato** (root → `/www/server/stop/`) — serve solo il cron CLI | NO (ricreare solo se riattivi gli upload web) |
+| MariaDB :3306 | **vuoto** — solo schemi di sistema | **NO** — non installare |
+| Docker/containerd | zero container, zero volumi | **NO** — non installare |
+
+### Procedura (dopo il cutover di Payroll)
+
+```bash
+# ── 1. Nuova VPS: PHP 8.3 CLI (App Store → PHP 8.3, o: apt install php8.3-cli php8.3-curl)
+#      + Redis (App Store → Redis, o apt) + binario JuiceFS
+curl -sSL https://d.juicefs.com/install | sh -   # installa /usr/local/bin/juicefs
+
+# ── 2. Redis nuova VPS: password NUOVA (quella vecchia è da considerare bruciata)
+NEW_REDIS_PASS=$(openssl rand -hex 16)
+echo "requirepass: $NEW_REDIS_PASS"    # imposta in redis.conf (bind 127.0.0.1) e riavvia redis
+
+# ── 3. VECCHIA VPS: esporta metadati JuiceFS (incluse le credenziali Cubbit)
+juicefs dump --keep-secret-key 'redis://:VECCHIA_PASS@127.0.0.1:6379/0' /tmp/jfs-meta.json
+
+# ── 4. Trasferisci su nuova VPS: /tmp/jfs-meta.json + le due directory
+#      scp -r /www/wwwroot/149.88.86.56 /www/keepalive_private nuova:/tmp/...
+#      (stessi path di destinazione: il config path /www/keepalive_private è hardcoded nello script)
+
+# ── 5. NUOVA VPS: importa metadati e monta
+juicefs load "redis://:$NEW_REDIS_PASS@127.0.0.1:6379/0" /tmp/jfs-meta.json
+mkdir -p /var/cache/juicefs /mnt/cubbit-media
+juicefs mount -d --cache-dir /var/cache/juicefs --cache-size 102400 \
+  "redis://:$NEW_REDIS_PASS@127.0.0.1:6379/0" /mnt/cubbit-media
+ls /mnt/cubbit-media/149.88.86.56/    # devono comparire i file del bucket
+
+# ── 6. Systemd unit (copia /etc/systemd/system/juicefs-mount.service dalla vecchia,
+#      aggiorna la password Redis nell'URL) + enable
+systemctl daemon-reload && systemctl enable --now juicefs-mount.service
+
+# ── 7. Cron keepalive (ogni 4 giorni alle 03:30 — come vecchia VPS)
+cat > /etc/cron.d/supabase-keepalive <<'EOF'
+30 3 */4 * * root /usr/bin/php /www/wwwroot/149.88.86.56/supabase_keepalive.php >> /www/keepalive_private/cron.log 2>&1
+EOF
+
+# ── 8. Test immediato + verifica notifica Telegram
+php /www/wwwroot/149.88.86.56/supabase_keepalive.php; tail -5 /www/keepalive_private/keepalive_log.txt
+```
+
+> ⚠️ Ordine critico: `juicefs dump` sulla vecchia **prima** di spegnerla — i metadati Redis
+> sono l'unica mappa dei file sul bucket Cubbit. Senza dump, i 6 file diventano orfani.
+> Se `dump --keep-secret-key` non includesse la secret Cubbit, dopo il `load` reimpostala:
+> `juicefs config META-URL --secret-key <secret-cubbit>`.
+
+---
+
 ## Troubleshooting
 
 | Sintomo | Causa/Fix |
