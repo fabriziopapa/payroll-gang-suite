@@ -378,9 +378,13 @@ php /www/wwwroot/149.88.86.56/supabase_keepalive.php; tail -5 /www/keepalive_pri
 ```
 
 > ⚠️ Ordine critico: `juicefs dump` sulla vecchia **prima** di spegnerla — i metadati Redis
-> sono l'unica mappa dei file sul bucket Cubbit. Senza dump, i 6 file diventano orfani.
-> Se `dump --keep-secret-key` non includesse la secret Cubbit, dopo il `load` reimpostala:
-> `juicefs config META-URL --secret-key <secret-cubbit>`.
+> sono l'unica mappa dei file sul bucket Cubbit. Senza dump, i file diventano orfani.
+>
+> ✅ **Procedura VERIFICATA end-to-end il 2026-07-02**: dump con `--keep-secret-key`
+> include la SecretKey Cubbit (cifrata, `KeyEncrypted: true`); test di load su Redis db 1
+> + mount read-only → alberi identici alla produzione e lettura dal bucket funzionante.
+> Dump di riferimento: `/root/jfs-meta-20260702.json` (+ cron settimanale + copia offsite).
+> JuiceFS mantiene anche auto-backup dei metadati dentro il bucket (xattr `lastBackup`).
 
 ---
 
