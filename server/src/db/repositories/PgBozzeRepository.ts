@@ -6,9 +6,65 @@
 import { eq, and } from 'drizzle-orm'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import * as schema from '../schema.js'
+import { encrypt, decrypt } from '../../services/cryptoService.js'
 import type { IBozzeRepository, BozzaRow, BozzaSummaryRow, BozzaInput } from '../IRepository.js'
 
 type DB = PostgresJsDatabase<typeof schema>
+
+// ------------------------------------------------------------
+// PGS-05 — Cifratura a riposo dei SOLI codici fiscali nel JSONB `dati`
+// (AES-256-GCM, stessa chiave/servizio di PGS-04):
+//   · nominativi[].codFisc                     → sempre cifrato
+//   · nominativi[].riferimentoCedolino         → cifrato se contiene un CF
+//   · dettagli[].riferimentoCedolino           → cifrato se contiene un CF
+// Il resto della bozza resta in chiaro (nessun impatto su Ricerca client-side,
+// che riceve i dati già decifrati). Prefisso marker per idempotenza; le righe
+// legacy in chiaro vengono lette in passthrough (backfill:
+// encrypt-bozze-cf-backfill.ts).
+// ------------------------------------------------------------
+
+const ENC_PREFIX = 'PGS05:'
+const CF_RE = /[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/
+
+function encField(v: string): string {
+  if (v === '' || v.startsWith(ENC_PREFIX)) return v   // idempotente
+  return ENC_PREFIX + encrypt(v)
+}
+
+function decField(v: string): string {
+  if (!v.startsWith(ENC_PREFIX)) return v              // riga legacy in chiaro
+  try { return decrypt(v.slice(ENC_PREFIX.length)) } catch { return v }
+}
+
+type DatiShape = { nominativi?: unknown[]; dettagli?: unknown[] }
+
+/** Applica `fn` ai campi CF-sensibili di una copia profonda di `dati`. */
+function mapCfFields(dati: unknown, fn: (v: string) => string, encrypting: boolean): unknown {
+  if (typeof dati !== 'object' || dati === null) return dati
+  const clone = structuredClone(dati) as DatiShape
+  for (const n of clone.nominativi ?? []) {
+    const o = n as Record<string, unknown>
+    if (typeof o['codFisc'] === 'string') o['codFisc'] = fn(o['codFisc'])
+    const rif = o['riferimentoCedolino']
+    if (typeof rif === 'string' && (!encrypting || CF_RE.test(rif))) o['riferimentoCedolino'] = fn(rif)
+  }
+  for (const d of clone.dettagli ?? []) {
+    const o = d as Record<string, unknown>
+    const rif = o['riferimentoCedolino']
+    if (typeof rif === 'string' && (!encrypting || CF_RE.test(rif))) o['riferimentoCedolino'] = fn(rif)
+  }
+  return clone
+}
+
+/** Cifra i CF prima della scrittura (create/update). */
+export function protectCf(dati: unknown): unknown {
+  return mapCfFields(dati, encField, true)
+}
+
+/** Decifra i CF dopo la lettura (findAll/findById). */
+export function revealCf(dati: unknown): unknown {
+  return mapCfFields(dati, decField, false)
+}
 
 /** Colonne selezionate con dati JSONB — usato solo da findById */
 const SEL = {
@@ -87,7 +143,7 @@ export class PgBozzeRepository implements IBozzeRepository {
         nome:              data.nome,
         stato:             data.stato             ?? 'bozza',
         protocolloDisplay: data.protocolloDisplay  ?? null,
-        dati:              data.dati               as Record<string, unknown>,
+        dati:              protectCf(data.dati)    as Record<string, unknown>,   // PGS-05
         createdBy:         data.createdBy          ?? null,
       })
       .returning({ id: schema.bozze.id })
@@ -102,7 +158,7 @@ export class PgBozzeRepository implements IBozzeRepository {
     }
     if (data.nome              !== undefined) set.nome              = data.nome
     if (data.protocolloDisplay !== undefined) set.protocolloDisplay = data.protocolloDisplay
-    if (data.dati              !== undefined) set.dati              = data.dati as Record<string, unknown>
+    if (data.dati              !== undefined) set.dati              = protectCf(data.dati) as Record<string, unknown>   // PGS-05
 
     const [upd] = await this.db
       .update(schema.bozze)
@@ -167,7 +223,7 @@ function toRow(r: RowShape): BozzaRow {
     nome:              r.nome,
     stato:             r.stato as 'bozza' | 'archiviata',
     protocolloDisplay: r.protocolloDisplay ?? null,
-    dati:              r.dati,
+    dati:              revealCf(r.dati),   // PGS-05: CF decifrati in uscita
     createdBy:         r.createdBy         ?? null,
     createdByUsername: r.createdByUsername  ?? null,
     createdAt:         r.createdAt,

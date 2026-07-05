@@ -24,7 +24,10 @@ export async function anagraficheRoutes(app: FastifyInstance): Promise<void> {
       ? await repo.findAllAtDate(data)
       : await repo.findAll()
 
-    return reply.send(rows)
+    // SEC-C2: il CF non viene esposto nella lista generale — il client non lo
+    // usa (i CF per i tag cedolino arrivano da /cineca/cf, admin + audit).
+    // Resta disponibile internamente (import differenziale, certificati).
+    return reply.send(rows.map(({ codFis: _codFis, ...rest }) => rest))
   })
 
   // GET /api/v1/anagrafiche/last-import

@@ -37,6 +37,9 @@ const envSchema = z.object({
   ENCRYPTION_KEY: z.string().regex(/^[0-9a-f]{64}$/, {
     message: 'ENCRYPTION_KEY deve essere hex a 64 caratteri (32 byte)',
   }),
+  // SEC-M4: chiave dedicata alla firma dei cookie (separata dalla cifratura
+  // PII per limitare il blast radius). Opzionale: fallback a ENCRYPTION_KEY.
+  COOKIE_SECRET: z.string().min(32).optional(),
 
   // Rate limiting
   RATE_LIMIT_MAX: z.coerce.number().int().default(100),

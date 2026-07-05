@@ -90,7 +90,9 @@ await app.register(cors, {
 })
 
 await app.register(cookie, {
-  secret: env.ENCRYPTION_KEY,  // firma i cookie
+  // SEC-M4: chiave di firma cookie separata dalla chiave di cifratura PII.
+  // Fallback a ENCRYPTION_KEY per retrocompatibilità con i .env esistenti.
+  secret: env.COOKIE_SECRET ?? env.ENCRYPTION_KEY,
   hook:   'onRequest',
 })
 

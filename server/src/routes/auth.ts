@@ -7,20 +7,31 @@ import { z } from 'zod'
 import type { AuthService } from '../auth/AuthService.js'
 import { requireAdmin } from '../middleware/authenticate.js'
 import { env, REFRESH_TOKEN_MS } from '../config/env.js'
+import { PgSettingsRepository } from '../db/repositories/PgSettingsRepository.js'
 
-// Fail-open: se CF è irraggiungibile non blocca il login
-async function verifyTurnstile(token: string | undefined, ip: string): Promise<boolean> {
-  if (!env.TURNSTILE_SECRET_KEY || !token) return true
+// SEC-A3 — Fail-closed: se Turnstile è ATTIVO (secret configurata + toggle
+// runtime `turnstileEnabled` non disattivato), il token è obbligatorio e la
+// verifica deve riuscire. Errore di rete verso Cloudflare ⇒ login rifiutato
+// (resta il rate limit come protezione, ma il CAPTCHA non è più bypassabile
+// causando un timeout). Se la secret manca o il toggle è spento ⇒ skip.
+async function verifyTurnstile(
+  enabled: boolean,
+  token: string | undefined,
+  ip: string,
+): Promise<boolean> {
+  if (!env.TURNSTILE_SECRET_KEY || !enabled) return true
+  if (!token) return false
   try {
     const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ secret: env.TURNSTILE_SECRET_KEY, response: token, remoteip: ip }),
+      signal:  AbortSignal.timeout(5000),
     })
     const data = await res.json() as { success: boolean }
     return data.success
   } catch {
-    return true
+    return false
   }
 }
 // MailerService è accessibile tramite app.mailer (decorato in app.ts)
@@ -37,6 +48,13 @@ const COOKIE_OPTS = {
 }
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
+
+  // SEC-A3: toggle runtime letto dal DB a ogni tentativo (endpoint già
+  // rate-limitati). Default true: se la chiave non è mai stata scritta
+  // il comportamento coincide con /settings/public.
+  const settingsRepo = new PgSettingsRepository(app.db)
+  const turnstileEnabled = async (): Promise<boolean> =>
+    (await settingsRepo.get<boolean>('turnstileEnabled')) !== false
 
   // ----------------------------------------------------------
   // GET /api/v1/auth/me — identità utente corrente
@@ -106,7 +124,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     })
     const { activationToken, token, cfTurnstileToken } = schema.parse(request.body)
 
-    if (!(await verifyTurnstile(cfTurnstileToken, request.ip))) {
+    if (!(await verifyTurnstile(await turnstileEnabled(), cfTurnstileToken, request.ip))) {
       return reply.code(400).send({ error: 'CAPTCHA_FAILED' })
     }
 
@@ -133,7 +151,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     })
     const { username, token, cfTurnstileToken } = schema.parse(request.body)
 
-    if (!(await verifyTurnstile(cfTurnstileToken, request.ip))) {
+    if (!(await verifyTurnstile(await turnstileEnabled(), cfTurnstileToken, request.ip))) {
       return reply.code(400).send({ error: 'CAPTCHA_FAILED' })
     }
 
