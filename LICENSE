@@ -139,6 +139,13 @@ esclusivamente le seguenti azioni:
        collaboratori), fermo restando il rispetto di tutti gli
        altri vincoli della presente licenza.
 
+  4.3  Creare fork del repository all'interno della piattaforma
+       GitHub, nei soli limiti in cui ciò è consentito dai Termini
+       di Servizio di GitHub per i repository pubblici, fermo
+       restando che al fork si applica integralmente la presente
+       licenza e che ogni utilizzo ulteriore resta soggetto agli
+       Articoli 2 e 3.
+
 I permessi di cui al presente articolo non implicano alcuna
 concessione di diritti d'uso per finalità diverse da quelle
 indicate e non costituiscono licenza implicita per usi ulteriori.
@@ -294,6 +301,12 @@ Notwithstanding Article 3, the following actions are permitted:
        evaluation (e.g. by recruiters, technical leads or potential
        collaborators), provided all other terms of this license
        are observed.
+
+  4.3  Forking the repository within the GitHub platform, solely
+       to the extent permitted by GitHub's Terms of Service for
+       public repositories, provided that this license applies in
+       full to any fork and that any further use remains subject
+       to Articles 2 and 3.
 
 The permissions granted in this article do not imply any grant
 of rights for purposes other than those indicated and do not

@@ -409,4 +409,8 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 ## Licenza
 
-Privato — uso interno.
+Proprietaria — tutti i diritti riservati. Codice pubblicato a solo scopo
+dimostrativo e di portfolio: è consentita la visualizzazione e la
+valutazione tecnica in locale; sono vietati uso commerciale, modifica,
+redistribuzione, erogazione come servizio e training di sistemi AI senza
+autorizzazione scritta. Testo completo (IT vincolante + EN): [LICENSE](LICENSE).
