@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# ============================================================
+# Pre-commit guard — blocca PII e segreti prima del commit.
+# Attivazione (una volta per clone):
+#   git config core.hooksPath .githooks
+# Falsi positivi (dati sintetici): aggiungi il valore ad ALLOW.
+# ============================================================
+set -u
+STAGED=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$STAGED" ] && exit 0
+
+FAIL=0
+# Codice fiscale italiano (mese: A B C D E H L M P R S T)
+CF='[A-Z]{6}[0-9]{2}[ABCDEHLMPRST][0-9]{2}[A-Z][0-9]{3}[A-Z]'
+# CF sintetici autorizzati (mock, seed, test)
+ALLOW='RSSMRA80A01F839Z|VRDLGU85M15H501X|BNCGLI85M41F839X|VRDLCU77R15F839W'
+# Pattern segreti evidenti
+SECRETS='BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|postgres(ql)?://[^ "]*:[^ "]*@|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{30,}|github_pat_|xox[bap]-|sk-[A-Za-z0-9]{20,}'
+# File/dir vietati a prescindere
+BANNED='(^|/)\.env($|\.)|\.pdf$|\.docx$|\.xlsx$|\.dump$|\.bak$|\.pem$|\.key$|\.p12$|\.pfx$|output-esempio/'
+
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  if echo "$f" | grep -qE "$BANNED"; then
+    if [ "$f" != ".env.example" ]; then
+      echo "BLOCCATO: file vietato in commit: $f"; FAIL=1; continue
+    fi
+  fi
+  case "$f" in
+    *.png|*.jpg|*.jpeg|*.gif|*.ico|*.mp3|*.woff|*.woff2|*.lock|package-lock.json) continue;;
+    .githooks/*) continue;;
+  esac
+  CONTENT=$(git show ":$f" 2>/dev/null) || continue
+  M=$(printf '%s' "$CONTENT" | grep -nE "$CF" | grep -vE "$ALLOW" | head -3)
+  if [ -n "$M" ]; then
+    echo "BLOCCATO: possibile codice fiscale reale in $f:"; echo "$M"; FAIL=1
+  fi
+  S=$(printf '%s' "$CONTENT" | grep -nEi "$SECRETS" | head -3)
+  if [ -n "$S" ]; then
+    echo "BLOCCATO: possibile segreto in $f:"; echo "$S"; FAIL=1
+  fi
+done <<< "$STAGED"
+
+if [ "$FAIL" -eq 1 ]; then
+  echo ""
+  echo "Commit bloccato dal guardrail PII/segreti (.githooks/pre-commit)."
+  echo "Se è un dato sintetico legittimo, aggiungilo ad ALLOW nel hook."
+  exit 1
+fi
+exit 0

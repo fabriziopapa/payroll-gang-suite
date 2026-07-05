@@ -1,0 +1,44 @@
+{
+  "name": "@payroll-gang/server",
+  "version": "26.07.02",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx --env-file=../.env watch src/app.ts",
+    "build": "tsc && node -e \"require('node:fs').cpSync('src/services/certificato/assets','dist/services/certificato/assets',{recursive:true})\"",
+    "start": "node --env-file=../.env dist/app.js",
+    "migrate": "drizzle-kit migrate",
+    "seed": "tsx --env-file=../.env src/db/seed.ts",
+    "regen-qr": "tsx --env-file=../.env src/db/regen-qr.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.0",
+    "@fastify/cors": "^10.0.0",
+    "@fastify/helmet": "^13.0.0",
+    "@fastify/rate-limit": "^10.0.0",
+    "argon2": "^0.41.0",
+    "decimal.js": "^10.6.0",
+    "docx": "^9.7.1",
+    "drizzle-orm": "^0.40.0",
+    "fastify": "^5.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "nodemailer": "^6.10.1",
+    "otplib": "^12.0.1",
+    "pdfjs-dist": "^6.0.227",
+    "postgres": "^3.4.0",
+    "qrcode": "^1.5.3",
+    "xlsx": "^0.18.5",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.0",
+    "@types/node": "^22.0.0",
+    "@types/nodemailer": "^6.4.23",
+    "@types/qrcode": "^1.5.0",
+    "drizzle-kit": "^0.30.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

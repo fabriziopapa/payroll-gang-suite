@@ -1,0 +1,71 @@
+# ── Ambiente ─────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ── Dipendenze ───────────────────────────────────────────────
+node_modules/
+**/node_modules/
+
+# ── Build ────────────────────────────────────────────────────
+dist/
+build/
+client/dist/
+server/dist/
+*.tsbuildinfo
+
+# ── Log ──────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── OS ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE / Editor / AI tooling ────────────────────────────────
+.vscode/
+.idea/
+.cursor/
+.claude/
+CLAUDE.local.md
+
+# ── Audit ────────────────────────────────────────────────────
+audit-log.json
+
+# ── Dati HR (anagrafiche/voci — contengono dati personali) ───
+*.xml
+*.csv
+*.xlsx
+*.xls
+
+# ── Documenti generati / campioni con PII (cedolini, certificati) ─
+*.pdf
+*.docx
+*.eml
+output-esempio/
+cedolino_expected.json
+
+# ── Dump e backup database ───────────────────────────────────
+*.dump
+*.bak
+*.sql.gz
+dump.sql
+
+# ── File temporanei / junk ───────────────────────────────────
+*.txt
+*.png
+*.py
+admin-qr.html
+
+# ── Documenti interni non distribuibili ──────────────────────
+PROMPT_MULTI_AGENTE.md
+STATO_PROGETTO.md
+
+# ── Legacy root src (non usato, solo in radice) ──────────────
+/src/
+
+# ── SQL —

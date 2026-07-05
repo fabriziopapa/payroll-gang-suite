@@ -1,0 +1,131 @@
+// ============================================================
+// PAYROLL GANG SUITE — Configurazione Ambiente
+// Validazione Zod a runtime — fallisce in avvio se mancano variabili
+// ============================================================
+
+import { z } from 'zod'
+
+const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  PORT: z.coerce.number().int().min(1024).max(65535).default(3001),
+  // Supporta lista separata da virgole: "https://example.com,https://www.example.com"
+  CLIENT_ORIGIN: z.string().transform(s =>
+    s.split(',').map(u => u.trim()).filter(Boolean)
+  ).pipe(z.array(z.string().url())),
+
+  // Database
+  DB_DRIVER: z.enum(['postgres']).default('postgres'),
+  DB_HOST: z.string().min(1),
+  DB_PORT: z.coerce.number().int().default(5432),
+  DB_NAME: z.string().min(1),
+  DB_USER: z.string().min(1),
+  DB_PASSWORD: z.string().min(1),
+  // SEC-H05: default true — le connessioni in produzione devono essere cifrate.
+  // Per sviluppo locale con PostgreSQL senza TLS, impostare DB_SSL=false nel .env
+  DB_SSL: z.enum(['true', 'false']).default('true').transform(v => v === 'true'),
+  DB_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
+  DB_POOL_IDLE_TIMEOUT: z.coerce.number().int().default(30000),
+  DB_CONNECTION_TIMEOUT: z.coerce.number().int().default(5000),
+
+  // JWT ES256
+  JWT_PRIVATE_KEY_BASE64: z.string().min(1),
+  JWT_PUBLIC_KEY_BASE64: z.string().min(1),
+  JWT_ACCESS_EXPIRES: z.string().default('15m'),
+  JWT_REFRESH_EXPIRES: z.string().default('7d'),
+
+  // Crittografia AES-256-GCM (hex 64 chars = 32 bytes)
+  ENCRYPTION_KEY: z.string().regex(/^[0-9a-f]{64}$/, {
+    message: 'ENCRYPTION_KEY deve essere hex a 64 caratteri (32 byte)',
+  }),
+
+  // Rate limiting
+  RATE_LIMIT_MAX: z.coerce.number().int().default(100),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().default(60000),
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().int().default(5),
+  AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().default(300000),
+  // /refresh è chiamato a ogni reload/multi-tab ed è protetto dal cookie
+  // HttpOnly (token 256-bit, brute-force infeasible) — limite generoso separato
+  // dal budget stretto anti-brute-force di /login.
+  REFRESH_RATE_LIMIT_MAX: z.coerce.number().int().default(30),
+
+  // TOTP
+  TOTP_ISSUER: z.string().default('PayrollGangSuite'),
+  TOTP_WINDOW: z.coerce.number().int().min(0).max(2).default(1),
+
+  // Cloudflare Turnstile (opzionale — se assente, verifica CAPTCHA saltata)
+  TURNSTILE_SECRET_KEY: z.string().optional(),
+
+  // SMTP mailer (opzionale — il server parte senza, ma non invia email)
+  SMTP_HOST:   z.string().optional(),
+  SMTP_PORT:   z.coerce.number().int().default(587),
+  SMTP_SECURE: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
+  SMTP_USER:   z.string().optional(),
+  SMTP_PASS:   z.string().optional(),
+  SMTP_FROM:   z.string().optional(),
+
+  // CINECA CSA-WS (opzionale — il server parte senza; le route /cineca/*
+  // rispondono 503 finché le credenziali non sono configurate)
+  CINECA_BASE_URL: z.string().url().optional(),       // es. https://prod.csa-ws.cineca.it
+  CINECA_TENANT:   z.string().optional(),             // es. uniparthenope
+  CINECA_USER:     z.string().optional(),
+  CINECA_PASSWORD: z.string().optional(),
+  // Gruppi richiesti nel token (CSV). 'familiari'=figli (WE), 'sge'=stato giuridico (CF dip.)
+  CINECA_GROUPS:   z.string().default('familiari,sge'),
+  // Reverse proxy in Italia per CSA-WS (opzionale) — CINECA geo-blocca gli IP
+  // extra-UE (da VPS extra-UE: TCP timeout). Il proxy inoltra a prod.csa-ws.cineca.it
+  // e richiede header X-Proxy-Auth. Attivazione runtime: toggle 'cinecaUseProxy'
+  // in Impostazioni (admin). Vedi CINECA_PROXY.md.
+  CINECA_PROXY_URL:    z.string().url().optional(),   // es. https://cineca-proxy.tuodominio.it
+  CINECA_PROXY_SECRET: z.string().min(32).optional(), // condiviso con il Caddy del proxy
+  // Codice rapportoParentela per figlio/figlia (da screen CSA: "FG")
+  PARENTELA_FIGLIO: z.string().default('FG'),
+})
+
+const parsed = envSchema.safeParse(process.env)
+
+if (!parsed.success) {
+  console.error('❌ Configurazione ambiente non valida:')
+  console.error(parsed.error.flatten().fieldErrors)
+  process.exit(1)
+}
+
+export const env = parsed.data
+
+/** Chiavi JWT decodificate da Base64 (usate da AuthService) */
+export const jwtKeys = {
+  private: Buffer.from(env.JWT_PRIVATE_KEY_BASE64, 'base64').toString('utf-8'),
+  public:  Buffer.from(env.JWT_PUBLIC_KEY_BASE64,  'base64').toString('utf-8'),
+} as const
+
+/**
+ * Converte una stringa di durata tipo '7d', '24h', '30m', '3600s' in millisecondi.
+ * Usato per derivare i valori numerici da JWT_REFRESH_EXPIRES.
+ */
+export function parseDurationMs(s: string): number {
+  const m = s.match(/^(\d+)(ms|s|m|h|d)$/)
+  if (!m) throw new Error(`parseDurationMs: formato non valido "${s}" — usa es. 7d, 24h, 30m, 3600s`)
+  const n = parseInt(m[1], 10)
+  switch (m[2]) {
+    case 'ms': return n
+    case 's':  return n * 1_000
+    case 'm':  return n * 60 * 1_000
+    case 'h':  return n * 3_600 * 1_000
+    case 'd':  return n * 86_400 * 1_000
+    default:   throw new Error(`parseDurationMs: unità sconosciuta "${m[2]}"`)
+  }
+}
+
+/**
+ * Durata del refresh token in millisecondi — derivata da JWT_REFRESH_EXPIRES.
+ * Unica sorgente di verità: cambiare JWT_REFRESH_EXPIRES in .env aggiorna
+ * automaticamente sia la scadenza del token in DB sia il maxAge del cookie.
+ */
+export const REFRESH_TOKEN_MS = parseDurationMs(env.JWT_REFRESH_EXPIRES)
+
+/** true se tutte le credenziali CINECA CSA-WS sono presenti */
+export const cinecaConfigured =
+  !!(env.CINECA_BASE_URL && env.CINECA_TENANT && env.CINECA_USER && env.CINECA_PASSWORD)
+
+/** true se il reverse proxy CINECA è configurato (URL + secret in .env) */
+export const cinecaProxyConfigured =
+  !!(env.CINECA_PROXY_URL && env.CINECA_PROXY_SECRET)

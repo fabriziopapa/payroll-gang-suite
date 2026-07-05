@@ -1,0 +1,548 @@
+// ============================================================
+// PAYROLL GANG SUITE — Interfacce Abstract Repository
+// Cambia driver DB senza toccare nulla al di sopra di questo layer
+// ============================================================
+
+// ------------------------------------------------------------
+// Risultato operazione di import XML
+// ------------------------------------------------------------
+
+export interface ImportResult {
+  inserted:    number
+  updated:     number
+  skipped:     number
+  errors:      Array<{ row: number; message: string }>
+  processedAt: Date
+}
+
+// ------------------------------------------------------------
+// Anagrafica Repository
+// ------------------------------------------------------------
+
+export interface AnagraficaInput {
+  matricola:         string
+  cognNome:          string
+  ruolo:             string
+  druolo?:           string
+  decorInq:          string   // YYYY-MM-DD — inizio periodo ruolo
+  finRap?:           string   // YYYY-MM-DD — fine rapporto (undefined = attivo)
+  dataAggiornamento: Date
+  // Campi SGE (opzionali — presenti solo da import xlsx)
+  idAb?:       number
+  cognome?:    string
+  nome?:       string
+  dtNascita?:  string  // YYYY-MM-DD
+  genere?:     string
+  codFis?:     string
+  hashRecord?: string  // SHA-256 campi funzionali
+}
+
+/**
+ * Risultato query ruolo-at:
+ * - 0 risultati → nessun record storico, usa fallback locale
+ * - 1 risultato → univoco, fill automatico
+ * - N>1 risultati → ambiguo, mostra scelta all'utente
+ */
+export interface RuoloAtResult {
+  ruolo:    string        // codice breve "PA"
+  druolo:   string | null // descrizione "Professori Associati"
+  decorInq: string        // "2020-01-01" — mostrato nell'UI per disambiguare
+  finRap:   string | null // null = ancora attivo
+}
+
+export interface IAnagraficheRepository {
+  findAll(): Promise<AnagraficaRow[]>
+  findAllAtDate(data: string): Promise<AnagraficaRow[]>
+  findByMatricola(matricola: string): Promise<AnagraficaRow[]>  // array: storia completa
+  findByRuolo(ruolo: string): Promise<AnagraficaRow[]>
+  findRuoloAt(matricola: string, data?: string): Promise<RuoloAtResult[]>
+  /** Versione bulk: una sola query per N matricole. Mappa matricola → risultati. */
+  findRuoloAtBulk(matricole: string[], data?: string): Promise<Record<string, RuoloAtResult[]>>
+  /** Codice fiscale locale (da SGE) per N matricole. Mappa matricola → CF. */
+  getCodFisByMatricole(matricole: string[]): Promise<Record<string, string>>
+  upsertMany(items: AnagraficaInput[]): Promise<ImportResult>
+  getLastImportDate(): Promise<Date | null>
+}
+
+export interface AnagraficaRow {
+  id:                number
+  matricola:         string
+  cognNome:          string
+  ruolo:             string
+  druolo:            string | null
+  decorInq:          string        // YYYY-MM-DD
+  finRap:            string | null // YYYY-MM-DD o null
+  dataAggiornamento: string
+  updatedAt:         Date
+  // Campi SGE (null se record importato da XML)
+  idAb:       number | null
+  cognome:    string | null
+  nome:       string | null
+  dtNascita:  string | null
+  genere:     string | null
+  codFis:     string | null
+  hashRecord: string | null
+}
+
+// ------------------------------------------------------------
+// Voci Repository
+// ------------------------------------------------------------
+
+export interface VoceInput {
+  codice:      string
+  descrizione: string
+  dataIn:      string
+  dataFin:     string
+  tipo?:       string
+  personale?:  string
+  immissione?: string
+  conguaglio?: string
+  capitoli:    Array<{ codice: string; descrizione?: string }>
+}
+
+export interface VoceRow {
+  id:          number
+  codice:      string
+  descrizione: string
+  dataIn:      string
+  dataFin:     string
+  tipo:        string | null
+  capitoli:    Array<{ codice: string; descrizione: string | null }>
+}
+
+export interface IVociRepository {
+  findAll(): Promise<VoceRow[]>
+  findByCodice(codice: string): Promise<VoceRow | null>
+  findActive(dataRiferimento?: Date): Promise<VoceRow[]>
+  upsertMany(items: VoceInput[]): Promise<ImportResult>
+  getLastImportDate(): Promise<Date | null>
+}
+
+// ------------------------------------------------------------
+// Voci Config Repository (parametri manuali per voce — rif. cedolino)
+// ------------------------------------------------------------
+
+export type TipoScorporoConfig = 'none' | 'standard' | 'contoterzi'
+export type TagDefaultConfig   = 'TL' | 'WD' | 'WE'
+
+export interface VoceConfigRow {
+  codice:       string
+  parti:        number | null
+  tipoScorporo: TipoScorporoConfig | null
+  tagDefault:   TagDefaultConfig | null
+  autoFiglio:   boolean
+  updatedAt:    Date
+}
+
+export interface VoceConfigInput {
+  codice:        string
+  parti?:        number | null
+  tipoScorporo?: TipoScorporoConfig | null
+  tagDefault?:   TagDefaultConfig | null
+  autoFiglio?:   boolean
+}
+
+export interface IVociConfigRepository {
+  findAll(): Promise<VoceConfigRow[]>
+  findByCodice(codice: string): Promise<VoceConfigRow | null>
+  upsert(input: VoceConfigInput): Promise<VoceConfigRow>
+  delete(codice: string): Promise<void>
+}
+
+// ------------------------------------------------------------
+// Familiari Cache Repository (figli da CINECA CSA-WS — tag WE)
+// ------------------------------------------------------------
+
+export interface FamiliareCacheRow {
+  idAb:              number | null
+  matricola:         string | null
+  codFisc:           string
+  cognome:           string | null
+  nome:              string | null
+  sesso:             string | null
+  rapportoParentela: string
+  dataNasc:          string | null  // YYYY-MM-DD
+  aggiornatoAt:      Date
+}
+
+export interface FamiliareCacheInput {
+  idAb?:             number | null
+  matricola:         string
+  codFisc:           string
+  cognome?:          string | null
+  nome?:             string | null
+  sesso?:            string | null
+  rapportoParentela: string
+  dataNasc?:         string | null
+}
+
+export interface IFamiliariRepository {
+  findByMatricola(matricola: string): Promise<FamiliareCacheRow[]>
+  /** Sostituisce l'intero nucleo cachato per la matricola (snapshot). */
+  replaceForMatricola(matricola: string, rows: FamiliareCacheInput[]): Promise<void>
+}
+
+// ------------------------------------------------------------
+// Bozze Repository
+// ------------------------------------------------------------
+
+export interface BozzaRow {
+  id:                 string
+  nome:               string
+  stato:              'bozza' | 'archiviata'
+  protocolloDisplay:  string | null
+  dati:               unknown
+  createdBy:          string | null
+  createdByUsername:  string | null
+  createdAt:          Date
+  updatedAt:          Date
+}
+
+export interface BozzaInput {
+  nome:              string
+  stato?:            'bozza' | 'archiviata'
+  protocolloDisplay?: string
+  dati:              unknown
+  createdBy?:        string
+}
+
+/**
+ * FIX H-1: tipo bozza senza il campo `dati` JSONB — usato dalla lista.
+ * Evita di trasferire 20KB avg per riga quando la dashboard mostra solo metadati.
+ */
+export interface BozzaSummaryRow {
+  id:                string
+  nome:              string
+  stato:             'bozza' | 'archiviata'
+  protocolloDisplay: string | null
+  createdBy:         string | null
+  createdByUsername: string | null
+  createdAt:         Date
+  updatedAt:         Date
+}
+
+export interface IBozzeRepository {
+  findAll(userId?: string): Promise<BozzaRow[]>
+  /** FIX H-1: lista senza dati JSONB — usata dal GET /bozze */
+  findAllSummary(userId?: string): Promise<BozzaSummaryRow[]>
+  findById(id: string): Promise<BozzaRow | null>
+  create(data: BozzaInput): Promise<BozzaRow>
+  update(id: string, data: Partial<BozzaInput>): Promise<BozzaRow>
+  archive(id: string): Promise<BozzaRow>
+  restore(id: string): Promise<BozzaRow>
+  delete(id: string): Promise<void>
+}
+
+// ------------------------------------------------------------
+// Users Repository
+// ------------------------------------------------------------
+
+export interface UserRow {
+  id:           string
+  username:     string
+  isAdmin:      boolean
+  isActive:     boolean
+  totpVerified: boolean
+  createdAt:    Date
+  lastLoginAt:  Date | null
+}
+
+/**
+ * Usato da activateUser: include i campi sensibili necessari per
+ * verificare OTP e controllare la scadenza del token.
+ */
+export interface ActivationUserRow extends UserRow {
+  totpSecret:          string
+  lastOtpToken:        string | null
+  activationExpiresAt: Date | null
+}
+
+export interface IUsersRepository {
+  findAll(): Promise<UserRow[]>
+  findById(id: string): Promise<UserRow | null>
+  findByUsername(username: string): Promise<(UserRow & {
+    totpSecret:   string
+    lastOtpToken: string | null
+    /** SEC-M01: timestamp fino al quale l'account è bloccato (null = non bloccato) */
+    lockedUntil:  Date | null
+  }) | null>
+  create(data: {
+    username:   string
+    totpSecret: string
+    isAdmin:    boolean
+  }): Promise<UserRow>
+  setTotpVerified(id: string): Promise<void>
+  updateLastLogin(id: string): Promise<void>
+  updateLastOtpToken(id: string, token: string): Promise<void>
+  /**
+   * Atomic check-and-set: imposta last_otp_token = token SOLO SE il valore corrente
+   * è NULL o diverso da token. Previene replay anche sotto carico concorrente.
+   * Restituisce true se il claim è avvenuto, false se era già presente (replay).
+   */
+  claimOtpToken(id: string, token: string): Promise<boolean>
+  setActive(id: string, active: boolean): Promise<void>
+  updateTotpSecret(id: string, totpSecret: string): Promise<void>
+  delete(id: string): Promise<void>
+  // ── FIX #4: Activation token con scadenza ──────────────────
+  /** Cerca utente per hash SHA-256 del token di attivazione. */
+  findByActivationTokenHash(tokenHash: string): Promise<ActivationUserRow | null>
+  /** Imposta hash + scadenza del token di attivazione. */
+  setActivationToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void>
+  /** Cancella il token dopo l'attivazione (o rigenera QR). */
+  clearActivationToken(userId: string): Promise<void>
+  /** Imposta/rimuove il ruolo admin. */
+  setAdmin(id: string, isAdmin: boolean): Promise<void>
+  // ── SEC-M01: TOTP brute-force lockout ──────────────────────
+  /**
+   * Incrementa failedOtpCount.
+   * Se raggiunge 5, imposta lockedUntil = now + 15 minuti e resetta il contatore.
+   */
+  incrementFailedOtp(userId: string): Promise<void>
+  /** Resetta failedOtpCount a 0 e cancella lockedUntil (chiamato dopo login riuscito). */
+  resetFailedOtp(userId: string): Promise<void>
+  /**
+   * SEC-M01 FIX G: sblocca manualmente un utente (admin → admin).
+   * Imposta failedOtpCount = 0, lockedUntil = NULL.
+   * Caso d'uso: account bloccato per troppi OTP falliti, nessun auto-unlock disponibile.
+   */
+  unlockUser(userId: string): Promise<void>
+}
+
+// ------------------------------------------------------------
+// Settings Repository
+// ------------------------------------------------------------
+
+export interface ISettingsRepository {
+  get<T>(chiave: string): Promise<T | null>
+  set<T>(chiave: string, valore: T): Promise<void>
+  getAll(): Promise<Record<string, unknown>>
+}
+
+// ------------------------------------------------------------
+// Audit Repository
+// ------------------------------------------------------------
+
+export interface AuditInput {
+  userId?:   string
+  azione:    string
+  entita?:   string
+  entitaId?: string
+  dettagli?: unknown
+  ip?:       string
+  userAgent?: string
+}
+
+export interface IAuditRepository {
+  log(entry: AuditInput): Promise<void>
+  findRecent(limit?: number): Promise<AuditEntry[]>
+}
+
+export interface AuditEntry {
+  id:        number
+  userId:    string | null
+  azione:    string
+  entita:    string | null
+  entitaId:  string | null
+  dettagli:  unknown
+  ip:        string | null
+  timestamp: Date
+}
+
+// ------------------------------------------------------------
+// Capitoli Anagrafica Repository
+// Capitoli standalone da Capitoli_STAMPA.xml / Capitoli_Locali_STAMPA.xml
+// ------------------------------------------------------------
+
+export type CapitoloSorgente = 'standard' | 'locali'
+
+export interface CapitoloAnagInput {
+  codice:       string
+  sorgente:     CapitoloSorgente
+  descrizione?: string
+  breve?:       string
+  tipoLiq?:     string
+  fCapitolo?:   string
+  dataIns?:     string
+  dataMod?:     string
+  operatore?:   string
+}
+
+export interface CapitoloAnagRow {
+  id:          number
+  codice:      string
+  sorgente:    string
+  descrizione: string | null
+  breve:       string | null
+  tipoLiq:     string | null
+  fCapitolo:   string | null
+  dataIns:     string | null
+  dataMod:     string | null
+  operatore:   string | null
+  updatedAt:   Date
+}
+
+export interface ICapitoliAnagRepository {
+  findAll(sorgente?: CapitoloSorgente): Promise<CapitoloAnagRow[]>
+  findByCodice(codice: string): Promise<CapitoloAnagRow[]>
+  upsertMany(items: CapitoloAnagInput[]): Promise<ImportResult>
+  getLastImportDates(): Promise<{ standard: Date | null; locali: Date | null }>
+}
+
+// ------------------------------------------------------------
+// Templati Certificato Repository (template-come-dato, CRUD)
+// ------------------------------------------------------------
+
+export interface TemplateRow {
+  id:            string
+  nome:          string
+  strutturaJson: unknown
+  attivo:        boolean
+  createdAt:     Date
+  updatedAt:     Date
+}
+
+export interface TemplateInput {
+  nome:          string
+  strutturaJson: unknown
+  attivo?:       boolean
+}
+
+export interface ITemplatiCertificatoRepository {
+  findAll(soloAttivi?: boolean): Promise<TemplateRow[]>
+  findById(id: string): Promise<TemplateRow | null>
+  create(data: TemplateInput): Promise<TemplateRow>
+  update(id: string, data: Partial<TemplateInput>): Promise<TemplateRow>
+  delete(id: string): Promise<void>
+}
+
+// ------------------------------------------------------------
+// Certificati Repository
+// ------------------------------------------------------------
+
+export interface CertificatoInput {
+  anno:           number
+  matricola?:     string | null
+  cf?:            string | null
+  periodo?:       string | null
+  nominativo?:    string | null
+  siglaOperatore: string
+  dirigente?:     string | null
+  templateId?:    string | null
+  /** Output parser (audit + rigenerazione). Privacy opzione A: no iban/CF nucleo. */
+  datiJson:       unknown
+  createdBy?:     string | null
+}
+
+export interface CertificatoRow {
+  id:             string
+  anno:           number
+  progressivo:    number
+  protocollo:     string
+  matricola:      string | null
+  cf:             string | null
+  periodo:        string | null
+  nominativo:     string | null
+  siglaOperatore: string
+  dirigente:      string | null
+  templateId:     string | null
+  datiJson:       unknown
+  createdBy:      string | null
+  createdByUsername: string | null
+  createdAt:      Date
+}
+
+/** Lista senza datiJson (può essere grande) */
+export interface CertificatoSummaryRow {
+  id:             string
+  anno:           number
+  progressivo:    number
+  protocollo:     string
+  matricola:      string | null
+  nominativo:     string | null
+  periodo:        string | null
+  siglaOperatore: string
+  createdByUsername: string | null
+  createdAt:      Date
+}
+
+export interface ICertificatiRepository {
+  /** Crea record assegnando il progressivo in modo ATOMICO (transazione). */
+  create(data: CertificatoInput): Promise<CertificatoRow>
+  findById(id: string): Promise<CertificatoRow | null>
+  /** Lista per anno (default: anno corrente) con ricerca opzionale matricola/nominativo. */
+  findAll(anno?: number, search?: string): Promise<CertificatoSummaryRow[]>
+  /**
+   * Elimina un certificato e RISINCRONIZZA il progressivo dell'anno a
+   * MAX(progressivo) rimanente (o 0). Cancellando gli ultimi N il contatore
+   * scala di N; cancellando in mezzo non si riusano numeri (evita collisione
+   * sull'unique anno,progressivo). Ritorna { protocollo, anno } o null se assente.
+   */
+  delete(id: string): Promise<{ protocollo: string; anno: number } | null>
+}
+
+// ------------------------------------------------------------
+// PDF Region Templates Repository (template-come-dato, VERSIONATO E IMMUTABILE)
+// Ogni riga = una versione immutabile. Modifiche → createNewVersion()
+// (nuova riga, mai update in-place sui campi geometrici). templateFamilyId
+// = lineage stabile fra versioni, indipendente da nome/id — refinement
+// Gate 2: evita rottura del lineage se l'admin rinomina creando versione.
+// ------------------------------------------------------------
+
+export interface PdfRegionTemplateRow {
+  id:                    string
+  templateFamilyId:      string
+  nome:                  string
+  nota:                  string | null
+  versione:              number
+  versioneLabel:         string
+  attivo:                boolean
+  pageGeometryJson:      unknown
+  partiJson:             unknown
+  certificatoTemplateId: string
+  createdBy:             string | null
+  createdByUsername:     string | null
+  createdAt:             Date
+  updatedAt:             Date
+}
+
+export interface PdfRegionTemplateInput {
+  nome:                  string
+  nota?:                 string | null
+  pageGeometryJson:      unknown
+  partiJson:             unknown
+  certificatoTemplateId: string
+  createdBy?:            string | null
+}
+
+export interface IPdfRegionTemplatesRepository {
+  /** Lista — default solo versioni attive; soloAttivi=false → storico completo (tutte le versioni/famiglie). */
+  findAll(soloAttivi?: boolean): Promise<PdfRegionTemplateRow[]>
+  findById(id: string): Promise<PdfRegionTemplateRow | null>
+  /** Crea v1: versione=1, versioneLabel=<oggi AA.MM.GG>, templateFamilyId nuovo, attivo=true. */
+  create(data: PdfRegionTemplateInput): Promise<PdfRegionTemplateRow>
+  /**
+   * Crea NUOVA VERSIONE in transazione atomica:
+   *  1. risolve famiglia/MAX(versione) dalla riga `precedenteId`
+   *  2. inserisce riga: stesso templateFamilyId, versione = max+1, versioneLabel = <oggi>, attivo = true
+   *  3. disattiva (attivo = false) la riga precedentemente attiva della stessa famiglia
+   * Mirror del pattern transazionale "progressivo atomico" di PgCertificatiRepository.
+   * MAI update in-place sui campi geometrici — immutabilità delle versioni preservata.
+   */
+  createNewVersion(precedenteId: string, data: PdfRegionTemplateInput): Promise<PdfRegionTemplateRow>
+  delete(id: string): Promise<void>
+}
+
+// ------------------------------------------------------------
+// Factory type — punto di accesso unico al DB layer
+// ------------------------------------------------------------
+
+export interface RepositoryFactory {
+  anagrafiche:       IAnagraficheRepository
+  voci:              IVociRepository
+  bozze:             IBozzeRepository
+  users:             IUsersRepository
+  settings:          ISettingsRepository
+  audit:             IAuditRepository
+  capitoliAnag:      ICapitoliAnagRepository
+  pdfRegionTemplates: IPdfRegionTemplatesRepository
+}

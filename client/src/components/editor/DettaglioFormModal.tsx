@@ -1,0 +1,602 @@
+// ============================================================
+// PAYROLL GANG SUITE — DettaglioFormModal
+// Modal add/edit DettaglioLiquidazione
+// Voce  → ricerca su tabella Voci HR
+// Capitolo → ricerca su tabella Capitoli HR
+// ============================================================
+
+import { useState, useEffect, useMemo, useRef, useId, cloneElement, isValidElement, Children } from 'react'
+import { useStore } from '../../store/useStore'
+import { lastDayOfMonth } from '../../utils/biz'
+import { DEFAULT_CSV_PARAMS } from '../../constants/csvDefaults'
+import { vociApi, capitoliApi, anagraficheApi, vociConfigApi } from '../../api/endpoints'
+import { showToast } from '../ToastManager'
+import { useModalKeyboard } from '../../hooks/useFocusTrap'
+import type { DettaglioLiquidazione, VoceConfig } from '../../types'
+
+interface Props {
+  existing?: DettaglioLiquidazione
+  onClose:   () => void
+}
+
+type Tab = 'base' | 'provvedimento' | 'avanzato'
+
+export default function DettaglioFormModal({ existing, onClose }: Props) {
+  const {
+    addDettaglio, updateDettaglio, settings,
+    voci, setVoci,
+    capitoliAnag, setCapitoliAnag,
+    vociConfigs: vociConfigsArr, setVociConfigs,
+  } = useStore()
+  const titleId   = useId()
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useModalKeyboard(dialogRef, onClose)
+
+  const csv  = settings?.csvDefaults ?? DEFAULT_CSV_PARAMS
+  const tags = (settings?.tags ?? []).map(t => t.prefisso)
+
+  // ── Stato form ────────────────────────────────────────────
+  const [tab, setTab]                               = useState<Tab>('base')
+  const [nomeDescrittivo, setNomeDescrittivo]       = useState(existing?.nomeDescrittivo ?? '')
+  const [voce, setVoce]                             = useState(existing?.voce ?? '')
+  const [capitolo, setCapitolo]                     = useState(existing?.capitolo ?? '')
+  const [competenza, setCompetenza]                 = useState(existing?.competenzaLiquidazione ?? '')
+  const [dataCompetenzaVoce, setDataCompetenzaVoce] = useState(existing?.dataCompetenzaVoce ?? '')
+  // Radio scorporo: 'none' | 'standard' | 'contoterzi'
+  type ScorporoMode = 'none' | 'standard' | 'contoterzi'
+  function initScorporoMode(): ScorporoMode {
+    if (!existing?.flagScorporo) return 'none'
+    if (existing.tipoScorporo === 'contoterzi') {
+      // downgrade a standard se i coefficienti CT sono stati rimossi dalle impostazioni
+      const hasCT = Object.keys(settings.coefficientiContoTerzi ?? {}).length > 0
+      return hasCT ? 'contoterzi' : 'standard'
+    }
+    return 'standard'
+  }
+  const [scorporoMode, setScorporoMode] = useState<ScorporoMode>(initScorporoMode)
+  const [riferimento, setRiferimento]               = useState(existing?.riferimentoCedolino ?? '')
+  const [idProv, setIdProv]                         = useState(existing?.identificativoProvvedimento ?? '000000000')
+  const [tipoProv, setTipoProv]                     = useState(existing?.tipoProvvedimento ?? csv.tipoProvvedimento)
+  const [numProv, setNumProv]                       = useState(existing?.numeroProvvedimento ?? '')
+  const [dataProv, setDataProv]                     = useState(existing?.dataProvvedimento ?? '')
+  const [aliquota, setAliquota]                     = useState(String(existing?.aliquota ?? csv.aliquota))
+  const [parti, setParti]                           = useState(String(existing?.parti ?? csv.parti))
+  const [flagAdem, setFlagAdem]                     = useState(String(existing?.flagAdempimenti ?? csv.flagAdempimenti))
+  const [idContratto, setIdContratto]               = useState(existing?.idContrattoCSA ?? csv.idContrattoCSA)
+  const [centroCosto, setCentroCosto]               = useState(existing?.centroCosto ?? '')
+  const [note, setNote]                             = useState(existing?.note ?? '')
+
+  // ── Validazione campi obbligatori (tab Principale) ────────
+  type FieldErrors = Partial<Record<'nomeDescrittivo' | 'competenza' | 'dataCompetenzaVoce', string>>
+  const [errors, setErrors] = useState<FieldErrors>({})
+
+  function validate(): FieldErrors {
+    const errs: FieldErrors = {}
+    if (!nomeDescrittivo.trim())
+      errs.nomeDescrittivo = 'Il nome descrittivo è obbligatorio'
+    if (!competenza.trim())
+      errs.competenza = 'La competenza è obbligatoria'
+    else if (!/^\d{2}\/\d{4}$/.test(competenza))
+      errs.competenza = 'Formato non valido: usare MM/YYYY (es. 04/2026)'
+    if (!dataCompetenzaVoce)
+      errs.dataCompetenzaVoce = 'La data competenza voce è obbligatoria'
+    return errs
+  }
+
+  function clearError(field: keyof FieldErrors) {
+    setErrors(prev => {
+      if (!prev[field]) return prev
+      const next = { ...prev }
+      delete next[field]
+      return next
+    })
+  }
+
+  // ── Config voci (pre-compilazione alla selezione voce) ────
+  const vociConfigs = useMemo(
+    () => Object.fromEntries(vociConfigsArr.map(c => [c.codice, c])) as Record<string, VoceConfig>,
+    [vociConfigsArr],
+  )
+
+  function applyVoceConfig(codice: string) {
+    const cfg = vociConfigs[codice]
+    if (!cfg) return
+    if (cfg.parti != null) setParti(String(cfg.parti))
+    if (cfg.tipoScorporo) {
+      // downgrade a standard se CT richiesto ma non configurato
+      const next = cfg.tipoScorporo === 'contoterzi'
+        && Object.keys(settings.coefficientiContoTerzi ?? {}).length === 0
+          ? 'standard' : cfg.tipoScorporo
+      setScorporoMode(next as ScorporoMode)
+    }
+    if (cfg.tagDefault) {
+      setRiferimento(prev => prev.trim() === '' ? `${cfg.tagDefault}@` : prev)
+    }
+  }
+
+  // ── Search state ──────────────────────────────────────────
+  const [voceSearch, setVoceSearch]         = useState(existing?.voce ?? '')
+  const [capitoloSearch, setCapitoloSearch] = useState(existing?.capitolo ?? '')
+  const [voceOpen, setVoceOpen]             = useState(!existing?.voce)
+  const [capitoloOpen, setCapitoloOpen]     = useState(!existing?.capitolo)
+
+  // ── Lazy load voci / capitoli se non ancora in store ─────
+  useEffect(() => {
+    if (voci.length === 0) {
+      vociApi.active().then(data => setVoci(data)).catch(() => {})
+    }
+    if (capitoliAnag.length === 0) {
+      capitoliApi.list().then(data => setCapitoliAnag(data)).catch(() => {})
+    }
+    if (vociConfigsArr.length === 0) vociConfigApi.list().then(setVociConfigs).catch(() => {})
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Ricalcola dataCompetenzaVoce ogni volta che competenza cambia
+  // L'utente può comunque sovrascrivere manualmente il campo data
+  useEffect(() => {
+    if (/^\d{2}\/\d{4}$/.test(competenza)) {
+      setDataCompetenzaVoce(lastDayOfMonth(competenza))
+    }
+  }, [competenza]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Ricerca word-tokenized ────────────────────────────────
+
+  const vociFiltrate = useMemo(() => {
+    const words = voceSearch.toLowerCase().trim().split(/\s+/).filter(Boolean)
+    if (words.length === 0) return voci.slice(0, 60)
+    return voci.filter(v => {
+      const hay = `${v.codice} ${v.descrizione}`.toLowerCase()
+      return words.every(w => hay.includes(w))
+    }).slice(0, 60)
+  }, [voci, voceSearch])
+
+  const capitaliFiltrati = useMemo(() => {
+    const words = capitoloSearch.toLowerCase().trim().split(/\s+/).filter(Boolean)
+    if (words.length === 0) return capitoliAnag.slice(0, 60)
+    return capitoliAnag.filter(c => {
+      const hay = `${c.codice} ${c.descrizione ?? ''} ${c.breve ?? ''}`.toLowerCase()
+      return words.every(w => hay.includes(w))
+    }).slice(0, 60)
+  }, [capitoliAnag, capitoloSearch])
+
+  // Descrizione voce/capitolo selezionato (per display)
+  const selectedVoceObj    = voci.find(v => v.codice === voce)
+  const selectedCapitoloObj = capitoliAnag.find(c => c.codice === capitolo)
+
+  // ── Submit ────────────────────────────────────────────────
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const errs = validate()
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs)
+      // I campi obbligatori vivono nel tab "Principale": riportalo in vista
+      // prima di spostare il focus sul primo campo invalido
+      setTab('base')
+      setTimeout(() => {
+        dialogRef.current?.querySelector<HTMLInputElement>('[aria-invalid="true"]')?.focus()
+      }, 0)
+      showToast('Compila i campi obbligatori evidenziati', 'error')
+      return
+    }
+    const data: Partial<Omit<DettaglioLiquidazione, 'id' | 'colore'>> = {
+      nomeDescrittivo,
+      voce,
+      capitolo,
+      competenzaLiquidazione:      competenza,
+      dataCompetenzaVoce,
+      flagScorporo:                scorporoMode !== 'none',
+      tipoScorporo:                scorporoMode === 'contoterzi' ? 'contoterzi' : scorporoMode === 'standard' ? 'standard' : undefined,
+      riferimentoCedolino:         riferimento,
+      identificativoProvvedimento: idProv,
+      tipoProvvedimento:           tipoProv,
+      numeroProvvedimento:         numProv,
+      dataProvvedimento:           dataProv,
+      aliquota:                    parseFloat(aliquota) || 0,
+      parti:                       parseFloat(parti) || 0,
+      flagAdempimenti:             parseInt(flagAdem) || 0,
+      idContrattoCSA:              idContratto,
+      centroCosto,
+      note,
+      // preserve existing flag until staleness check overwrites it
+      anagraficheOutdated: existing?.anagraficheOutdated ?? false,
+    }
+
+    // Persist immediately, then check staleness in background
+    let detId: string
+    if (existing) {
+      updateDettaglio(existing.id, data)
+      detId = existing.id
+    } else {
+      detId = addDettaglio(data)
+    }
+    onClose()
+
+    // Background: verifica se dataCompetenzaVoce è successiva all'ultimo import anagrafiche
+    if (dataCompetenzaVoce) {
+      anagraficheApi.lastImport()
+        .then(({ lastImport }) => {
+          if (!lastImport) return
+          const importDate = lastImport.slice(0, 10)  // YYYY-MM-DD
+          if (dataCompetenzaVoce > importDate) {
+            updateDettaglio(detId, { anagraficheOutdated: true })
+            showToast(
+              `Data competenza voce (${dataCompetenzaVoce}) successiva all'ultimo import anagrafiche (${importDate}).\nVerifica i ruoli con "Aggiorna Ruolo" prima di esportare il CSV.`,
+              'warning',
+            )
+          } else {
+            updateDettaglio(detId, { anagraficheOutdated: false })
+          }
+        })
+        .catch(() => { /* nessuna connessione — ignora */ })
+    }
+  }
+
+  const TABS: { id: Tab; label: string }[] = [
+    { id: 'base',          label: 'Principale' },
+    { id: 'provvedimento', label: 'Provvedimento' },
+    { id: 'avanzato',      label: 'Avanzato' },
+  ]
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+    >
+      <div ref={dialogRef} className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl
+                      max-h-[90vh] flex flex-col shadow-2xl">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
+          <h2 id={titleId} className="text-white font-semibold">
+            {existing ? 'Modifica gruppo' : 'Nuovo gruppo liquidazione'}
+          </h2>
+          <button onClick={onClose} aria-label="Chiudi"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-0.5 px-5 pt-3">
+          {TABS.map(t => (
+            <button key={t.id} type="button" onClick={() => setTab(t.id)}
+              className={`px-3 py-1.5 rounded-t-lg text-sm font-medium transition
+                ${tab === t.id ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} noValidate className="flex-1 overflow-y-auto">
+          <div className="px-5 py-4 space-y-4">
+
+            {/* ── TAB BASE ──────────────────────────────────── */}
+            {tab === 'base' && (
+              <>
+                <Field label="Nome descrittivo *" error={errors.nomeDescrittivo}>
+                  <input value={nomeDescrittivo}
+                    onChange={e => { setNomeDescrittivo(e.target.value); clearError('nomeDescrittivo') }}
+                    placeholder="es. TFA Sostegno Nov 2026"
+                    className={errors.nomeDescrittivo ? inputErrCls : inputCls} />
+                </Field>
+
+                {/* ── VOCE HR ──────────────────────────── */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-sm font-medium text-slate-300">Voce HR</label>
+                    {voce && (
+                      <button type="button" onClick={() => { setVoce(''); setVoceSearch(''); setVoceOpen(true) }}
+                        className="text-xs text-slate-500 hover:text-red-400 transition">
+                        Deseleziona
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Valore selezionato */}
+                  {voce && !voceOpen ? (
+                    <button type="button" onClick={() => setVoceOpen(true)}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg
+                                 bg-indigo-900/30 border border-indigo-700/50 text-left hover:bg-indigo-900/40 transition">
+                      <span className="font-mono text-indigo-300 text-sm shrink-0">{voce}</span>
+                      <span className="text-white text-sm truncate">{selectedVoceObj?.descrizione ?? ''}</span>
+                      <svg className="w-3.5 h-3.5 text-slate-500 ml-auto shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+                      </svg>
+                    </button>
+                  ) : (
+                    <div className="space-y-1">
+                      <input autoFocus={voceOpen} value={voceSearch}
+                        onChange={e => setVoceSearch(e.target.value)}
+                        placeholder="Cerca per codice o descrizione…"
+                        className={inputCls} />
+                      {voci.length === 0 ? (
+                        <p className="text-xs text-amber-400 px-1">
+                          Nessuna voce caricata. Importa le voci dalla sezione "Voci HR".
+                        </p>
+                      ) : (
+                        <div className="rounded-lg border border-slate-700 overflow-hidden max-h-44 overflow-y-auto">
+                          {vociFiltrate.length === 0 ? (
+                            <p className="text-center py-4 text-slate-500 text-sm">Nessun risultato.</p>
+                          ) : vociFiltrate.map(v => (
+                            <button key={`${v.codice}-${v.dataIn}`} type="button"
+                              onClick={() => { setVoce(v.codice); setVoceOpen(false); applyVoceConfig(v.codice) }}
+                              className="w-full flex items-center gap-3 px-3 py-2 text-left
+                                         hover:bg-slate-700/60 transition border-b border-slate-800/50 last:border-0">
+                              <span className="font-mono text-indigo-400 text-xs shrink-0 w-14">{v.codice}</span>
+                              <span className="text-slate-200 text-sm truncate">{v.descrizione}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {voce && vociConfigs[voce] && (
+                  <p className="text-xs text-indigo-400 mt-1.5 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                    Parametri pre-compilati da config voce
+                    {vociConfigs[voce]!.tagDefault && ` · tag ${vociConfigs[voce]!.tagDefault}`}
+                  </p>
+                )}
+
+                {/* ── CAPITOLO ─────────────────────────── */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-sm font-medium text-slate-300">Capitolo</label>
+                    {capitolo && (
+                      <button type="button" onClick={() => { setCapitolo(''); setCapitoloSearch(''); setCapitoloOpen(true) }}
+                        className="text-xs text-slate-500 hover:text-red-400 transition">
+                        Deseleziona
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Valore selezionato */}
+                  {capitolo && !capitoloOpen ? (
+                    <button type="button" onClick={() => setCapitoloOpen(true)}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg
+                                 bg-emerald-900/30 border border-emerald-700/50 text-left hover:bg-emerald-900/40 transition">
+                      <span className="font-mono text-emerald-300 text-sm shrink-0">{capitolo}</span>
+                      <span className="text-white text-sm truncate">
+                        {selectedCapitoloObj?.descrizione ?? selectedCapitoloObj?.breve ?? ''}
+                      </span>
+                      <svg className="w-3.5 h-3.5 text-slate-500 ml-auto shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+                      </svg>
+                    </button>
+                  ) : (
+                    <div className="space-y-1">
+                      <input value={capitoloSearch}
+                        onChange={e => setCapitoloSearch(e.target.value)}
+                        placeholder="Cerca per codice o descrizione…"
+                        className={inputCls} />
+                      {capitoliAnag.length === 0 ? (
+                        <p className="text-xs text-amber-400 px-1">
+                          Nessun capitolo caricato. Importa i capitoli dalla sezione "Capitoli".
+                        </p>
+                      ) : (
+                        <div className="rounded-lg border border-slate-700 overflow-hidden max-h-44 overflow-y-auto">
+                          {capitaliFiltrati.length === 0 ? (
+                            <p className="text-center py-4 text-slate-500 text-sm">Nessun risultato.</p>
+                          ) : capitaliFiltrati.map(c => (
+                            <button key={`${c.codice}-${c.sorgente}`} type="button"
+                              onClick={() => { setCapitolo(c.codice); setCapitoloOpen(false) }}
+                              className="w-full flex items-center gap-3 px-3 py-2 text-left
+                                         hover:bg-slate-700/60 transition border-b border-slate-800/50 last:border-0">
+                              <span className="font-mono text-emerald-400 text-xs shrink-0 w-16">{c.codice}</span>
+                              <span className="text-slate-200 text-sm truncate flex-1">
+                                {c.descrizione ?? c.breve ?? '—'}
+                              </span>
+                              <span className="text-xs text-slate-600 shrink-0">{c.sorgente}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Competenza */}
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Competenza (MM/YYYY) *" error={errors.competenza}>
+                    <input value={competenza}
+                      onChange={e => { setCompetenza(e.target.value); clearError('competenza') }}
+                      placeholder="04/2026" inputMode="numeric"
+                      className={errors.competenza ? inputErrCls : inputCls} />
+                  </Field>
+                  <Field label="Data competenza voce *" error={errors.dataCompetenzaVoce}>
+                    <input type="date" value={dataCompetenzaVoce}
+                      onChange={e => { setDataCompetenzaVoce(e.target.value); clearError('dataCompetenzaVoce') }}
+                      className={errors.dataCompetenzaVoce ? inputErrCls : inputCls} />
+                  </Field>
+                </div>
+
+                {/* Scorporo — radio group */}
+                <div className="p-3 rounded-lg bg-slate-800/50 border border-slate-700 space-y-2">
+                  <p className="text-sm font-medium text-slate-300 mb-1">Scorporo</p>
+
+                  {/* Nessuno */}
+                  <label className="flex items-start gap-3 cursor-pointer group">
+                    <input
+                      type="radio" name="scorporo" value="none"
+                      checked={scorporoMode === 'none'}
+                      onChange={() => setScorporoMode('none')}
+                      className="mt-0.5 w-4 h-4 border-slate-600 text-indigo-600"
+                    />
+                    <span className="text-sm text-slate-200">
+                      Nessuno
+                      <span className="text-slate-500 text-xs block">Importo lordo invariato nel CSV</span>
+                    </span>
+                  </label>
+
+                  {/* Scorporo Standard */}
+                  <label className="flex items-start gap-3 cursor-pointer group">
+                    <input
+                      type="radio" name="scorporo" value="standard"
+                      checked={scorporoMode === 'standard'}
+                      onChange={() => setScorporoMode('standard')}
+                      className="mt-0.5 w-4 h-4 border-slate-600 text-indigo-600"
+                    />
+                    <span className="text-sm text-slate-200">
+                      Scorporo standard
+                      <span className="text-slate-500 text-xs block">
+                        Ruoli configurati:{' '}
+                        {Object.keys(settings.coefficienti).length > 0
+                          ? Object.keys(settings.coefficienti).join(', ')
+                          : <em>nessuno</em>}
+                      </span>
+                    </span>
+                  </label>
+
+                  {/* Scorporo Conto Terzi */}
+                  <label className={`flex items-start gap-3 ${Object.keys(settings.coefficientiContoTerzi ?? {}).length === 0 ? 'opacity-40' : 'cursor-pointer'}`}>
+                    <input
+                      type="radio" name="scorporo" value="contoterzi"
+                      checked={scorporoMode === 'contoterzi'}
+                      onChange={() => setScorporoMode('contoterzi')}
+                      disabled={Object.keys(settings.coefficientiContoTerzi ?? {}).length === 0}
+                      className="mt-0.5 w-4 h-4 border-slate-600 text-indigo-600"
+                    />
+                    <span className="text-sm text-slate-200">
+                      Scorporo conto terzi
+                      <span className="text-slate-500 text-xs block">
+                        {Object.keys(settings.coefficientiContoTerzi ?? {}).length === 0
+                          ? 'Configura i coefficienti CT in Impostazioni'
+                          : `Ruoli CT: ${Object.keys(settings.coefficientiContoTerzi!).join(', ')}`}
+                      </span>
+                    </span>
+                  </label>
+                </div>
+
+                {/* Riferimento cedolino */}
+                <Field label="Riferimento cedolino">
+                  <input value={riferimento} onChange={e => setRiferimento(e.target.value)}
+                    placeholder="es. TL@TFA SOSTEGNO 2023/24@" className={inputCls} />
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {tags.map(tag => (
+                      <button key={tag} type="button"
+                        onClick={() => setRiferimento(v => v + tag + '@')}
+                        className="px-2 py-0.5 rounded text-xs bg-slate-700 text-slate-300 hover:bg-slate-600 transition">
+                        {tag}
+                      </button>
+                    ))}
+                    <button type="button"
+                      onClick={() => setRiferimento(v => v + '@')}
+                      className="px-2 py-0.5 rounded text-xs bg-slate-700 text-slate-300 hover:bg-slate-600 transition">
+                      @
+                    </button>
+                  </div>
+                </Field>
+              </>
+            )}
+
+            {/* ── TAB PROVVEDIMENTO ──────────────────────────── */}
+            {tab === 'provvedimento' && (
+              <>
+                <Field label="ID Provvedimento (9 cifre)">
+                  <input value={idProv}
+                    onChange={e => setIdProv(e.target.value.replace(/\D/g, '').slice(0, 9))}
+                    placeholder="000000000" maxLength={9}
+                    className={`${inputCls} font-mono tracking-widest`} />
+                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Tipo Provvedimento">
+                    <input value={tipoProv} onChange={e => setTipoProv(e.target.value)} className={inputCls} />
+                  </Field>
+                  <Field label="Numero Provvedimento">
+                    <input value={numProv} onChange={e => setNumProv(e.target.value)} className={inputCls} />
+                  </Field>
+                </div>
+                <Field label="Data Provvedimento">
+                  <input type="date" value={dataProv} onChange={e => setDataProv(e.target.value)} className={inputCls} />
+                </Field>
+              </>
+            )}
+
+            {/* ── TAB AVANZATO ──────────────────────────────── */}
+            {tab === 'avanzato' && (
+              <>
+                <div className="grid grid-cols-3 gap-3">
+                  <Field label="Aliquota">
+                    <input type="number" value={aliquota} onChange={e => setAliquota(e.target.value)} className={inputCls} />
+                  </Field>
+                  <Field label="Parti">
+                    <input type="number" value={parti} onChange={e => setParti(e.target.value)} className={inputCls} />
+                  </Field>
+                  <Field label="Flag Adempimenti">
+                    <input type="number" value={flagAdem} onChange={e => setFlagAdem(e.target.value)} className={inputCls} />
+                  </Field>
+                </div>
+                <Field label="ID Contratto CSA">
+                  <input value={idContratto} onChange={e => setIdContratto(e.target.value)} className={inputCls} />
+                </Field>
+                <Field label="Centro di Costo">
+                  <input value={centroCosto} onChange={e => setCentroCosto(e.target.value)} className={inputCls} />
+                </Field>
+                <Field label="Note">
+                  <textarea value={note} onChange={e => setNote(e.target.value)} rows={3} className={inputCls} />
+                </Field>
+              </>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-slate-800">
+            <button type="button" onClick={onClose}
+              className="px-4 py-2 rounded-lg text-slate-300 hover:bg-slate-800 text-sm transition">
+              Annulla
+            </button>
+            <button type="submit"
+              className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500
+                         text-white text-sm font-medium transition">
+              {existing ? 'Salva modifiche' : 'Aggiungi gruppo'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ── Helpers ───────────────────────────────────────────────────
+
+const inputCls = `w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700
+  text-white text-sm placeholder-slate-500
+  focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition`
+
+const inputErrCls = `w-full px-3 py-2 rounded-lg bg-slate-800 border border-red-500/70
+  text-white text-sm placeholder-slate-500
+  focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition`
+
+function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
+  const id       = useId()
+  const errorId  = `${id}-error`
+  const childArr = Children.toArray(children)
+  const first    = childArr[0]
+  const rest     = childArr.slice(1)
+  const a11y = error ? { 'aria-invalid': true as const, 'aria-describedby': errorId } : {}
+  return (
+    <div>
+      <label htmlFor={id} className="block text-sm font-medium text-slate-300 mb-1.5">{label}</label>
+      {isValidElement(first)
+        ? cloneElement(first as React.ReactElement<{ id?: string; 'aria-invalid'?: boolean; 'aria-describedby'?: string }>, { id, ...a11y })
+        : first}
+      {error && (
+        <p id={errorId} role="alert" className="mt-1 flex items-center gap-1 text-xs text-red-400">
+          <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M12 9v3.75m0 3.75h.008v.008H12v-.008zM21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          {error}
+        </p>
+      )}
+      {rest}
+    </div>
+  )
+}
