@@ -151,15 +151,17 @@ export function serializeCsv(rows: CsvExportRow[]): string {
     ].join(';'),
   )
   // Termina con \r\n dopo l'ultima riga (richiesto da HR Suite)
-  return [CSV_HEADER, ...dataRows].join('\r\n') + '\r\n'
+  //return [CSV_HEADER, ...dataRows].join('\r\n') + '\r\n'
+  return [CSV_HEADER, ...dataRows].join('\n') + '\n'
 }
 
 /**
  * Trigger download CSV nel browser con BOM UTF-8 (per compatibilità Excel italiano).
  */
 export function downloadCsv(content: string, filename: string): void {
-  const BOM  = '\uFEFF'
-  const blob = new Blob([BOM + content], { type: 'text/csv;charset=utf-8;' })
+  //const BOM  = '\uFEFF'
+  //const blob = new Blob([BOM + content], { type: 'text/csv;charset=utf-8;' })
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' })
   const url  = URL.createObjectURL(blob)
   const a    = Object.assign(document.createElement('a'), { href: url, download: filename })
   a.click()
