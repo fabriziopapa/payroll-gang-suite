@@ -3,7 +3,7 @@
 // AES-256-GCM per dati sensibili a riposo (es. TOTP secrets)
 // ============================================================
 
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { env } from '../config/env.js'
 
 const ALGORITHM  = 'aes-256-gcm'
@@ -51,21 +51,9 @@ export function decrypt(payload: string): string {
   return decrypted.toString('utf8')
 }
 
-/**
- * Genera N byte casuali crittograficamente sicuri.
- * @returns stringa hex
- */
-export function generateSecureToken(bytes = 32): string {
-  return randomBytes(bytes).toString('hex')
-}
-
-/**
- * Fingerprint non reversibile per il refresh token
- * (hash SHA-256 di userAgent + IP). Funzione sincrona.
- */
-export function fingerprintRequest(userAgent: string, ip: string): string {
-  return createHash('sha256')
-    .update(`${userAgent}|${ip}`)
-    .digest('hex')
-    .slice(0, 64)
-}
+// NOTA: generateSecureToken()/fingerprintRequest() sono state rimosse perché
+// inutilizzate — codice morto (dead code). AuthService.#fingerprint() implementa
+// la propria fingerprint (solo User-Agent, senza IP — SEC-H03) e i token grezzi
+// vengono generati con randomBytes(32) direttamente in AuthService, senza
+// passare da qui. Se in futuro serve un helper condiviso, ripristinarlo qui
+// ed effettivamente farlo usare da entrambi i chiamanti.
