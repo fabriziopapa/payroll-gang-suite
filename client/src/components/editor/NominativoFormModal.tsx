@@ -129,7 +129,7 @@ function normStr(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
 }
 
-// ── Filtro rilevanza: esclude cessati da più di 2 anni ────────
+// ── Filtro rilevanza: esclude cessati da più di 3 anni ────────
 const _today         = new Date().toISOString().slice(0, 10)
 const _threeYearsAgo = (() => {
   const d = new Date()
