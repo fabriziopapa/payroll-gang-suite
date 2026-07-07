@@ -310,6 +310,27 @@ function parseXlsxDate(val: unknown): string | undefined {
 function calcHash(fields: string[]): string {
   return createHash('sha256').update(fields.join('|')).digest('hex')
 }
+ 
+ /**
+  * FIX: valida che MATRICOLA sia effettivamente numerica prima di normalizzarla.
+  * BUG precedente: `String(Number(matricolaRaw)).padStart(6,'0')` su un valore
+  * non numerico (es. cella XLSX con testo/errore di battitura) produceva
+  * silenziosamente "000NaN" — un record veniva scritto a DB con una matricola
+  * spazzatura invece di finire in errors[].
+  * Ritorna la matricola normalizzata a 6 cifre, o null se non valida.
+  */
+function normalizeMatricola(raw: unknown): string | null {
+   if (typeof raw === 'number') {
+     if (!Number.isFinite(raw) || !Number.isInteger(raw) || raw < 0) return null
+     return String(raw).padStart(6, '0')
+   }
+   if (typeof raw === 'string') {
+     const trimmed = raw.trim()
+     if (!/^\d+$/.test(trimmed)) return null
+     return trimmed.padStart(6, '0')
+   }
+   return null
+}
 
 export async function importAnagraficheXlsx(
   fileBuffer:        Buffer,
@@ -354,7 +375,11 @@ export async function importAnagraficheXlsx(
       return
     }
 
-    const matricola = String(Number(matricolaRaw)).padStart(6, '0')
+    const matricola = normalizeMatricola(matricolaRaw)
+    if (!matricola) {
+      errors.push({ row: index + 1, message: `MATRICOLA non numerica o malformata: "${String(matricolaRaw)}"` })
+      return
+    }
     const decorInq  = parseXlsxDate(row['DT_INIZIO']) ?? dataAgg
     const finRap    = parseXlsxDate(row['DT_FINE'])
     const dtNascita = parseXlsxDate(row['DT_NASCITA'])
