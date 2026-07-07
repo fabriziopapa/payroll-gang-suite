@@ -199,6 +199,7 @@ export const useStore = create<AppStore>()(
         s.anagrafiche       = []
         s.voci              = []
         s.capitoliAnag      = []
+        s.vociConfigs       = []
         s.settings          = DEFAULT_SETTINGS
         s.bootstrapDone     = true
       })
