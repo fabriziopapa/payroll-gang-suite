@@ -101,12 +101,15 @@ export async function cinecaRoutes(app: FastifyInstance): Promise<void> {
     }
   }
 
+  // Tutti i figli (FG), ordinati dal più giovane al più anziano.
+  function figliFG(familiari: FamiliareNorm[]): FamiliareNorm[] {
+    return familiari
+      .filter(f => f.rapportoParentela.toUpperCase() === env.PARENTELA_FIGLIO.toUpperCase())
+      .sort((a, b) => (b.dataNasc ?? '').localeCompare(a.dataNasc ?? ''))
+  }
+
   function figlioPiuGiovane(familiari: FamiliareNorm[]): FamiliareNorm | null {
-    const figli = familiari.filter(
-      f => f.rapportoParentela.toUpperCase() === env.PARENTELA_FIGLIO.toUpperCase(),
-    )
-    if (figli.length === 0) return null
-    return figli.sort((a, b) => (b.dataNasc ?? '').localeCompare(a.dataNasc ?? ''))[0]!
+    return figliFG(familiari)[0] ?? null
   }
 
   // GET /cf?matricola=  — CF dipendente dal dato locale (SGE)
@@ -166,6 +169,33 @@ export async function cinecaRoutes(app: FastifyInstance): Promise<void> {
       }
     })
     app.log.info({ totale: matricole.length, risolti, senzaFiglioOrIdAb: matricole.length - risolti - errori, errori }, 'figli-giovane-bulk')
+    return reply.send(out)
+  })
+
+  // POST /figli-bulk  { matricole[] }  → { [matricola]: FamiliareNorm[] }
+  // Tutti i figli (FG) per matricola — per la scelta manuale in blocco (tag WE
+  // senza scelta automatica). Cache-first + concorrenza limitata + timeout.
+  // Errori per-matricola non bloccano il batch (→ array vuoto).
+  app.post('/figli-bulk', pii, async (request, reply) => {
+    const { matricole } = z.object({
+      matricole: z.array(z.string().min(1).max(20)).min(1).max(200),
+    }).parse(request.body)
+    audit(request.user?.id, request.ip, { endpoint: 'figli-bulk', count: matricole.length })
+
+    const out: Record<string, FamiliareNorm[]> = {}
+    let conFigli = 0, errori = 0
+    await mapLimit(matricole, CINECA_CONCURRENCY, async matricola => {
+      try {
+        const { familiari } = await resolveNucleo(matricola)
+        const figli = figliFG(familiari)
+        out[matricola] = figli
+        if (figli.length > 0) conFigli++
+      } catch {
+        out[matricola] = []
+        errori++
+      }
+    })
+    app.log.info({ totale: matricole.length, conFigli, errori }, 'figli-bulk')
     return reply.send(out)
   })
 

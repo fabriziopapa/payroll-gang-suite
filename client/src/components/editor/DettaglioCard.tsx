@@ -14,6 +14,7 @@ import ProgressBar from '../ProgressBar'
 import RuoloDisambiguaModal, { type DisambiguaItem } from '../RuoloDisambiguaModal'
 import ConflittoRuoloModal, { type ConflittoItem } from '../ConflittoRuoloModal'
 import ComunicazioneModal from './ComunicazioneModal'
+import ScegliFigliBulkModal from './ScegliFigliBulkModal'
 import type { Comunicazione } from '../../types'
 import BudgetPanel from './BudgetPanel'
 
@@ -52,6 +53,8 @@ export default function DettaglioCard({ dettaglio, voceConfig, onEdit, onAddNomi
   const [recupero, setRecupero] = useState<{ done: number; total: number } | null>(null)
   const recuperoCancelRef       = useRef(false)
   const [recuperoConfirmOpen, setRecuperoConfirmOpen] = useState(false)
+  // Picker scelta manuale figli (WE senza scelta automatica)
+  const [figliBulkTargets, setFigliBulkTargets] = useState<Nominativo[] | null>(null)
 
   // ── Ordinamento snapshot (solo vista) ─────────────────────
   // L'ordine viene congelato al click sull'header: le modifiche inline
@@ -84,6 +87,7 @@ export default function DettaglioCard({ dettaglio, voceConfig, onEdit, onAddNomi
       capitolo:                    dettaglio.capitolo,
       competenzaLiquidazione:      dettaglio.competenzaLiquidazione,
       dataCompetenzaVoce:          dettaglio.dataCompetenzaVoce,
+      dataRiferimentoFigli:        dettaglio.dataRiferimentoFigli,
       flagScorporo:                dettaglio.flagScorporo,
       tipoScorporo:                dettaglio.tipoScorporo,
       riferimentoCedolino:         dettaglio.riferimentoCedolino,
@@ -304,6 +308,12 @@ export default function DettaglioCard({ dettaglio, voceConfig, onEdit, onAddNomi
     const targets = noms.filter(n => !n.riferimentoCedolino?.trim())
     if (targets.length === 0) {
       showToast('Tutti i nominativi hanno già il riferimento cedolino', 'success')
+      return
+    }
+    // WE senza scelta automatica: mostra i figli recuperati con l'età alla data
+    // as-of e lascia scegliere il CF nominativo per nominativo.
+    if (tagTipo === 'WE' && !voceConfig?.autoFiglio) {
+      setFigliBulkTargets(targets)
       return
     }
     recuperoCancelRef.current = false
@@ -585,7 +595,11 @@ export default function DettaglioCard({ dettaglio, voceConfig, onEdit, onAddNomi
               {/* Recupera CF da CINECA — solo voci con tag WD/WE */}
               {isCfTag && (
                 <button
-                  onClick={() => setRecuperoConfirmOpen(true)}
+                  onClick={() => {
+                    // WE senza scelta automatica: apri direttamente il picker figli
+                    if (tagTipo === 'WE' && !voceConfig?.autoFiglio) runRecuperaCF()
+                    else setRecuperoConfirmOpen(true)
+                  }}
                   disabled={!!recupero}
                   className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-400 hover:bg-slate-800 transition disabled:opacity-40"
                   title={`Recupera CF da CINECA per il riferimento cedolino (${tagTipo}) — solo nominativi senza riferimento`}
@@ -831,6 +845,21 @@ export default function DettaglioCard({ dettaglio, voceConfig, onEdit, onAddNomi
       onConfirm={() => { setRecuperoConfirmOpen(false); runRecuperaCF() }}
       onCancel={() => setRecuperoConfirmOpen(false)}
     />
+    {figliBulkTargets && (
+      <ScegliFigliBulkModal
+        dettaglio={dettaglio}
+        targets={figliBulkTargets}
+        onClose={() => setFigliBulkTargets(null)}
+        onConfirm={scelte => {
+          let resolved = 0
+          for (const [nomId, cf] of Object.entries(scelte)) {
+            if (cf) { updateNominativo(nomId, { riferimentoCedolino: `WE@${annoComp}${cf}@` }); resolved++ }
+          }
+          setFigliBulkTargets(null)
+          showToast(`Riferimento WE impostato per ${resolved} nominativi`, resolved ? 'success' : 'warning')
+        }}
+      />
+    )}
     </>
   )
 }

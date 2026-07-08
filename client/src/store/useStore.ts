@@ -271,6 +271,7 @@ export const useStore = create<AppStore>()(
           capitolo:                    partial?.capitolo                    ?? '',
           competenzaLiquidazione:      partial?.competenzaLiquidazione      ?? '',
           dataCompetenzaVoce:          partial?.dataCompetenzaVoce          ?? '',
+          dataRiferimentoFigli:        partial?.dataRiferimentoFigli        ?? undefined,
           flagScorporo:                partial?.flagScorporo                ?? false,
           tipoScorporo:                partial?.tipoScorporo                ?? undefined,
           riferimentoCedolino:         partial?.riferimentoCedolino         ?? '',
