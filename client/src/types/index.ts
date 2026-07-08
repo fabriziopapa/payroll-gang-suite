@@ -184,6 +184,13 @@ export interface DettaglioLiquidazione {
    * Mappato su dataCompetenzaVoce nel CSV.
    */
   dataCompetenzaVoce: string;
+  /**
+   * Formato ISO "YYYY-MM-DD". Data "as-of" per il calcolo dell'età dei figli
+   * nella scelta del riferimento cedolino WE (tag CF figlio).
+   * Vuoto/undefined = eredita dataCompetenzaVoce.
+   * Rilevante solo se la voce ha tag WE; ignorato altrimenti.
+   */
+  dataRiferimentoFigli?: string;
 
   // --- Scorporo ---
   flagScorporo: boolean;

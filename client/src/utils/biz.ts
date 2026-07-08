@@ -296,3 +296,25 @@ export function finRapWarn(
   const [y, m, d] = finRap.split('-')
   return `${d ?? '??'}/${m ?? '??'}/${y ?? '??'}`
 }
+
+/**
+ * Età in anni compiuti alla data `asOf` per una data di nascita ISO (YYYY-MM-DD).
+ * Ritorna null se una delle date manca o è malformata.
+ * Usata nella scelta del figlio per il riferimento cedolino WE.
+ */
+export function etaAllaData(
+  dataNasc: string | null | undefined,
+  asOf:     string | null | undefined,
+): number | null {
+  if (!dataNasc || !asOf) return null
+  const nascParts = dataNasc.slice(0, 10).split('-').map(Number)
+  const asOfParts = asOf.slice(0, 10).split('-').map(Number)
+  if (nascParts.length !== 3 || asOfParts.length !== 3) return null
+  const [ny, nm, nd] = nascParts as [number, number, number]
+  const [ay, am, ad] = asOfParts as [number, number, number]
+  if ([ny, nm, nd, ay, am, ad].some(n => !Number.isFinite(n))) return null
+  let eta = ay - ny
+  // Non ancora compiuto il compleanno alla data as-of → sottrai 1
+  if (am < nm || (am === nm && ad < nd)) eta--
+  return eta < 0 ? null : eta
+}

@@ -42,6 +42,7 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
   const [capitolo, setCapitolo]                     = useState(existing?.capitolo ?? '')
   const [competenza, setCompetenza]                 = useState(existing?.competenzaLiquidazione ?? '')
   const [dataCompetenzaVoce, setDataCompetenzaVoce] = useState(existing?.dataCompetenzaVoce ?? '')
+  const [dataRifFigli, setDataRifFigli]             = useState(existing?.dataRiferimentoFigli ?? '')
   // Radio scorporo: 'none' | 'standard' | 'contoterzi'
   type ScorporoMode = 'none' | 'standard' | 'contoterzi'
   function initScorporoMode(): ScorporoMode {
@@ -184,6 +185,10 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
       capitolo,
       competenzaLiquidazione:      competenza,
       dataCompetenzaVoce,
+      // Solo per voci WE; vuoto = eredita dataCompetenzaVoce nel calcolo età
+      dataRiferimentoFigli:        vociConfigs[voce]?.tagDefault === 'WE'
+                                     ? (dataRifFigli || undefined)
+                                     : undefined,
       flagScorporo:                scorporoMode !== 'none',
       tipoScorporo:                scorporoMode === 'contoterzi' ? 'contoterzi' : scorporoMode === 'standard' ? 'standard' : undefined,
       riferimentoCedolino:         riferimento,
@@ -416,6 +421,19 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
                       className={errors.dataCompetenzaVoce ? inputErrCls : inputCls} />
                   </Field>
                 </div>
+
+                {/* Data riferimento età figli — solo voci con tag WE */}
+                {vociConfigs[voce]?.tagDefault === 'WE' && (
+                  <Field label="Data età figli (riferimento WE)">
+                    <input type="date" value={dataRifFigli}
+                      onChange={e => setDataRifFigli(e.target.value)}
+                      className={inputCls} />
+                    <p className="text-xs text-slate-500 mt-1">
+                      Data a cui calcolare l&apos;età dei figli nella scelta del CF.
+                      Vuoto = usa la data competenza voce{dataCompetenzaVoce ? ` (${dataCompetenzaVoce})` : ''}.
+                    </p>
+                  </Field>
+                )}
 
                 {/* Scorporo — radio group */}
                 <div className="p-3 rounded-lg bg-slate-800/50 border border-slate-700 space-y-2">

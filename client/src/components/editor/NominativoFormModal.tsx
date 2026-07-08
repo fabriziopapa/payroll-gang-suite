@@ -12,7 +12,7 @@ import { anagraficheApi, bozzeApi, vociConfigApi, cinecaApi, type AnagraficaApi,
 import type { DettaglioLiquidazione, Nominativo, ImportoBudgetItem, VoceConfig } from '../../types'
 import RuoloDisambiguaModal, { type DisambiguaItem } from '../RuoloDisambiguaModal'
 import { showToast } from '../ToastManager'
-import { finRapWarn } from '../../utils/biz'
+import { finRapWarn, etaAllaData } from '../../utils/biz'
 import { useModalKeyboard } from '../../hooks/useFocusTrap'
 import BudgetPanel from './BudgetPanel'
 
@@ -271,6 +271,8 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
   // anno competenza (da "MM/YYYY") per il segmento <anno> del riferimento
   const annoComp = (dettaglio.competenzaLiquidazione.split('/')[1] ?? '').trim()
   const tagTipo  = voceConfig?.tagDefault ?? null   // 'TL' | 'WD' | 'WE' | null
+  // Data as-of per l'età dei figli (WE): campo del gruppo o, in mancanza, competenza voce
+  const asOfFigli = dettaglio.dataRiferimentoFigli || dettaglio.dataCompetenzaVoce || ''
 
   useEffect(() => {
     if (vociConfigs.length === 0) vociConfigApi.list().then(setVociConfigs).catch(() => {})
@@ -872,16 +874,22 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
                       onChange={e => { const cf = e.target.value; if (cf) setMRiferimento(`WE@${annoComp}${cf}@`) }}
                       className={inputCls} defaultValue="">
                       <option value="" disabled>Scegli il figlio…</option>
-                      {figli.map(f => (
-                        <option key={f.codFisc} value={f.codFisc}>
-                          {f.cognome} {f.nome} — {f.codFisc}{f.dataNasc ? ` (${f.dataNasc})` : ''}
-                        </option>
-                      ))}
+                      {figli.map(f => {
+                        const eta = etaAllaData(f.dataNasc, asOfFigli)
+                        return (
+                          <option key={f.codFisc} value={f.codFisc}>
+                            {f.cognome} {f.nome} — {f.codFisc}{f.dataNasc ? ` (${f.dataNasc})` : ''}
+                            {eta != null ? ` · ${eta} anni` : ''}
+                          </option>
+                        )
+                      })}
                     </select>
                   )}
                   <p className="text-xs text-slate-500">
                     {annoComp || '—'} = anno competenza · CF recuperato da CSA-WS
                     {tagTipo === 'WE' && voceConfig?.autoFiglio && ' · figlio più giovane (auto)'}
+                    {tagTipo === 'WE' && !voceConfig?.autoFiglio && asOfFigli &&
+                      ` · età al ${asOfFigli}`}
                   </p>
                 </div>
               ) : dettaglio.riferimentoCedolino ? (

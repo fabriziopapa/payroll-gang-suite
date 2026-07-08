@@ -337,6 +337,13 @@ export const cinecaApi = {
       method: 'POST',
       body:   JSON.stringify({ matricole }),
     }),
+
+  /** Tutti i figli (FG) per N matricole — scelta manuale in blocco (tag WE, no auto) */
+  figliBulk: (matricole: string[]) =>
+    apiFetch<Record<string, FamiliareApi[]>>('/cineca/figli-bulk', {
+      method: 'POST',
+      body:   JSON.stringify({ matricole }),
+    }),
 }
 
 // ── Capitoli Anagrafica ───────────────────────────────────────
