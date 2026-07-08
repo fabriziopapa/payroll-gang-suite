@@ -6,7 +6,7 @@
 // riferimento figli del gruppo, altrimenti data competenza voce).
 // ============================================================
 
-import { useState, useEffect, useMemo, useRef, useId } from 'react'
+import { useState, useEffect, useMemo, useRef, useId, useCallback } from 'react'
 import { cinecaApi, type FamiliareApi } from '../../api/endpoints'
 import type { DettaglioLiquidazione, Nominativo } from '../../types'
 import { etaAllaData } from '../../utils/biz'
@@ -35,27 +35,42 @@ export default function ScegliFigliBulkModal({ dettaglio, targets, onClose, onCo
     dettaglio.dataRiferimentoFigli || dettaglio.dataCompetenzaVoce || '',
   )
 
-  useEffect(() => {
-    let cancelled = false
+  // Recupero figli via endpoint `familiari` (uno per matricola, chunked) —
+  // stesso endpoint del singolo, così NON serve il redeploy del server.
+  const loadFigli = useCallback(async (): Promise<void> => {
     setLoading(true)
     // Deduplica le matricole (più nominativi possono condividere la stessa)
     const matricole = [...new Set(targets.map(n => n.matricola))]
-    cinecaApi.figliBulk(matricole)
-      .then(map => {
-        if (cancelled) return
-        setFigliMap(map)
-        // Preseleziona il figlio più giovane (primo: il server ordina giovane→anziano)
-        const pre: Record<string, string> = {}
-        for (const n of targets) {
-          const figli = map[n.matricola] ?? []
-          if (figli.length >= 1) pre[n.id] = figli[0]!.codFisc
+    const map: Record<string, FamiliareApi[]> = {}
+    const CHUNK = 8
+    let errori = 0
+    for (let i = 0; i < matricole.length; i += CHUNK) {
+      const chunk = matricole.slice(i, i + CHUNK)
+      await Promise.all(chunk.map(async m => {
+        try {
+          const { familiari } = await cinecaApi.familiari(m)
+          map[m] = familiari
+            .filter(f => f.rapportoParentela.toUpperCase() === 'FG')
+            .sort((a, b) => (b.dataNasc ?? '').localeCompare(a.dataNasc ?? ''))  // giovane→anziano
+        } catch {
+          map[m] = []
+          errori++
         }
-        setScelte(pre)
-      })
-      .catch(() => { if (!cancelled) showToast('Errore lookup figli CINECA', 'error') })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+      }))
+    }
+    setFigliMap(map)
+    // Preseleziona il figlio più giovane (primo dopo l'ordinamento)
+    const pre: Record<string, string> = {}
+    for (const n of targets) {
+      const figli = map[n.matricola] ?? []
+      if (figli.length >= 1) pre[n.id] = figli[0]!.codFisc
+    }
+    setScelte(pre)
+    setLoading(false)
+    if (errori > 0) showToast(`${errori} matricole senza risposta da CINECA`, 'warning')
+  }, [targets])
+
+  useEffect(() => { void loadFigli() }, [loadFigli])
 
   const conFigli   = useMemo(
     () => targets.filter(n => (figliMap[n.matricola]?.length ?? 0) > 0).length,
@@ -104,6 +119,12 @@ export default function ScegliFigliBulkModal({ dettaglio, targets, onClose, onCo
           <input type="date" value={asOf} onChange={e => setAsOf(e.target.value)}
             className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-white text-sm
                        focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          <button type="button" onClick={() => void loadFigli()} disabled={loading}
+            title="Ricarica i figli da CINECA e ricalcola l'età alla data indicata"
+            className="px-3 py-1.5 rounded-lg bg-indigo-600/20 text-indigo-300 border border-indigo-700/50
+                       hover:bg-indigo-600/40 transition text-sm shrink-0 disabled:opacity-40">
+            {loading ? 'Ricarico…' : '↻ Ricarica'}
+          </button>
           <span className="text-xs text-slate-500">
             default: {dettaglio.dataRiferimentoFigli || dettaglio.dataCompetenzaVoce || '—'}
           </span>
