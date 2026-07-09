@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.07.02-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.07.09-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -280,6 +280,26 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 ---
 
 ## Changelog
+
+### 26.07.09
+**Feature — Scelta figlio WE con età alla data (cedolino/CINECA)**
+- Il *Recupera CF* delle voci **WE** ora rispetta il flag *scelta automatica figlio* della `voci_config`: **ON** = figlio più giovane (comportamento invariato); **OFF** = **picker per gruppo** (`ScegliFigliBulkModal`) che elenca i figli con **età calcolata a una data as-of**, con scelta per singolo nominativo.
+- Nuovo campo `DettaglioLiquidazione.dataRiferimentoFigli` (solo voci WE, default `dataCompetenzaVoce`): pilota il calcolo dell'età; l'età nel picker si **ricalcola live** al cambio data. Helper `etaAllaData` in `biz.ts`, età mostrata anche nel dropdown figli dell'inserimento singolo.
+- **Hotfix picker**: il modale bulk non dipende più dal nuovo endpoint `POST /cineca/figli-bulk` (che rispondeva `404` in produzione) — usa `familiari` per matricola come l'inserimento singolo. Aggiunto tasto **Ricarica** per ripetere la chiamata CSA-WS.
+
+**Fix — Import XLSX SGE**
+- `importAnagraficheXlsx`: validazione della **MATRICOLA prima della normalizzazione**. Il vecchio `String(Number(raw)).padStart(6,'0')` su una cella non numerica (testo / errore di battitura) scriveva silenziosamente una matricola spazzatura `"000NaN"` a DB invece di segnalare l'errore. Il nuovo `normalizeMatricola()` accetta solo interi ≥ 0 / stringhe di sole cifre, altrimenti la riga finisce in `errors[]` con messaggio esplicito.
+
+**Fix — Export CSV**
+- `serializeCsv` / creazione blob: terminatore di riga **LF** invece di CRLF e **rimozione del BOM** `﻿` dal blob CSV — output allineato al tracciato HR atteso.
+
+**Refactor / hardening**
+- Rimosso **dead code** da `cryptoService`: le funzioni inutilizzate `generateSecureToken` e `fingerprintRequest` (la generazione/fingerprinting dei refresh token è gestita interamente da `AuthService`).
+- `vociConfigs` esposto nello stato dello store Zustand (`useStore`) — accesso centralizzato lato editor.
+- Allineato a 3 anni il commento del filtro di rilevanza in `NominativoFormModal`.
+
+**Config / DevOps**
+- [`.env.example`](.env.example) riconciliato con lo schema Zod (`config/env.ts`): aggiunta `REFRESH_RATE_LIMIT_MAX` (mancante) e nuova sezione **"Generazione chiavi sicure"** con i comandi per ogni segreto (`ENCRYPTION_KEY`/`COOKIE_SECRET` via `openssl rand -hex 32`, coppia JWT ES256, `DB_PASSWORD`, `CINECA_PROXY_SECRET`) e distinzione fra chiavi da generare e segreti forniti da terzi. Tutti i valori di esempio sono anonimizzati (nessun dato reale nel repo).
 
 ### 26.07.02
 **Infrastruttura — consolidamento DB + guide migrazione VPS**
