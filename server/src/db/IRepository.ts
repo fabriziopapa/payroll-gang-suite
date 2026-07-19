@@ -192,6 +192,10 @@ export interface BozzaRow {
   stato:              'bozza' | 'archiviata'
   protocolloDisplay:  string | null
   dati:               unknown
+  /** ISO YYYY-MM-DD — valorizzata all'archiviazione */
+  dataLiquidazione:   string | null
+  /** ID liquidazione CSA, es. "1ND001950001220240442801" */
+  idLiquidazioneCsa:  string | null
   createdBy:          string | null
   createdByUsername:  string | null
   createdAt:          Date
@@ -215,10 +219,20 @@ export interface BozzaSummaryRow {
   nome:              string
   stato:             'bozza' | 'archiviata'
   protocolloDisplay: string | null
+  dataLiquidazione:  string | null
+  idLiquidazioneCsa: string | null
   createdBy:         string | null
   createdByUsername: string | null
   createdAt:         Date
   updatedAt:         Date
+}
+
+/** Dati di archiviazione richiesti dal flusso "Archivia liquidazione". */
+export interface LiquidazioneInfo {
+  /** ISO YYYY-MM-DD — obbligatoria */
+  dataLiquidazione:   string
+  /** ID liquidazione CSA — facoltativo (integrabile in seguito) */
+  idLiquidazioneCsa?: string | null
 }
 
 export interface IBozzeRepository {
@@ -228,8 +242,11 @@ export interface IBozzeRepository {
   findById(id: string): Promise<BozzaRow | null>
   create(data: BozzaInput): Promise<BozzaRow>
   update(id: string, data: Partial<BozzaInput>): Promise<BozzaRow>
-  archive(id: string): Promise<BozzaRow>
+  /** Archivia la bozza salvando data liquidazione (obbligatoria) e ID CSA (facoltativo). */
+  archive(id: string, info: LiquidazioneInfo): Promise<BozzaRow>
   restore(id: string): Promise<BozzaRow>
+  /** Aggiorna data liquidazione / ID CSA di una bozza già archiviata. */
+  updateLiquidazioneInfo(id: string, info: LiquidazioneInfo): Promise<BozzaRow>
   delete(id: string): Promise<void>
 }
 

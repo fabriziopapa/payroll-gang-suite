@@ -211,6 +211,13 @@ export const bozze = pgTable('bozze', {
   protocolloDisplay: varchar('protocollo_display', { length: 100 }),
   /** Serializzazione completa: liquidazioni + nominativi */
   dati:              jsonb('dati').notNull(),
+  /**
+   * Data di liquidazione (ISO YYYY-MM-DD) — richiesta all'archiviazione.
+   * NULL per le bozze attive e per le archiviate legacy (pre-migrazione 0010).
+   */
+  dataLiquidazione:  date('data_liquidazione'),
+  /** ID liquidazione generato da CSA, es. "1ND001950001220240442801". Facoltativo. */
+  idLiquidazioneCsa: varchar('id_liquidazione_csa', { length: 40 }),
   createdBy:         uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   createdAt:         timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:         timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

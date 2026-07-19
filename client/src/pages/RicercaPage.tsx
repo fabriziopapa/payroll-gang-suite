@@ -16,6 +16,10 @@ interface SearchRow {
   bozzaId:      string
   bozzaNome:    string
   bozzaStato:   'bozza' | 'archiviata'
+  /** Data di liquidazione ISO (solo archiviate) */
+  dataLiq:      string
+  /** ID liquidazione CSA (solo archiviate, facoltativo) */
+  idCsa:        string
   dettaglioId:  string
   detNome:      string
   voce:         string
@@ -50,6 +54,8 @@ function buildSearchRows(bozze: BozzaApi[], coefficienti: Record<string, number>
           bozzaId:      bozza.id,
           bozzaNome:    bozza.nome,
           bozzaStato:   bozza.stato,
+          dataLiq:      bozza.dataLiquidazione  ?? '',
+          idCsa:        bozza.idLiquidazioneCsa ?? '',
           dettaglioId:  det.id,
           detNome:      det.nomeDescrittivo,
           voce:         det.voce,
@@ -149,7 +155,9 @@ export default function RicercaPage() {
         r.cognomeNome.toLowerCase().includes(q)   ||
         r.voce.toLowerCase().includes(q)          ||
         r.competenza.toLowerCase().includes(q)    ||
-        r.ruolo.toLowerCase().includes(q)
+        r.ruolo.toLowerCase().includes(q)         ||
+        r.idCsa.toLowerCase().includes(q)         ||
+        r.dataLiq.includes(q)
       )
     })
   }, [allRows, debouncedQuery, modoFulltext, filtroStato, filtroAnno])
@@ -170,9 +178,9 @@ export default function RicercaPage() {
   }
 
   function handleExportRicerca() {
-    const header = 'Liquidazione;Stato;Gruppo;Matricola;Cognome Nome;Ruolo;Voce;Competenza;Importo Lordo;Importo CSV\r\n'
+    const header = 'Liquidazione;Stato;Data Liquidazione;ID Liquidazione CSA;Gruppo;Matricola;Cognome Nome;Ruolo;Voce;Competenza;Importo Lordo;Importo CSV\r\n'
     const body   = filtered.map(r =>
-      [r.bozzaNome, r.bozzaStato, r.detNome, r.matricola, r.cognomeNome,
+      [r.bozzaNome, r.bozzaStato, r.dataLiq, r.idCsa, r.detNome, r.matricola, r.cognomeNome,
        r.ruolo, r.voce, r.competenza,
        r.importoLordo.toFixed(2), r.importoCSV.toFixed(2)].map(escapeCsvCell).join(';'),
     ).join('\r\n')
@@ -372,6 +380,7 @@ export default function RicercaPage() {
                       <th className="px-3 py-2.5 text-left font-medium">Voce</th>
                       <th className="px-3 py-2.5 text-left font-medium">Competenza</th>
                       <th className="px-3 py-2.5 text-right font-medium">Importo</th>
+                      <th className="px-3 py-2.5 text-left font-medium">Data liq.</th>
                       <th className="px-3 py-2.5 text-left font-medium">Stato</th>
                     </tr>
                   </thead>
@@ -392,6 +401,13 @@ export default function RicercaPage() {
                         <td className="px-3 py-2 font-mono text-slate-400">{r.voce || '—'}</td>
                         <td className="px-3 py-2 text-slate-400">{r.competenza || '—'}</td>
                         <td className="px-3 py-2 text-right font-mono text-slate-300">{formatEur(r.importoLordo)}</td>
+                        <td className="px-3 py-2 text-slate-400 whitespace-nowrap"
+                            title={r.idCsa ? `ID CSA: ${r.idCsa}` : undefined}>
+                          {r.dataLiq
+                            ? new Date(r.dataLiq).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                            : '—'}
+                          {r.idCsa && <span className="ml-1 text-amber-500/70">•</span>}
+                        </td>
                         <td className="px-3 py-2">
                           <span className={`px-1.5 py-0.5 rounded-full border text-xs
                             ${r.bozzaStato === 'archiviata'

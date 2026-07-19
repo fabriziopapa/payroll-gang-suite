@@ -3,8 +3,11 @@
 // Visualizzazione sola lettura di una liquidazione archiviata
 // ============================================================
 
-import { useMemo, useEffect } from 'react'
+import { useMemo, useEffect, useState } from 'react'
 import { useStore, type BozzaDati } from '../store/useStore'
+import { bozzeApi } from '../api/endpoints'
+import ArchiviaLiquidazioneModal from '../components/ArchiviaLiquidazioneModal'
+import { showToast } from '../components/ToastManager'
 import {
   calcolaImportoCSV, calcolaTotali, buildCsvRows,
   serializeCsv, downloadCsv, formatEur,
@@ -12,7 +15,9 @@ import {
 import type { DettaglioLiquidazione, Nominativo } from '../types'
 
 export default function ViewerPage() {
-  const { viewerBozza, navigate, settings } = useStore()
+  const { viewerBozza, navigate, settings, loadBozzaInViewer, upsertBozza } = useStore()
+  // Modal modifica dati liquidazione (data + ID CSA) su archiviata
+  const [editInfo, setEditInfo] = useState(false)
 
   // Guard: nessuna bozza in viewer → torna alla dashboard
   useEffect(() => {
@@ -29,6 +34,12 @@ export default function ViewerPage() {
   const updatedAt = new Date(viewerBozza.updatedAt).toLocaleDateString('it-IT', {
     day: '2-digit', month: 'short', year: 'numeric',
   })
+
+  const dataLiquidazione = viewerBozza.dataLiquidazione
+    ? new Date(viewerBozza.dataLiquidazione).toLocaleDateString('it-IT', {
+        day: '2-digit', month: 'short', year: 'numeric',
+      })
+    : null
 
   // ── Export CSV HR ────────────────────────────────────────────
   function handleExportCsv() {
@@ -66,6 +77,24 @@ export default function ViewerPage() {
   return (
     <div className="flex gap-0 min-h-full">
 
+      {editInfo && (
+        <ArchiviaLiquidazioneModal
+          mode="modifica"
+          nome={viewerBozza.nome}
+          initialData={viewerBozza}
+          onConfirm={async info => {
+            try {
+              const updated = await bozzeApi.updateLiquidazioneInfo(viewerBozza.id, info)
+              upsertBozza(updated)
+              loadBozzaInViewer(updated)
+              setEditInfo(false)
+              showToast('Dati liquidazione aggiornati', 'success')
+            } catch { showToast("Errore durante l'aggiornamento", 'error') }
+          }}
+          onClose={() => setEditInfo(false)}
+        />
+      )}
+
       {/* ── Area principale ─────────────────────────────────── */}
       <div className="flex-1 min-w-0 p-4 lg:p-6">
 
@@ -95,6 +124,31 @@ export default function ViewerPage() {
               )}
               <span>·</span>
               <span>Archiviata {updatedAt}</span>
+              {dataLiquidazione && (
+                <>
+                  <span>·</span>
+                  <span className="text-amber-500/90">Liquidata {dataLiquidazione}</span>
+                </>
+              )}
+              {viewerBozza.idLiquidazioneCsa && (
+                <>
+                  <span>·</span>
+                  <span className="font-mono text-xs" title="ID liquidazione CSA">
+                    {viewerBozza.idLiquidazioneCsa}
+                  </span>
+                </>
+              )}
+              {/* Modifica data liquidazione / ID CSA (facoltativo, integrabile dopo) */}
+              <button
+                onClick={() => setEditInfo(true)}
+                className="p-1 rounded text-slate-500 hover:text-amber-400 hover:bg-amber-950/30 transition"
+                title="Modifica dati liquidazione (data / ID CSA)"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+              </button>
             </div>
           </div>
 

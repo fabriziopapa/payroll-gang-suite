@@ -128,7 +128,7 @@ su - postgres -c "psql -v app_password=\"$DB_PASS\" -f /www/wwwroot/payroll-gang
 
 Output finale atteso: elenco di **17 tabelle**.
 
-> Le migrazioni storiche (`server/src/db/migrations/0001…0009`) sono già incluse — NON eseguirle.
+> Le migrazioni storiche (`server/src/db/migrations/0001…0010`) sono già incluse — NON eseguirle.
 
 ---
 

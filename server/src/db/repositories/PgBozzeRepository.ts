@@ -7,7 +7,7 @@ import { eq, and } from 'drizzle-orm'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import * as schema from '../schema.js'
 import { encrypt, decrypt } from '../../services/cryptoService.js'
-import type { IBozzeRepository, BozzaRow, BozzaSummaryRow, BozzaInput } from '../IRepository.js'
+import type { IBozzeRepository, BozzaRow, BozzaSummaryRow, BozzaInput, LiquidazioneInfo } from '../IRepository.js'
 
 type DB = PostgresJsDatabase<typeof schema>
 
@@ -73,6 +73,8 @@ const SEL = {
   stato:             schema.bozze.stato,
   protocolloDisplay: schema.bozze.protocolloDisplay,
   dati:              schema.bozze.dati,
+  dataLiquidazione:  schema.bozze.dataLiquidazione,
+  idLiquidazioneCsa: schema.bozze.idLiquidazioneCsa,
   createdBy:         schema.bozze.createdBy,
   createdAt:         schema.bozze.createdAt,
   updatedAt:         schema.bozze.updatedAt,
@@ -85,6 +87,8 @@ const SEL_SUMMARY = {
   nome:              schema.bozze.nome,
   stato:             schema.bozze.stato,
   protocolloDisplay: schema.bozze.protocolloDisplay,
+  dataLiquidazione:  schema.bozze.dataLiquidazione,
+  idLiquidazioneCsa: schema.bozze.idLiquidazioneCsa,
   createdBy:         schema.bozze.createdBy,
   createdAt:         schema.bozze.createdAt,
   updatedAt:         schema.bozze.updatedAt,
@@ -173,10 +177,15 @@ export class PgBozzeRepository implements IBozzeRepository {
     return (await this.findById(upd.id))!
   }
 
-  async archive(id: string): Promise<BozzaRow> {
+  async archive(id: string, info: LiquidazioneInfo): Promise<BozzaRow> {
     const [upd] = await this.db
       .update(schema.bozze)
-      .set({ stato: 'archiviata', updatedAt: new Date() })
+      .set({
+        stato:             'archiviata',
+        dataLiquidazione:  info.dataLiquidazione,
+        idLiquidazioneCsa: info.idLiquidazioneCsa ?? null,
+        updatedAt:         new Date(),
+      })
       .where(and(
         eq(schema.bozze.id,    id),
         eq(schema.bozze.stato, 'bozza'),
@@ -201,6 +210,28 @@ export class PgBozzeRepository implements IBozzeRepository {
     return (await this.findById(upd.id))!
   }
 
+  /**
+   * Aggiorna data liquidazione / ID CSA su una bozza GIÀ archiviata
+   * (l'ID CSA è facoltativo all'archiviazione e integrabile in seguito).
+   */
+  async updateLiquidazioneInfo(id: string, info: LiquidazioneInfo): Promise<BozzaRow> {
+    const [upd] = await this.db
+      .update(schema.bozze)
+      .set({
+        dataLiquidazione:  info.dataLiquidazione,
+        idLiquidazioneCsa: info.idLiquidazioneCsa ?? null,
+        updatedAt:         new Date(),
+      })
+      .where(and(
+        eq(schema.bozze.id,    id),
+        eq(schema.bozze.stato, 'archiviata'),
+      ))
+      .returning({ id: schema.bozze.id })
+
+    if (!upd) throw new Error(`Bozza ${id} non trovata o non archiviata`)
+    return (await this.findById(upd.id))!
+  }
+
   async delete(id: string): Promise<void> {
     await this.db
       .delete(schema.bozze)
@@ -213,6 +244,7 @@ export class PgBozzeRepository implements IBozzeRepository {
 type RowShape = {
   id: string; nome: string; stato: string
   protocolloDisplay: string | null; dati: unknown
+  dataLiquidazione: string | null; idLiquidazioneCsa: string | null
   createdBy: string | null; createdAt: Date; updatedAt: Date
   createdByUsername: string | null
 }
@@ -224,6 +256,8 @@ function toRow(r: RowShape): BozzaRow {
     stato:             r.stato as 'bozza' | 'archiviata',
     protocolloDisplay: r.protocolloDisplay ?? null,
     dati:              revealCf(r.dati),   // PGS-05: CF decifrati in uscita
+    dataLiquidazione:  r.dataLiquidazione  ?? null,
+    idLiquidazioneCsa: r.idLiquidazioneCsa ?? null,
     createdBy:         r.createdBy         ?? null,
     createdByUsername: r.createdByUsername  ?? null,
     createdAt:         r.createdAt,
@@ -235,6 +269,7 @@ function toRow(r: RowShape): BozzaRow {
 type SummaryRowShape = {
   id: string; nome: string; stato: string
   protocolloDisplay: string | null
+  dataLiquidazione: string | null; idLiquidazioneCsa: string | null
   createdBy: string | null; createdAt: Date; updatedAt: Date
   createdByUsername: string | null
 }
@@ -245,6 +280,8 @@ function toSummaryRow(r: SummaryRowShape): BozzaSummaryRow {
     nome:              r.nome,
     stato:             r.stato as 'bozza' | 'archiviata',
     protocolloDisplay: r.protocolloDisplay ?? null,
+    dataLiquidazione:  r.dataLiquidazione  ?? null,
+    idLiquidazioneCsa: r.idLiquidazioneCsa ?? null,
     createdBy:         r.createdBy         ?? null,
     createdByUsername: r.createdByUsername  ?? null,
     createdAt:         r.createdAt,

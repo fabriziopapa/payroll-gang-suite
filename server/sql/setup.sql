@@ -5,7 +5,7 @@
 -- tutte le 17 tabelle, indici, privilegi e dati seed.
 -- Sostituisce e consolida: vecchio setup.sql, tables_only.sql,
 -- migrate_anagrafiche_v2.sql, add_capitoli_anag.sql,
--- encrypt_certificati.sql e le migrazioni 0001–0009
+-- encrypt_certificati.sql e le migrazioni 0001–0010
 -- (server/src/db/migrations/ — conservate solo come storico).
 --
 -- Fonte di verità dello schema: server/src/db/schema.ts
@@ -266,10 +266,20 @@ CREATE TABLE IF NOT EXISTS bozze (
   protocollo_display VARCHAR(100),
   -- Serializzazione completa editor: nominativi + dettagli + comunicazioni
   dati               JSONB        NOT NULL,
+  -- Dati di archiviazione (ex migrazione 0010):
+  --   data_liquidazione   — obbligatoria nel flusso archive (client)
+  --   id_liquidazione_csa — ID generato da CSA, facoltativo,
+  --                         es. "1ND001950001220240442801"
+  data_liquidazione   DATE,
+  id_liquidazione_csa VARCHAR(40),
   created_by         UUID         REFERENCES users(id) ON DELETE SET NULL,
   created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   updated_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
+-- Upgrade di database pre-esistenti (il CREATE IF NOT EXISTS sopra non
+-- aggiunge colonne a tabelle già create): idempotente, no-op su DB nuovi.
+ALTER TABLE bozze ADD COLUMN IF NOT EXISTS data_liquidazione   DATE;
+ALTER TABLE bozze ADD COLUMN IF NOT EXISTS id_liquidazione_csa VARCHAR(40);
 CREATE INDEX IF NOT EXISTS idx_bozze_stato      ON bozze (stato);
 CREATE INDEX IF NOT EXISTS idx_bozze_created_by ON bozze (created_by);
 

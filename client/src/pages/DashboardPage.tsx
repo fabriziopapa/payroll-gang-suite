@@ -8,6 +8,7 @@ import { bozzeApi, type BozzaApi } from '../api/endpoints'
 import { showToast } from '../components/ToastManager'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import CopiaLiquidazioneModal from '../components/CopiaLiquidazioneModal'
+import ArchiviaLiquidazioneModal from '../components/ArchiviaLiquidazioneModal'
 
 const PAGE_SIZE = 6
 
@@ -27,6 +28,8 @@ export default function DashboardPage() {
   // Bozza sorgente per la copia — caricata completa (con dati) via getById
   const [copiaSource, setCopiaSource]     = useState<BozzaApi | null>(null)
   const [copying, setCopying]             = useState<string | null>(null)
+  // Bozza in attesa dei dati di archiviazione (data liquidazione + ID CSA)
+  const [archiviaTarget, setArchiviaTarget] = useState<BozzaApi | null>(null)
 
   // Carica bozze al mount
   useEffect(() => {
@@ -73,13 +76,12 @@ export default function DashboardPage() {
     } catch { showToast("Errore nell'apertura dell'anteprima", 'error') }
   }
 
+  // Bozza attiva → apre il modal dati archiviazione; archiviata → ripristino diretto
   async function handleArchive(b: BozzaApi) {
+    if (b.stato === 'bozza') { setArchiviaTarget(b); return }
     setArchiving(b.id)
     try {
-      const updated = b.stato === 'bozza'
-        ? await bozzeApi.archive(b.id)
-        : await bozzeApi.restore(b.id)
-      upsertBozza(updated)
+      upsertBozza(await bozzeApi.restore(b.id))
     } catch { showToast('Errore durante l\'operazione', 'error') }
     finally { setArchiving(null) }
   }
@@ -225,6 +227,23 @@ export default function DashboardPage() {
         onCancel={() => setConfirmDeleteId(null)}
       />
 
+      {archiviaTarget && (
+        <ArchiviaLiquidazioneModal
+          mode="archivia"
+          nome={archiviaTarget.nome}
+          initialData={archiviaTarget}
+          onConfirm={async info => {
+            try {
+              const updated = await bozzeApi.archive(archiviaTarget.id, info)
+              upsertBozza(updated)
+              setArchiviaTarget(null)
+              showToast(`«${updated.nome}» archiviata`, 'success')
+            } catch { showToast("Errore durante l'archiviazione", 'error') }
+          }}
+          onClose={() => setArchiviaTarget(null)}
+        />
+      )}
+
       {copiaSource && (
         <CopiaLiquidazioneModal
           bozza={copiaSource}
@@ -318,6 +337,18 @@ function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onView, onArchive,
           <span className="text-xs text-slate-600">
             {createdAt !== updatedAt ? `Modificato ${updatedAt}` : `Creato ${createdAt}`}
           </span>
+          {isArchiviata && bozza.dataLiquidazione && (
+            <span className="text-xs text-amber-500/80">
+              Liquidata {new Date(bozza.dataLiquidazione).toLocaleDateString('it-IT', {
+                day: '2-digit', month: 'short', year: 'numeric',
+              })}
+            </span>
+          )}
+          {isArchiviata && bozza.idLiquidazioneCsa && (
+            <span className="text-xs font-mono text-slate-500 truncate" title="ID liquidazione CSA">
+              {bozza.idLiquidazioneCsa}
+            </span>
+          )}
         </div>
       </div>
 
