@@ -72,12 +72,35 @@ export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(bozza)
   })
 
+  // ── Schema dati di archiviazione ───────────────────────────
+  // dataLiquidazione  — obbligatoria (ISO YYYY-MM-DD)
+  // idLiquidazioneCsa — facoltativo, ID generato da CSA
+  //                     (es. "1ND001950001220240442801"); integrabile dopo
+  const LiquidazioneInfoSchema = z.object({
+    dataLiquidazione:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data liquidazione non valida (YYYY-MM-DD)'),
+    idLiquidazioneCsa: z.string().trim().max(40).optional()
+                        .transform(v => (v === '' ? undefined : v)),
+  })
+
   // archive/restore — admin può gestire qualsiasi bozza
   app.post('/:id/archive', { preHandler: [app.authenticate] }, async (req, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params)
+    const info = LiquidazioneInfoSchema.parse(req.body ?? {})
     const existing = await requireOwner(id, req.user!.id, req.user!.isAdmin, reply)
     if (!existing) return
-    return reply.send(await repo.archive(id))
+    return reply.send(await repo.archive(id, info))
+  })
+
+  // PATCH dati liquidazione su bozza GIÀ archiviata (ID CSA aggiunto in seguito)
+  app.patch('/:id/liquidazione-info', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params)
+    const info = LiquidazioneInfoSchema.parse(req.body ?? {})
+    const existing = await requireOwner(id, req.user!.id, req.user!.isAdmin, reply)
+    if (!existing) return
+    if (existing.stato !== 'archiviata') {
+      return reply.code(409).send({ error: 'NOT_ARCHIVED' })
+    }
+    return reply.send(await repo.updateLiquidazioneInfo(id, info))
   })
 
   app.post('/:id/restore', { preHandler: [app.authenticate] }, async (req, reply) => {

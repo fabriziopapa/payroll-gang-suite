@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.07.09-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.07.19-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -63,7 +63,7 @@ payroll-gang-suite/
 │       ├── auth/                # TOTP (RFC 6238) + JWT ES256 + refresh rotante Argon2id
 │       ├── db/
 │       │   ├── schema.ts        # ★ Schema Drizzle — fonte di verità del DB
-│       │   ├── migrations/      # 0001…0009 — SOLO storico del DB di produzione esistente
+│       │   ├── migrations/      # 0001…0010 — SOLO storico del DB di produzione esistente
 │       │   │                    #   (già incluse in setup.sql: NON eseguire su install nuova)
 │       │   └── repositories/    # Repository pattern (PgBozze, PgUsers, PgCertificati, …)
 │       ├── middleware/          # authenticate.ts (JWT preHandler)
@@ -280,6 +280,14 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 ---
 
 ## Changelog
+
+### 26.07.19
+**Feature — Dati di archiviazione liquidazione (data + ID CSA)**
+- All'**archiviazione** di una liquidazione si apre il nuovo `ArchiviaLiquidazioneModal` che richiede la **data di liquidazione** (obbligatoria) e l'**ID liquidazione CSA** (facoltativo, es. `1ND001950001220240442801`, integrabile in seguito).
+- Nuove colonne `bozze.data_liquidazione` (DATE) e `bozze.id_liquidazione_csa` (VARCHAR(40)) — consolidate in [`server/sql/setup.sql`](server/sql/setup.sql) (colonne nel `CREATE TABLE` + `ALTER TABLE … ADD COLUMN IF NOT EXISTS` idempotenti per i DB pre-esistenti); la migrazione storica è `0010_liquidazione_archivio.sql`.
+- `POST /bozze/:id/archive` ora valida il body con Zod (`dataLiquidazione` ISO `YYYY-MM-DD` obbligatoria, `idLiquidazioneCsa` max 40 char); nuovo endpoint `PATCH /bozze/:id/liquidazione-info` per aggiornare i dati su una liquidazione **già archiviata** (stesso modal in modalità *modifica* dal Viewer, icona matita nell'header).
+- Dati visibili ovunque: **card Dashboard** (riga "Liquidata … " + ID CSA), **header Viewer**, **Ricerca** (nuova colonna *Data liq.* con tooltip ID CSA, campi inclusi nella ricerca fulltext e nell'export CSV).
+- Il ripristino di un'archiviata **conserva** data/ID: alla ri-archiviazione il modal è precompilato.
 
 ### 26.07.09
 **Feature — Scelta figlio WE con età alla data (cedolino/CINECA)**

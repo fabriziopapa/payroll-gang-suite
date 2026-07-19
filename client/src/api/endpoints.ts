@@ -69,6 +69,10 @@ export interface BozzaApi {
    * Presente solo in GET /bozze/:id (singola bozza, usata dall'editor/viewer).
    */
   dati?:              unknown
+  /** Data di liquidazione ISO YYYY-MM-DD — valorizzata all'archiviazione */
+  dataLiquidazione:   string | null
+  /** ID liquidazione CSA, es. "1ND001950001220240442801" — facoltativo */
+  idLiquidazioneCsa:  string | null
   createdBy:          string | null
   createdByUsername:  string | null
   createdAt:          string
@@ -173,6 +177,14 @@ export const usersApi = {
 
 // ── Bozze ─────────────────────────────────────────────────────
 
+/** Dati richiesti all'archiviazione di una liquidazione. */
+export interface LiquidazioneInfo {
+  /** ISO YYYY-MM-DD — obbligatoria */
+  dataLiquidazione:   string
+  /** ID liquidazione CSA — facoltativo */
+  idLiquidazioneCsa?: string
+}
+
 export const bozzeApi = {
   list: () =>
     apiFetch<BozzaApi[]>('/bozze'),
@@ -204,8 +216,18 @@ export const bozzeApi = {
       body:   JSON.stringify(data),
     }),
 
-  archive: (id: string) =>
-    apiFetch<BozzaApi>(`/bozze/${id}/archive`, { method: 'POST' }),
+  archive: (id: string, info: LiquidazioneInfo) =>
+    apiFetch<BozzaApi>(`/bozze/${id}/archive`, {
+      method: 'POST',
+      body:   JSON.stringify(info),
+    }),
+
+  /** Aggiorna data liquidazione / ID CSA di una bozza già archiviata. */
+  updateLiquidazioneInfo: (id: string, info: LiquidazioneInfo) =>
+    apiFetch<BozzaApi>(`/bozze/${id}/liquidazione-info`, {
+      method: 'PATCH',
+      body:   JSON.stringify(info),
+    }),
 
   restore: (id: string) =>
     apiFetch<BozzaApi>(`/bozze/${id}/restore`, { method: 'POST' }),
