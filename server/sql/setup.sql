@@ -9,7 +9,7 @@
 -- (server/src/db/migrations/ — conservate solo come storico).
 --
 -- Fonte di verità dello schema: server/src/db/schema.ts
--- Allineato a: v26.07.01
+-- Allineato a: v26.07.19
 --
 -- ESECUZIONE (come superuser postgres, passando la password
 -- dell'utente applicativo come variabile psql):
