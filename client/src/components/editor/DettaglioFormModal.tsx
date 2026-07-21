@@ -68,7 +68,7 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
   const [note, setNote]                             = useState(existing?.note ?? '')
 
   // ── Validazione campi obbligatori (tab Principale) ────────
-  type FieldErrors = Partial<Record<'nomeDescrittivo' | 'competenza' | 'dataCompetenzaVoce', string>>
+  type FieldErrors = Partial<Record<'nomeDescrittivo' | 'competenza' | 'dataCompetenzaVoce' | 'riferimento', string>>
   const [errors, setErrors] = useState<FieldErrors>({})
 
   function validate(): FieldErrors {
@@ -81,6 +81,9 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
       errs.competenza = 'Formato non valido: usare MM/YYYY (es. 04/2026)'
     if (!dataCompetenzaVoce)
       errs.dataCompetenzaVoce = 'La data competenza voce è obbligatoria'
+    const rifLen = rifCedolinoLen(riferimento)
+    if (rifLen > RIF_CEDOLINO_MAX)
+      errs.riferimento = `Riferimento cedolino troppo lungo: ${rifLen}/${RIF_CEDOLINO_MAX} caratteri (tag e @ esclusi). Accorcia il testo per salvare.`
     return errs
   }
 
@@ -176,7 +179,12 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
       setTimeout(() => {
         dialogRef.current?.querySelector<HTMLInputElement>('[aria-invalid="true"]')?.focus()
       }, 0)
-      showToast('Compila i campi obbligatori evidenziati', 'error')
+      showToast(
+        Object.keys(errs).length === 1 && errs.riferimento
+          ? errs.riferimento
+          : 'Compila i campi obbligatori evidenziati',
+        'error',
+      )
       return
     }
     const data: Partial<Omit<DettaglioLiquidazione, 'id' | 'colore'>> = {
@@ -493,9 +501,26 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
                 </div>
 
                 {/* Riferimento cedolino */}
-                <Field label="Riferimento cedolino">
-                  <input value={riferimento} onChange={e => setRiferimento(e.target.value)}
-                    placeholder="es. TL@TFA SOSTEGNO 2023/24@" className={inputCls} />
+                <Field label="Riferimento cedolino" error={errors.riferimento}>
+                  <input value={riferimento}
+                    onChange={e => { setRiferimento(e.target.value); clearError('riferimento') }}
+                    placeholder="es. TL@TFA SOSTEGNO 2023/24@"
+                    className={errors.riferimento ? inputErrCls : inputCls} />
+                  {/* Contatore caratteri utili: esclude il tag (XX@) e le @ */}
+                  <div className="flex items-center justify-between mt-1">
+                    <span className="text-[11px] text-slate-600">
+                      contano solo i caratteri tra le @ (tag escluso)
+                    </span>
+                    <span
+                      aria-live="polite"
+                      className={`text-xs font-mono tabular-nums transition-colors
+                        ${rifCedolinoLen(riferimento) > RIF_CEDOLINO_MAX
+                          ? 'text-red-400 font-semibold'
+                          : 'text-slate-500'}`}
+                    >
+                      {rifCedolinoLen(riferimento)}/{RIF_CEDOLINO_MAX}
+                    </span>
+                  </div>
                   <div className="flex flex-wrap gap-1 mt-1.5">
                     {tags.map(tag => (
                       <button key={tag} type="button"
@@ -583,6 +608,15 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────
+
+// ── Riferimento cedolino: limite HR Suite sul testo utile ─────
+// Il contatore/validazione considera SOLO il testo del riferimento,
+// escludendo il tag iniziale a 2 lettere (TL@/WD@/WE@…) e le @.
+const RIF_CEDOLINO_MAX = 50
+
+function rifCedolinoLen(v: string): number {
+  return v.trim().replace(/^[A-Za-z]{2}@/, '').replace(/@/g, '').length
+}
 
 const inputCls = `w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700
   text-white text-sm placeholder-slate-500
