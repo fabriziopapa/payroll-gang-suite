@@ -117,7 +117,7 @@ export function formatCsvDate(isoDate: string): string {
 }
 
 /**
- * Serializza righe CsvExportRow in stringa CSV (RFC 4180, BOM UTF-8 gestito in download).
+ * Serializza righe CsvExportRow in stringa CSV (RFC 4180, codifica ANSI gestita in download).
  * Date ISO → GG/MM/YYYY per compatibilità HR Suite.
  * Termina con \r\n (riga finale inclusa).
  */

@@ -374,7 +374,7 @@ function CsvInfoBanner({ rows, onExport }: { rows: number; onExport: () => void 
         <p className="text-white text-sm font-medium">Pronto per l&apos;esportazione</p>
         <p className="text-slate-400 text-xs mt-0.5">
           {rows} righe CSV HR · separatore{' '}
-          <code className="text-indigo-400">;</code> · BOM UTF-8
+          <code className="text-indigo-400">;</code> · ANSI Windows-1252 senza BOM
         </p>
       </div>
       <button
