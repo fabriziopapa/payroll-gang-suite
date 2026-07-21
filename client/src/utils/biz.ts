@@ -171,8 +171,8 @@ const CP1252_EXTRA: Record<number, number> = {
 }
 
 /** Stringa → byte Windows-1252. Caratteri non rappresentabili → '?'. */
-export function encodeWindows1252(s: string): Uint8Array {
-  const out = new Uint8Array(s.length)
+export function encodeWindows1252(s: string): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(new ArrayBuffer(s.length))
   for (let i = 0; i < s.length; i++) {
     const cp = s.charCodeAt(i)
     if (cp <= 0x7F || (cp >= 0xA0 && cp <= 0xFF)) out[i] = cp
