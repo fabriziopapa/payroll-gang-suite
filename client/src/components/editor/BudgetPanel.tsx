@@ -108,6 +108,7 @@ export default function BudgetPanel({ initialItems, initialSingle, anchorEl, onC
           Badge importo
         </span>
         <button
+          type="button"
           onClick={onClose}
           className="text-slate-500 hover:text-white text-xs transition leading-none"
           aria-label="Chiudi"
@@ -123,6 +124,7 @@ export default function BudgetPanel({ initialItems, initialSingle, anchorEl, onC
               type="text"
               value={b.descrizione}
               onChange={e => update(b.id, 'descrizione', e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') e.preventDefault() }}
               placeholder="Descrizione"
               className="flex-1 px-2 py-1.5 rounded-lg bg-slate-800 border border-slate-700
                          text-white text-xs placeholder-slate-600
@@ -136,7 +138,7 @@ export default function BudgetPanel({ initialItems, initialSingle, anchorEl, onC
               onChange={e => update(b.id, 'importoStr', e.target.value)}
               onKeyDown={e => {
                 if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault()
-                if (e.key === 'Enter') handleConfirm()
+                if (e.key === 'Enter') { e.preventDefault(); handleConfirm() }
               }}
               placeholder="0.00"
               className="w-24 px-2 py-1.5 rounded-lg bg-slate-800 border border-slate-700
@@ -144,6 +146,7 @@ export default function BudgetPanel({ initialItems, initialSingle, anchorEl, onC
                          focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
             <button
+              type="button"
               onClick={() => remove(b.id)}
               disabled={items.length === 1}
               className="p-1 rounded text-slate-600 hover:text-red-400 hover:bg-red-950/30
@@ -161,6 +164,7 @@ export default function BudgetPanel({ initialItems, initialSingle, anchorEl, onC
       {/* Footer */}
       <div className="flex items-center justify-between pt-1.5 border-t border-slate-800">
         <button
+          type="button"
           onClick={addRow}
           className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 transition"
         >
@@ -174,6 +178,7 @@ export default function BudgetPanel({ initialItems, initialSingle, anchorEl, onC
             {total.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
           </span>
           <button
+            type="button"
             onClick={handleConfirm}
             className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500
                        text-white text-xs font-medium transition"
