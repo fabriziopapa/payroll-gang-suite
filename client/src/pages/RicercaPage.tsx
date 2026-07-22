@@ -9,6 +9,7 @@ import { bozzeApi, type BozzaApi } from '../api/endpoints'
 import { calcolaImportoCSV, formatEur } from '../utils/biz'
 import Pagination from '../components/Pagination'
 import { useDebounce } from '../hooks/useDebounce'
+import { normalizeText } from '../utils/groupSearch'
 
 // ── Tipi interni ──────────────────────────────────────────────
 
@@ -23,12 +24,19 @@ interface SearchRow {
   dettaglioId:  string
   detNome:      string
   voce:         string
+  capitolo:     string
+  idProv:       string
+  centroCosto:  string
+  note:         string
   competenza:   string
+  dataCompVoce: string
   matricola:    string
   cognomeNome:  string
   ruolo:        string
   importoLordo: number
   importoCSV:   number
+  /** haystack normalizzato (gruppo + nominativo) per fulltext veloce */
+  hay:          string
 }
 
 type TabId = 'ricerca' | 'report'
@@ -59,10 +67,21 @@ function buildSearchRows(bozze: BozzaApi[], coefficienti: Record<string, number>
           dettaglioId:  det.id,
           detNome:      det.nomeDescrittivo,
           voce:         det.voce,
+          capitolo:     det.capitolo,
+          idProv:       det.identificativoProvvedimento,
+          centroCosto:  det.centroCosto,
+          note:         det.note,
           competenza:   det.competenzaLiquidazione,
+          dataCompVoce: det.dataCompetenzaVoce,
           matricola:    nom.matricola,
           cognomeNome:  nom.cognomeNome,
           ruolo:        nom.ruolo,
+          hay: normalizeText([
+            bozza.nome, det.nomeDescrittivo, det.voce, det.capitolo,
+            det.identificativoProvvedimento, det.centroCosto, det.note,
+            det.competenzaLiquidazione, nom.matricola, nom.cognomeNome, nom.ruolo,
+            bozza.idLiquidazioneCsa ?? '',
+          ].filter(Boolean).join('  ')),
           importoLordo: nom.importoLordo,
           importoCSV,
         })
@@ -98,6 +117,8 @@ export default function RicercaPage() {
   const [modoFulltext, setModoFulltext] = useState(false)
   const [filtroStato, setFiltroStato]   = useState<'tutte' | 'bozza' | 'archiviata'>('tutte')
   const [filtroAnno, setFiltroAnno]     = useState('')
+  const [compFrom, setCompFrom]         = useState('')
+  const [compTo, setCompTo]             = useState('')
   const [page, setPage]           = useState(1)
   const [pageSize, setPageSize]   = useState(20)
   const [reportMode, setReportMode] = useState<ReportMode>('matricola')
@@ -139,31 +160,22 @@ export default function RicercaPage() {
   // Dipende da debouncedQuery (non da query): ricalcolo O(n) solo 200ms
   // dopo l'ultimo keystroke — evita iterazioni inutili durante la digitazione.
   const filtered = useMemo(() => {
-    const q = debouncedQuery.trim().toLowerCase()
+    const tokens = normalizeText(debouncedQuery.trim()).split(/\s+/).filter(Boolean)
     return allRows.filter(r => {
       if (filtroStato !== 'tutte' && r.bozzaStato !== filtroStato) return false
       if (filtroAnno && !r.competenza.endsWith(`/${filtroAnno}`)) return false
-      if (!q) return true
-      if (!modoFulltext) {
-        return r.bozzaNome.toLowerCase().includes(q)
-      }
-      // fulltext: cerca su tutti i campi stringa
-      return (
-        r.bozzaNome.toLowerCase().includes(q)     ||
-        r.detNome.toLowerCase().includes(q)       ||
-        r.matricola.toLowerCase().includes(q)     ||
-        r.cognomeNome.toLowerCase().includes(q)   ||
-        r.voce.toLowerCase().includes(q)          ||
-        r.competenza.toLowerCase().includes(q)    ||
-        r.ruolo.toLowerCase().includes(q)         ||
-        r.idCsa.toLowerCase().includes(q)         ||
-        r.dataLiq.includes(q)
-      )
+      // Range su data competenza voce (ISO): confronto lessicografico = cronologico
+      if (compFrom && (!r.dataCompVoce || r.dataCompVoce < compFrom)) return false
+      if (compTo   && (!r.dataCompVoce || r.dataCompVoce > compTo))   return false
+      if (tokens.length === 0) return true
+      // "per nome": titolo liquidazione + titolo gruppo. Fulltext: haystack completo.
+      const hay = modoFulltext ? r.hay : normalizeText(`${r.bozzaNome}  ${r.detNome}`)
+      return tokens.every(t => hay.includes(t))
     })
-  }, [allRows, debouncedQuery, modoFulltext, filtroStato, filtroAnno])
+  }, [allRows, debouncedQuery, modoFulltext, filtroStato, filtroAnno, compFrom, compTo])
 
   // Reset pagina su cambio filtri
-  useEffect(() => { setPage(1) }, [debouncedQuery, modoFulltext, filtroStato, filtroAnno, tab, reportMode])
+  useEffect(() => { setPage(1) }, [debouncedQuery, modoFulltext, filtroStato, filtroAnno, compFrom, compTo, tab, reportMode])
 
   const pagedRows = filtered.slice((page - 1) * pageSize, page * pageSize)
 
@@ -301,7 +313,7 @@ export default function RicercaPage() {
                 type="text"
                 value={query}
                 onChange={e => setQuery(e.target.value)}
-                placeholder={modoFulltext ? 'Cerca in tutti i campi…' : 'Cerca per nome liquidazione…'}
+                placeholder={modoFulltext ? 'Cerca in tutti i campi…' : 'Cerca per nome liquidazione o gruppo…'}
                 className="w-full pl-9 pr-4 py-2 rounded-lg bg-slate-800 border border-slate-700
                            text-white text-sm placeholder:text-slate-500
                            focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-transparent"
@@ -344,6 +356,20 @@ export default function RicercaPage() {
               <option value="">Tutti gli anni</option>
               {anniDisponibili.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
+
+            {/* Range data competenza voce */}
+            <label className="flex items-center gap-1.5 text-slate-400 text-xs">
+              Comp. dal
+              <input type="date" value={compFrom} onChange={e => setCompFrom(e.target.value)}
+                className="px-2 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs
+                           [color-scheme:dark] focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+            </label>
+            <label className="flex items-center gap-1.5 text-slate-400 text-xs">
+              al
+              <input type="date" value={compTo} onChange={e => setCompTo(e.target.value)}
+                className="px-2 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs
+                           [color-scheme:dark] focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+            </label>
 
             {filtered.length > 0 && (
               <button
