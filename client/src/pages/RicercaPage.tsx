@@ -9,7 +9,7 @@ import { bozzeApi, type BozzaApi } from '../api/endpoints'
 import { calcolaImportoCSV, formatEur } from '../utils/biz'
 import Pagination from '../components/Pagination'
 import { useDebounce } from '../hooks/useDebounce'
-import { normalizeText } from '../utils/groupSearch'
+import { normalizeText, includesNorm } from '../utils/groupSearch'
 
 // ── Tipi interni ──────────────────────────────────────────────
 
@@ -119,6 +119,11 @@ export default function RicercaPage() {
   const [filtroAnno, setFiltroAnno]     = useState('')
   const [compFrom, setCompFrom]         = useState('')
   const [compTo, setCompTo]             = useState('')
+  const [advOpen, setAdvOpen]           = useState(false)
+  const [advF, setAdvF] = useState({ titolo: '', voce: '', capitolo: '', idProv: '', centroCosto: '', note: '' })
+  const advKey = useDebounce(JSON.stringify(advF), 250)
+  const advc   = useMemo(() => JSON.parse(advKey) as typeof advF, [advKey])
+  const advActive = Object.values(advF).some(v => v.trim())
   const [page, setPage]           = useState(1)
   const [pageSize, setPageSize]   = useState(20)
   const [reportMode, setReportMode] = useState<ReportMode>('matricola')
@@ -167,15 +172,22 @@ export default function RicercaPage() {
       // Range su data competenza voce (ISO): confronto lessicografico = cronologico
       if (compFrom && (!r.dataCompVoce || r.dataCompVoce < compFrom)) return false
       if (compTo   && (!r.dataCompVoce || r.dataCompVoce > compTo))   return false
+      // Ricerca mirata per singolo campo (AND)
+      if (!includesNorm(r.detNome,     advc.titolo))      return false
+      if (!includesNorm(r.voce,        advc.voce))        return false
+      if (!includesNorm(r.capitolo,    advc.capitolo))    return false
+      if (!includesNorm(r.idProv,      advc.idProv))      return false
+      if (!includesNorm(r.centroCosto, advc.centroCosto)) return false
+      if (!includesNorm(r.note,        advc.note))        return false
       if (tokens.length === 0) return true
       // "per nome": titolo liquidazione + titolo gruppo. Fulltext: haystack completo.
       const hay = modoFulltext ? r.hay : normalizeText(`${r.bozzaNome}  ${r.detNome}`)
       return tokens.every(t => hay.includes(t))
     })
-  }, [allRows, debouncedQuery, modoFulltext, filtroStato, filtroAnno, compFrom, compTo])
+  }, [allRows, debouncedQuery, modoFulltext, filtroStato, filtroAnno, compFrom, compTo, advc])
 
   // Reset pagina su cambio filtri
-  useEffect(() => { setPage(1) }, [debouncedQuery, modoFulltext, filtroStato, filtroAnno, compFrom, compTo, tab, reportMode])
+  useEffect(() => { setPage(1) }, [debouncedQuery, modoFulltext, filtroStato, filtroAnno, compFrom, compTo, advc, tab, reportMode])
 
   const pagedRows = filtered.slice((page - 1) * pageSize, page * pageSize)
 
@@ -331,7 +343,30 @@ export default function RicercaPage() {
             >
               {modoFulltext ? 'Fulltext' : 'Per nome'}
             </button>
+            <button
+              onClick={() => setAdvOpen(v => !v)}
+              className={`px-3 py-2 rounded-lg text-sm border transition shrink-0
+                ${advOpen || advActive
+                  ? 'bg-indigo-600/20 text-indigo-400 border-indigo-700'
+                  : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}
+              title="Ricerca mirata per campo"
+            >
+              Mirata
+            </button>
           </div>
+
+          {/* Pannello ricerca mirata per campo */}
+          {(advOpen || advActive) && (
+            <div className="mb-4 p-3 rounded-lg bg-slate-800/40 border border-slate-700
+                            grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              <FieldMini label="Titolo gruppo"    value={advF.titolo}      onChange={v => setAdvF(f => ({ ...f, titolo: v }))} />
+              <FieldMini label="Voce"             value={advF.voce}        onChange={v => setAdvF(f => ({ ...f, voce: v }))} />
+              <FieldMini label="Capitolo"         value={advF.capitolo}    onChange={v => setAdvF(f => ({ ...f, capitolo: v }))} />
+              <FieldMini label="ID provvedimento" value={advF.idProv}      onChange={v => setAdvF(f => ({ ...f, idProv: v }))} mono />
+              <FieldMini label="Centro di costo"  value={advF.centroCosto} onChange={v => setAdvF(f => ({ ...f, centroCosto: v }))} />
+              <FieldMini label="Note"             value={advF.note}        onChange={v => setAdvF(f => ({ ...f, note: v }))} />
+            </div>
+          )}
 
           {/* Filtri */}
           <div className="flex flex-wrap gap-3 mb-4 text-sm">
@@ -596,6 +631,25 @@ export default function RicercaPage() {
 }
 
 // ── Sub-components ────────────────────────────────────────────
+
+function FieldMini({ label, value, onChange, mono }: {
+  label: string; value: string; onChange: (v: string) => void; mono?: boolean
+}) {
+  return (
+    <label className="block">
+      <span className="block text-[11px] font-medium text-slate-500 mb-1">{label}</span>
+      <input
+        type="text"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className={`w-full px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700
+                    text-white text-sm placeholder:text-slate-600
+                    focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-transparent
+                    ${mono ? 'font-mono' : ''}`}
+      />
+    </label>
+  )
+}
 
 function LoadingSpinner() {
   return (
