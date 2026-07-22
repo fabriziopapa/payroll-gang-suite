@@ -115,6 +115,16 @@ const NAV_ITEMS: NavItem[] = [
       </svg>
     ),
   },
+  {
+    id:    'audit',
+    label: 'Audit',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    ),
+  },
 ]
 
 interface LayoutProps {
@@ -128,7 +138,7 @@ export default function Layout({ children }: LayoutProps) {
   // - "Utenti" visibile solo agli admin
   // - "Certificati PDF" dietro kill-switch pdfRegionEditorEnabled (default off — modulo in rollout)
   const visibleNavItems = NAV_ITEMS.filter(item =>
-    (item.id !== 'utenti' || user?.isAdmin) &&
+    ((item.id !== 'utenti' && item.id !== 'audit') || user?.isAdmin) &&
     (item.id !== 'pdf-region-templates' || (settings.pdfRegionEditorEnabled ?? false)),
   )
   const [loggingOut, setLoggingOut]   = useState(false)

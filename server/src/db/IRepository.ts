@@ -349,9 +349,31 @@ export interface AuditInput {
   userAgent?: string
 }
 
+/** Voce audit arricchita con lo username (join) per la pagina Audit. */
+export interface AuditEntryWithUser extends AuditEntry {
+  username:  string | null
+  userAgent: string | null
+}
+
+export interface AuditQueryOpts {
+  limit:   number
+  offset:  number
+  azione?: string
+  userId?: string
+  /** ricerca libera su azione/entita/entitaId/ip/username */
+  search?: string
+  /** ISO date (inclusi) — filtro su timestamp */
+  from?:   string
+  to?:     string
+}
+
 export interface IAuditRepository {
   log(entry: AuditInput): Promise<void>
   findRecent(limit?: number): Promise<AuditEntry[]>
+  /** Query paginata e filtrata con username; ritorna righe + totale. */
+  query(opts: AuditQueryOpts): Promise<{ rows: AuditEntryWithUser[]; total: number }>
+  /** Elenco distinto delle azioni presenti (per il filtro a tendina). */
+  distinctAzioni(): Promise<string[]>
 }
 
 export interface AuditEntry {

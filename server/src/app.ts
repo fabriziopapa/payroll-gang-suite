@@ -41,6 +41,7 @@ import { templatiCertificatoRoutes } from './routes/templatiCertificato.js'
 import { pdfRegionTemplatesRoutes } from './routes/pdfRegionTemplates.js'
 import { cinecaRoutes }       from './routes/cineca.js'
 import { vociConfigRoutes }   from './routes/vociConfig.js'
+import { auditRoutes } from './routes/audit.js'
 
 // ============================================================
 
@@ -195,6 +196,7 @@ await app.register(templatiCertificatoRoutes, { prefix: '/api/v1/templati-certif
 await app.register(pdfRegionTemplatesRoutes, { prefix: '/api/v1/pdf-region-templates' })
 await app.register(cinecaRoutes,      { prefix: '/api/v1/cineca' })
 await app.register(vociConfigRoutes,  { prefix: '/api/v1/voci-config' })
+await app.register(auditRoutes,       { prefix: '/api/v1/audit' })
 
 // Health check (no auth) — SEC-M07: solo status minimale, nessuna info di versione/sistema
 app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))

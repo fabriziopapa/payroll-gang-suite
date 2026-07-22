@@ -28,6 +28,7 @@ import VociPage           from './pages/VociPage'
 import CapitoliPage       from './pages/CapitoliPage'
 import ImpostazioniPage   from './pages/ImpostazioniPage'
 import GestioneUtentiPage from './pages/GestioneUtentiPage'
+import AuditPage          from './pages/AuditPage'
 import ViewerPage         from './pages/ViewerPage'
 import RicercaPage        from './pages/RicercaPage'
 import CertificatiPage    from './pages/CertificatiPage'
@@ -265,6 +266,7 @@ export default function App() {
       {currentPage === 'capitoli'     && <CapitoliPage />}
       {currentPage === 'impostazioni' && <ImpostazioniPage />}
       {currentPage === 'utenti'       && <GestioneUtentiPage />}
+      {currentPage === 'audit'        && user?.isAdmin && <AuditPage />}
       {currentPage === 'viewer'       && <ViewerPage />}
       {currentPage === 'ricerca'      && <RicercaPage />}
       {currentPage === 'certificati'  && <CertificatiPage />}

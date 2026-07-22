@@ -31,6 +31,7 @@ export type PageId =
   | 'capitoli'
   | 'impostazioni'
   | 'utenti'
+  | 'audit'
   | 'certificati'
   | 'certificati-template'
   | 'pdf-region-templates'
