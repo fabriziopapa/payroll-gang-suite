@@ -4,7 +4,7 @@
 // ============================================================
 
 import { useStore } from '../../store/useStore'
-import { calcolaTotali, calcolaImportoCSV, formatEur } from '../../utils/biz'
+import { calcolaTotali, calcolaImportoCSV, formatEur, isImportoAttivo } from '../../utils/biz'
 
 export default function TotaliSidebar() {
   const { dettagli, nominativi, settings } = useStore()
@@ -48,13 +48,16 @@ export default function TotaliSidebar() {
               const noms  = nominativi.filter(n => n.dettaglioId === d.id)
 
               // Totali per ruolo
+              const attivoImporto = det ? isImportoAttivo(det) : true
               const perRuolo = new Map<string, { lordo: number; csv: number; count: number }>()
               for (const nom of noms) {
                 const key  = nom.ruolo || '—'
                 const prev = perRuolo.get(key) ?? { lordo: 0, csv: 0, count: 0 }
-                const csv  = det ? calcolaImportoCSV(nom, det, settings.coefficienti, settings.coefficientiContoTerzi) : nom.importoLordo
+                // Gruppi in sola modalità "parti": importo escluso dai totali
+                const csv   = !attivoImporto ? 0 : det ? calcolaImportoCSV(nom, det, settings.coefficienti, settings.coefficientiContoTerzi) : nom.importoLordo
+                const lordo = attivoImporto ? nom.importoLordo : 0
                 perRuolo.set(key, {
-                  lordo: prev.lordo + nom.importoLordo,
+                  lordo: prev.lordo + lordo,
                   csv:   prev.csv  + csv,
                   count: prev.count + 1,
                 })

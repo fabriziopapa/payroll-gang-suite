@@ -273,6 +273,8 @@ export const useStore = create<AppStore>()(
           dataCompetenzaVoce:          partial?.dataCompetenzaVoce          ?? '',
           dataRiferimentoFigli:        partial?.dataRiferimentoFigli        ?? undefined,
           flagScorporo:                partial?.flagScorporo                ?? false,
+          flagImporto:                 partial?.flagImporto                 ?? true,
+          flagParti:                   partial?.flagParti                   ?? false,
           tipoScorporo:                partial?.tipoScorporo                ?? undefined,
           riferimentoCedolino:         partial?.riferimentoCedolino         ?? '',
           identificativoProvvedimento: partial?.identificativoProvvedimento ?? '000000000',

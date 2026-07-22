@@ -12,7 +12,7 @@ import { anagraficheApi, bozzeApi, vociConfigApi, cinecaApi, type AnagraficaApi,
 import type { DettaglioLiquidazione, Nominativo, ImportoBudgetItem, VoceConfig } from '../../types'
 import RuoloDisambiguaModal, { type DisambiguaItem } from '../RuoloDisambiguaModal'
 import { showToast } from '../ToastManager'
-import { finRapWarn, etaAllaData } from '../../utils/biz'
+import { finRapWarn, etaAllaData, isImportoAttivo, isPartiAttivo } from '../../utils/biz'
 import { useModalKeyboard } from '../../hooks/useFocusTrap'
 import BudgetPanel from './BudgetPanel'
 
@@ -35,6 +35,7 @@ interface PasteRow {
   chosen?:       string
   include:       boolean
   importoParsed: number   // importo estratto dal testo incollato
+  partiParsed:   number   // parti estratte (o inserite) per la riga
 }
 
 /**
@@ -187,6 +188,10 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
     [nominativi, dettaglio.id],
   )
 
+  // Modalità valori del gruppo target: importo e/o parti per nominativo
+  const showImporto = isImportoAttivo(dettaglio)
+  const showParti   = isPartiAttivo(dettaglio)
+
   // Bozze salvate CON dati (per il tab Copia): la lista normale non
   // include `dati` (FIX H-1), quindi gruppi/nominativi sarebbero vuoti.
   const [bozzeData, setBozzeData] = useState<BozzaApi[]>([])
@@ -243,6 +248,7 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
   const [mRuolo, setMRuolo]           = useState('')
   const [mDruolo, setMDruolo]         = useState('')
   const [mImporto, setMImporto]       = useState('')
+  const [mParti, setMParti]           = useState('')
   const [filled, setFilled]           = useState(false)
   const [fillLoading, setFillLoading] = useState(false)
   const [selectedAnag, setSelectedAnag] = useState<AnagraficaApi | null>(null)
@@ -387,8 +393,9 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
       ruolo:        mRuolo.trim().toUpperCase(),
       druolo:       mDruolo.trim(),
       dettaglioId:  dettaglio.id,
-      importoLordo,
-      importoBudget,
+      importoLordo: showImporto ? importoLordo : 0,
+      importoBudget: showImporto ? importoBudget : undefined,
+      parti:        showParti ? (parseFloat(mParti.replace(',', '.')) || 0) : undefined,
       origine:      'manuale',
       finRap:       anagRecord?.finRap ?? null,
       riferimentoCedolino: mRiferimento.trim() || undefined,
@@ -397,6 +404,7 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
     setMSearch('')
     setMMatricola('')
     setMCognNome('')
+    setMParti('')
     setMRuolo('')
     setMDruolo('')
     setMImporto('')
@@ -427,8 +435,11 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
 
     // Fase 1: ricerca locale con deduplicazione per matricola
     const preliminary: PasteRow[] = parsed.map(({ name, importo }) => {
+      // Il numero incollato è importo se il gruppo usa importo; se usa solo parti → è il valore parti
+      const impVal = showImporto ? importo : 0
+      const parVal = showParti ? (showImporto ? 0 : importo) : 0
       const rawMatches = searchAnag(name)
-      if (rawMatches.length === 0) return { input: name, status: 'not_found', include: false, importoParsed: importo }
+      if (rawMatches.length === 0) return { input: name, status: 'not_found', include: false, importoParsed: impVal, partiParsed: parVal }
 
       // Deduplica per matricola: tieni il primo record per ogni persona
       const seen = new Set<string>()
@@ -440,10 +451,10 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
 
       const single = matches.length === 1 ? matches[0]! : null
       if (single && alreadyIn.has(single.matricola)) {
-        return { input: name, status: 'duplicate', match: single, include: false, importoParsed: importo }
+        return { input: name, status: 'duplicate', match: single, include: false, importoParsed: impVal, partiParsed: parVal }
       }
-      if (single) return { input: name, status: 'found', match: single, include: true, importoParsed: importo }
-      return { input: name, status: 'multiple', matches, include: false, importoParsed: importo }
+      if (single) return { input: name, status: 'found', match: single, include: true, importoParsed: impVal, partiParsed: parVal }
+      return { input: name, status: 'multiple', matches, include: false, importoParsed: impVal, partiParsed: parVal }
     })
 
     setPasteRows(preliminary)
@@ -513,7 +524,8 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
         ruolo:        a.ruolo,
         druolo:       a.druolo ?? '',
         dettaglioId:  dettaglio.id,
-        importoLordo: r.importoParsed,
+        importoLordo: showImporto ? r.importoParsed : 0,
+        parti:        showParti ? r.partiParsed : undefined,
         origine:      'pdf',
         finRap:       a.finRap ?? null,
       })
@@ -524,6 +536,12 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
   function updatePasteImporto(idx: number, value: string) {
     setPasteRows(prev => prev.map((r, i) =>
       i === idx ? { ...r, importoParsed: parseFloat(value.replace(',', '.')) || 0 } : r,
+    ))
+  }
+
+  function updatePasteParti(idx: number, value: string) {
+    setPasteRows(prev => prev.map((r, i) =>
+      i === idx ? { ...r, partiParsed: parseFloat(value.replace(',', '.')) || 0 } : r,
     ))
   }
 
@@ -613,6 +631,7 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
         druolo:       nom.druolo,
         dettaglioId:  dettaglio.id,
         importoLordo: nom.importoLordo,
+        parti:        nom.parti,
         origine:      nom.origine,
         // Sorgente può non avere finRap (bozze pre-26.06.12) → fallback anagrafica
         finRap:       nom.finRap
@@ -809,6 +828,7 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
               </div>
 
               {/* ── Importo + Badge ───────────────────────── */}
+              {showImporto && (
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-1.5">
                   Importo lordo (€) *
@@ -848,6 +868,23 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
                   />
                 )}
               </div>
+
+)}
+
+              {/* ── Parti (per-nominativo) ───────────────── */}
+              {showParti && (
+                <Field label="Parti">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={mParti}
+                    onChange={e => setMParti(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault() }}
+                    placeholder="es. 0,75"
+                    className={inputCls}
+                  />
+                </Field>
+              )}
 
               {/* ── Riferimento cedolino (per-nominativo) ──── */}
               {tagTipo === 'WD' || tagTipo === 'WE' ? (
@@ -944,6 +981,9 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
                         onToggle={() => toggleInclude(idx)}
                         onChoose={m => chooseMatch(idx, m)}
                         onImportoChange={v => updatePasteImporto(idx, v)}
+                        onPartiChange={v => updatePasteParti(idx, v)}
+                        showImporto={showImporto}
+                        showParti={showParti}
                         dataCompetenza={dettaglio.dataCompetenzaVoce || undefined} />
                     ))}
                   </div>
@@ -1165,11 +1205,14 @@ export default function NominativoFormModal({ dettaglio, onClose }: Props) {
 
 // ── Riga risultato incolla ────────────────────────────────────
 
-function PasteResultRow({ row, onToggle, onChoose, onImportoChange, dataCompetenza }: {
+function PasteResultRow({ row, onToggle, onChoose, onImportoChange, onPartiChange, showImporto, showParti, dataCompetenza }: {
   row:             PasteRow
   onToggle:        () => void
   onChoose:        (matricola: string) => void
   onImportoChange: (value: string) => void
+  onPartiChange:   (value: string) => void
+  showImporto:     boolean
+  showParti:       boolean
   dataCompetenza?: string
 }) {
   const statusIcon: Record<PasteStatus, React.ReactNode> = {
@@ -1187,6 +1230,13 @@ function PasteResultRow({ row, onToggle, onChoose, onImportoChange, dataCompeten
   useEffect(() => {
     setLocalImporto(row.importoParsed > 0 ? String(row.importoParsed) : '')
   }, [row.importoParsed])
+
+  const [localParti, setLocalParti] = useState(
+    row.partiParsed > 0 ? String(row.partiParsed) : '',
+  )
+  useEffect(() => {
+    setLocalParti(row.partiParsed > 0 ? String(row.partiParsed) : '')
+  }, [row.partiParsed])
 
   return (
     <div className={`px-3 py-2.5 flex items-start gap-3 ${row.include ? 'bg-indigo-900/10' : ''}`}>
@@ -1241,21 +1291,41 @@ function PasteResultRow({ row, onToggle, onChoose, onImportoChange, dataCompeten
           </div>
         )}
       </div>
-      {/* Importo editabile per riga */}
+      {/* Importo / Parti editabili per riga (in base ai flag del gruppo) */}
       {(row.status === 'found' || (row.status === 'multiple' && !!row.chosen)) && (
-        <div className="shrink-0 flex items-center gap-1">
-          <input
-            type="number"
-            step="0.01"
-            value={localImporto}
-            onChange={e => { setLocalImporto(e.target.value); onImportoChange(e.target.value) }}
-            onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault() }}
-            placeholder="€ 0"
-            className="w-24 px-2 py-1 rounded-lg bg-slate-700 border border-slate-600
-                       text-white text-xs text-right font-mono
-                       focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          />
-          <span className="text-slate-600 text-xs">€</span>
+        <div className="shrink-0 flex items-center gap-2">
+          {showImporto && (
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                step="0.01"
+                value={localImporto}
+                onChange={e => { setLocalImporto(e.target.value); onImportoChange(e.target.value) }}
+                onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault() }}
+                placeholder="€ 0"
+                className="w-24 px-2 py-1 rounded-lg bg-slate-700 border border-slate-600
+                           text-white text-xs text-right font-mono
+                           focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+              <span className="text-slate-600 text-xs">€</span>
+            </div>
+          )}
+          {showParti && (
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                step="0.01"
+                value={localParti}
+                onChange={e => { setLocalParti(e.target.value); onPartiChange(e.target.value) }}
+                onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault() }}
+                placeholder="parti"
+                className="w-20 px-2 py-1 rounded-lg bg-slate-700 border border-slate-600
+                           text-white text-xs text-right font-mono
+                           focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+              <span className="text-slate-600 text-xs">pt</span>
+            </div>
+          )}
         </div>
       )}
     </div>

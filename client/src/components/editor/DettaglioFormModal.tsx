@@ -62,6 +62,8 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
   const [dataProv, setDataProv]                     = useState(existing?.dataProvvedimento ?? '')
   const [aliquota, setAliquota]                     = useState(String(existing?.aliquota ?? csv.aliquota))
   const [parti, setParti]                           = useState(String(existing?.parti ?? csv.parti))
+  const [flagImporto, setFlagImporto]               = useState(existing?.flagImporto ?? true)
+  const [flagParti, setFlagParti]                   = useState(existing?.flagParti ?? false)
   const [flagAdem, setFlagAdem]                     = useState(String(existing?.flagAdempimenti ?? csv.flagAdempimenti))
   const [idContratto, setIdContratto]               = useState(existing?.idContrattoCSA ?? csv.idContrattoCSA)
   const [centroCosto, setCentroCosto]               = useState(existing?.centroCosto ?? '')
@@ -206,6 +208,8 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
       dataProvvedimento:           dataProv,
       aliquota:                    parseFloat(aliquota) || 0,
       parti:                       parseFloat(parti) || 0,
+      flagImporto,
+      flagParti,
       flagAdempimenti:             parseInt(flagAdem) || 0,
       idContrattoCSA:              idContratto,
       centroCosto,
@@ -565,17 +569,49 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
             {/* ── TAB AVANZATO ──────────────────────────────── */}
             {tab === 'avanzato' && (
               <>
+                {/* Modalità valori CSV: importo e/o parti per nominativo */}
+                <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-3 space-y-2">
+                  <p className="text-sm font-medium text-slate-300">Valori per nominativo (CSV)</p>
+                  <ValoreToggle
+                    label="Importo"
+                    hint="Ogni nominativo ha un importo → colonna «importo» del CSV."
+                    checked={flagImporto}
+                    onChange={next => {
+                      // almeno uno attivo: se spengo l'importo e le parti sono spente, accendo le parti
+                      if (!next && !flagParti) setFlagParti(true)
+                      setFlagImporto(next)
+                    }}
+                  />
+                  <ValoreToggle
+                    label="Parti"
+                    hint="Ogni nominativo ha un valore parti (decimali) → colonna «parti» del CSV."
+                    checked={flagParti}
+                    onChange={next => {
+                      if (!next && !flagImporto) setFlagImporto(true)
+                      setFlagParti(next)
+                    }}
+                  />
+                </div>
+
                 <div className="grid grid-cols-3 gap-3">
                   <Field label="Aliquota">
                     <input type="number" value={aliquota} onChange={e => setAliquota(e.target.value)} className={inputCls} />
                   </Field>
-                  <Field label="Parti">
-                    <input type="number" value={parti} onChange={e => setParti(e.target.value)} className={inputCls} />
-                  </Field>
+                  {/* Parti di gruppo: usata solo quando NON è attivo il flag Parti per-nominativo */}
+                  {!flagParti && (
+                    <Field label="Parti (gruppo)">
+                      <input type="number" value={parti} onChange={e => setParti(e.target.value)} className={inputCls} />
+                    </Field>
+                  )}
                   <Field label="Flag Adempimenti">
                     <input type="number" value={flagAdem} onChange={e => setFlagAdem(e.target.value)} className={inputCls} />
                   </Field>
                 </div>
+                {flagParti && (
+                  <p className="text-xs text-slate-500 -mt-1">
+                    Le parti si inseriscono per singolo nominativo nella tabella del gruppo.
+                  </p>
+                )}
                 <Field label="ID Contratto CSA">
                   <input value={idContratto} onChange={e => setIdContratto(e.target.value)} className={inputCls} />
                 </Field>
@@ -625,6 +661,26 @@ const inputCls = `w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-7
 const inputErrCls = `w-full px-3 py-2 rounded-lg bg-slate-800 border border-red-500/70
   text-white text-sm placeholder-slate-500
   focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition`
+
+function ValoreToggle({ label, hint, checked, onChange }: {
+  label: string; hint: string; checked: boolean; onChange: (next: boolean) => void
+}) {
+  return (
+    <label className="flex items-start gap-3 cursor-pointer group">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={e => onChange(e.target.checked)}
+        className="mt-0.5 w-4 h-4 rounded border-slate-600 bg-slate-900 text-indigo-500
+                   focus:ring-indigo-500 focus:ring-offset-slate-900 cursor-pointer"
+      />
+      <span className="min-w-0">
+        <span className="block text-sm text-slate-200">{label}</span>
+        <span className="block text-xs text-slate-500">{hint}</span>
+      </span>
+    </label>
+  )
+}
 
 function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
   const id       = useId()

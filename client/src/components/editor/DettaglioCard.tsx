@@ -7,7 +7,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useStore } from '../../store/useStore'
 import { showToast } from '../ToastManager'
 import { ConfirmDialog } from '../ConfirmDialog'
-import { calcolaImportoCSV, formatEur, finRapWarn, buildCsvRows, serializeCsv, downloadCsv } from '../../utils/biz'
+import { calcolaImportoCSV, formatEur, finRapWarn, buildCsvRows, serializeCsv, downloadCsv, isImportoAttivo, isPartiAttivo } from '../../utils/biz'
 import type { DettaglioLiquidazione, Nominativo, VoceConfig } from '../../types'
 import { anagraficheApi, cinecaApi, type RuoloAtApiResult } from '../../api/endpoints'
 import ProgressBar from '../ProgressBar'
@@ -762,9 +762,14 @@ export default function DettaglioCard({ dettaglio, voceConfig, onEdit, onAddNomi
                   <SortableTh label="Matricola"  col="matricola"  sort={sort} onSort={handleSortClick}
                     className="hidden sm:table-cell" />
                   <SortableTh label="Ruolo"      col="ruolo"      sort={sort} onSort={handleSortClick} />
-                  <SortableTh label="Lordo"      col="lordo"      sort={sort} onSort={handleSortClick} align="right" />
-                  {dettaglio.flagScorporo && (
+                  {isImportoAttivo(dettaglio) && (
+                    <SortableTh label="Lordo"      col="lordo"      sort={sort} onSort={handleSortClick} align="right" />
+                  )}
+                  {isImportoAttivo(dettaglio) && dettaglio.flagScorporo && (
                     <th className="text-right px-4 py-2 text-slate-500 text-xs font-medium">Lordo benef.</th>
+                  )}
+                  {isPartiAttivo(dettaglio) && (
+                    <SortableTh label="Parti"      col="parti"      sort={sort} onSort={handleSortClick} align="right" />
                   )}
                   <th className="w-8"/>
                 </tr>
@@ -894,11 +899,32 @@ function NominativoRow({ nom, dettaglio, cfTag, annoComp, coefficienti, coeffici
   const [editingRif, setEditingRif] = useState(false)
   const [tempCf, setTempCf]         = useState('')
   // Numero colonne per il colSpan della sotto-riga
-  const colSpan = 4 + (dettaglio.flagScorporo ? 1 : 0) + 1
+  const colSpan = 3 + (isImportoAttivo(dettaglio) ? 1 : 0)
+                    + (isImportoAttivo(dettaglio) && dettaglio.flagScorporo ? 1 : 0)
+                    + (isPartiAttivo(dettaglio) ? 1 : 0) + 1
 
   const [tempImporto, setTempImporto] = useState(String(nom.importoLordo))
   const [budgetAnchorEl, setBudgetAnchorEl] = useState<HTMLElement | null>(null)
   const importoInputRef = useRef<HTMLInputElement>(null)
+
+  const showImporto  = isImportoAttivo(dettaglio)
+  const showParti    = isPartiAttivo(dettaglio)
+  const showScorporo = showImporto && dettaglio.flagScorporo
+
+  // Editing inline delle parti per-nominativo (decimali ammessi)
+  const [editingParti, setEditingParti] = useState(false)
+  const [tempParti, setTempParti]       = useState(String(nom.parti ?? 0))
+  const partiInputRef = useRef<HTMLInputElement>(null)
+  function startEditParti() {
+    setTempParti((nom.parti ?? 0) === 0 ? '' : String(nom.parti ?? 0))
+    setEditingParti(true)
+    setTimeout(() => { partiInputRef.current?.focus(); partiInputRef.current?.select() }, 0)
+  }
+  function commitParti() {
+    const val = parseFloat(tempParti.replace(',', '.'))
+    updateNominativo(nom.id, { parti: isNaN(val) ? 0 : val })
+    setEditingParti(false)
+  }
 
   const [editingRuolo, setEditingRuolo] = useState(false)
   const [tempRuolo, setTempRuolo]       = useState(nom.ruolo)
@@ -997,6 +1023,7 @@ function NominativoRow({ nom, dettaglio, cfTag, annoComp, coefficienti, coeffici
           </span>
         )}
       </td>
+      {showImporto && (
       <td className="px-4 py-2 text-right text-sm font-mono">
         {isEditingImporto ? (
           <input
@@ -1048,9 +1075,39 @@ function NominativoRow({ nom, dettaglio, cfTag, annoComp, coefficienti, coeffici
           />
         )}
       </td>
-      {dettaglio.flagScorporo && (
+      )}
+      {showScorporo && (
         <td className={`px-4 py-2 text-right text-sm font-mono ${scorporato ? 'text-indigo-400' : 'text-slate-500'}`}>
           {scorporato ? formatEur(importoCSV) : '—'}
+        </td>
+      )}
+      {showParti && (
+        <td className="px-4 py-2 text-right text-sm font-mono">
+          {editingParti ? (
+            <input
+              ref={partiInputRef}
+              type="number"
+              step="0.01"
+              value={tempParti}
+              onChange={e => setTempParti(e.target.value)}
+              onBlur={commitParti}
+              onKeyDown={e => {
+                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault()
+                if (e.key === 'Enter')  commitParti()
+                if (e.key === 'Escape') setEditingParti(false)
+              }}
+              className="w-24 px-2 py-0.5 rounded bg-slate-700 border border-indigo-500
+                         text-white text-sm text-right outline-none"
+            />
+          ) : (
+            <button
+              onClick={startEditParti}
+              title="Clicca per modificare le parti"
+              className={`hover:text-white transition ${(nom.parti ?? 0) === 0 ? 'text-amber-400' : 'text-slate-300'}`}
+            >
+              {formatParti(nom.parti ?? 0)}
+            </button>
+          )}
         </td>
       )}
       <td className="px-2 py-2">
@@ -1118,7 +1175,7 @@ function NominativoRow({ nom, dettaglio, cfTag, annoComp, coefficienti, coeffici
 
 // ── Ordinamento e ricerca (helper puri, solo vista) ───────────
 
-type SortCol = 'nominativo' | 'matricola' | 'ruolo' | 'lordo'
+type SortCol = 'nominativo' | 'matricola' | 'ruolo' | 'lordo' | 'parti'
 
 const sortCollator = new Intl.Collator('it', { sensitivity: 'base', numeric: true })
 
@@ -1128,6 +1185,7 @@ function compareNomBy(col: SortCol, a: Nominativo, b: Nominativo): number {
     case 'matricola':  return sortCollator.compare(a.matricola, b.matricola)
     case 'ruolo':      return sortCollator.compare(a.ruolo, b.ruolo)
     case 'lordo':      return a.importoLordo - b.importoLordo
+    case 'parti':      return (a.parti ?? 0) - (b.parti ?? 0)
   }
 }
 
@@ -1176,8 +1234,12 @@ function TotaleRow({ noms, dettaglio, coefficienti, coefficientiContoTerzi }: {
   coefficienti:              ReturnType<typeof useStore.getState>['settings']['coefficienti']
   coefficientiContoTerzi?:   ReturnType<typeof useStore.getState>['settings']['coefficientiContoTerzi']
 }) {
+  const showImporto  = isImportoAttivo(dettaglio)
+  const showParti    = isPartiAttivo(dettaglio)
+  const showScorporo = showImporto && dettaglio.flagScorporo
   const totaleLordo = noms.reduce((s, n) => s + n.importoLordo, 0)
   const totaleCSV   = noms.reduce((s, n) => s + calcolaImportoCSV(n, dettaglio, coefficienti, coefficientiContoTerzi), 0)
+  const totaleParti = noms.reduce((s, n) => s + (n.parti ?? 0), 0)
 
   return (
     <tr className="border-t border-slate-700 bg-slate-800/30">
@@ -1185,15 +1247,27 @@ function TotaleRow({ noms, dettaglio, coefficienti, coefficientiContoTerzi }: {
         Totale ({noms.length})
       </td>
       <td className="px-4 py-2 hidden sm:table-cell"/>
-      <td className="px-4 py-2 text-right text-white text-sm font-mono font-medium">
-        {formatEur(Math.round(totaleLordo * 100) / 100)}
-      </td>
-      {dettaglio.flagScorporo && (
+      {showImporto && (
+        <td className="px-4 py-2 text-right text-white text-sm font-mono font-medium">
+          {formatEur(Math.round(totaleLordo * 100) / 100)}
+        </td>
+      )}
+      {showScorporo && (
         <td className="px-4 py-2 text-right text-indigo-400 text-sm font-mono font-medium">
           {formatEur(Math.round(totaleCSV * 100) / 100)}
+        </td>
+      )}
+      {showParti && (
+        <td className="px-4 py-2 text-right text-white text-sm font-mono font-medium">
+          {formatParti(Math.round(totaleParti * 100) / 100)}
         </td>
       )}
       <td/>
     </tr>
   )
+}
+
+/** Formatta le parti (decimali) in stile italiano, max 2 decimali. */
+function formatParti(n: number): string {
+  return n.toLocaleString('it-IT', { maximumFractionDigits: 2 })
 }

@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.07.19-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.07.22-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -280,6 +280,17 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 ---
 
 ## Changelog
+
+### 26.07.22
+**Feature — Valori per nominativo: importo e/o parti (per gruppo)**
+- Nuovi flag di gruppo (modale gruppo → *Avanzato* → «Valori per nominativo»): **Importo** (attivo di default) e **Parti** (disattivo di default). Guardrail: non è possibile disattivarli entrambi. Retrocompatibile — le bozze esistenti restano in sola modalità importo (`flagImporto` undefined = true, `flagParti` undefined = false).
+- Solo importo → comportamento invariato. Solo parti → si inserisce/esporta il valore **parti** per nominativo (decimali, es. `0,75`/`12,6`) nella colonna `parti` del CSV HR; la colonna `importo` esce `0`. Entrambi → si inseriscono ed esportano sia importo (scorporo invariato) sia parti.
+- Nuovo campo `Nominativo.parti` + `DettaglioLiquidazione.flagImporto/flagParti`; schema Zod server esteso (retrocompatibile, strip-mode).
+- Tabella del gruppo: colonne **Importo/Parti** condizionali con editing inline (decimali), ordinamento per parti, totali per gruppo aggiornati. Totali globali (sidebar) escludono l'importo dei gruppi in sola modalità parti.
+- Estesi i tre flussi di *Aggiungi nominativo*: inserimento singolo, **Incolla lista** (il numero incollato va a importo o parti secondo i flag; colonna parti editabile in anteprima) e **Copia nominativi** (le parti vengono copiate).
+
+**UI — Input numerici**
+- Rimosse le frecce su/giù (spin button) da tutti gli `input[type=number]` dell'app (webkit + firefox), via regola globale in `index.css`. L'input resta numerico.
 
 ### 26.07.19
 **Feature — Dati di archiviazione liquidazione (data + ID CSA)**
