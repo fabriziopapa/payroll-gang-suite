@@ -8,7 +8,7 @@
 // ------------------------------------------------------------
 
 export const APP_NAME = 'Payroll Gang Suite' as const;
-export const APP_VERSION = '26.07.19' as const;
+export const APP_VERSION = '26.07.22' as const;
 
 // ------------------------------------------------------------
 // RUOLI
@@ -60,6 +60,12 @@ export interface Nominativo {
    * Può essere negativo (es. recuperi).
    */
   importoLordo: number;
+  /**
+   * Parti per singolo nominativo (decimali ammessi, es. 0,75 o 12,6).
+   * Usato SOLO quando il gruppo ha flagParti attivo; altrimenti si usa
+   * DettaglioLiquidazione.parti (valore di gruppo). Assente = 0.
+   */
+  parti?: number;
   origine: OrigineNominativo;
   /**
    * true quando il ruolo è stato modificato manualmente (doppio click).
@@ -201,6 +207,19 @@ export interface DettaglioLiquidazione {
    * undefined = 'standard' per backward compat con bozze esistenti
    */
   tipoScorporo?: 'standard' | 'contoterzi';
+
+  // --- Modalità valori CSV (importo / parti per nominativo) ---
+  /**
+   * Se attivo (default), ogni nominativo ha un importo che finisce nella
+   * colonna `importo` del CSV. undefined = true (backward compat).
+   */
+  flagImporto?: boolean;
+  /**
+   * Se attivo, ogni nominativo ha un proprio valore `parti` (per-nominativo)
+   * che finisce nella colonna `parti` del CSV, al posto del valore di gruppo.
+   * undefined = false (backward compat).
+   */
+  flagParti?: boolean;
 
   // --- Riferimento cedolino ---
   /** Es. "TL@TFA SOSTEGNO 2023 2024@" */

@@ -41,6 +41,18 @@ export function calcolaImportoCSV(
   return Math.round((nominativo.importoLordo / (1 + coeff / 100)) * 100) / 100
 }
 
+// ── Modalità valori (importo / parti per nominativo) ─────────
+
+/** true se il gruppo esporta l'importo per nominativo (default true, backward compat). */
+export function isImportoAttivo(dettaglio: DettaglioLiquidazione): boolean {
+  return dettaglio.flagImporto !== false
+}
+
+/** true se il gruppo usa le parti per-nominativo (default false, backward compat). */
+export function isPartiAttivo(dettaglio: DettaglioLiquidazione): boolean {
+  return dettaglio.flagParti === true
+}
+
 // ── CSV Export ────────────────────────────────────────────────
 
 /**
@@ -74,8 +86,10 @@ export function buildCsvRows(
         dataCompetenzaVoce:          det.dataCompetenzaVoce,
         codiceStatoVoce:             CSV_FIXED.codiceStatoVoce,
         aliquota:                    det.aliquota,
-        parti:                       det.parti,
-        importo:                     calcolaImportoCSV(nom, det, coefficienti, coefficientiContoTerzi),
+        // parti: per-nominativo se flagParti attivo, altrimenti valore di gruppo
+        parti:                       isPartiAttivo(det) ? (nom.parti ?? 0) : det.parti,
+        // importo: solo se flagImporto attivo, altrimenti 0 (colonna richiesta numerica da HR)
+        importo:                     isImportoAttivo(det) ? calcolaImportoCSV(nom, det, coefficienti, coefficientiContoTerzi) : 0,
         codiceDivisa:                CSV_FIXED.codiceDivisa,
         codiceEnte:                  CSV_FIXED.codiceEnte,
         codiceCapitolo:              det.capitolo,
@@ -276,8 +290,10 @@ export function calcolaTotali(
 ): TotaliLiquidazione {
   const perDettaglio = dettagli.map(det => {
     const noms       = nominativi.filter(n => n.dettaglioId === det.id)
-    const totaleLordo = noms.reduce((s, n) => s + n.importoLordo, 0)
-    const totaleCSV   = noms.reduce((s, n) => s + calcolaImportoCSV(n, det, coefficienti, coefficientiContoTerzi), 0)
+    // Gruppi in sola modalità "parti": non contribuiscono ai totali importo
+    const attivoImporto = isImportoAttivo(det)
+    const totaleLordo = attivoImporto ? noms.reduce((s, n) => s + n.importoLordo, 0) : 0
+    const totaleCSV   = attivoImporto ? noms.reduce((s, n) => s + calcolaImportoCSV(n, det, coefficienti, coefficientiContoTerzi), 0) : 0
     return {
       id:          det.id,
       nome:        det.nomeDescrittivo,

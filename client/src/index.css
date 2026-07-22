@@ -11,6 +11,20 @@
   }
 }
 
+@layer base {
+  /* Rimuove le frecce su/giù (spin button) da tutti gli input numerici:
+     su webkit/blink e firefox. L'input resta comunque numerico. */
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+}
+
 @layer utilities {
   /* Glassmorphism */
   .glass {
