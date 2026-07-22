@@ -20,14 +20,16 @@ import { sql } from 'drizzle-orm'
 import { db, closeDb } from './connection.js'
 import { protectCf } from './repositories/PgBozzeRepository.js'
 
-type Row = { id: string; dati_text: string | null }
+type Row = { id: string; datitext: string | null }
 
 async function main(): Promise<void> {
   console.log('\n🔒 PGS-05 — Backfill cifratura CF nelle bozze\n')
 
-  // Legge dati come TEXT: nessun transform sulle chiavi del JSONB.
+  // Legge dati come TEXT. NB: alias SENZA underscore (`datitext`, non
+  // `dati_text`): la connessione usa transform:postgres.camel, che
+  // convertirebbe `dati_text` -> `datiText` rendendo la proprietà illeggibile.
   const rows = await db.execute<Row>(sql`
-    SELECT id, dati::text AS dati_text
+    SELECT id, dati::text AS datitext
     FROM bozze
   `)
 
@@ -35,8 +37,8 @@ async function main(): Promise<void> {
 
   for (const r of rows as unknown as Row[]) {
     try {
-      if (!r.dati_text) { giaCifrate++; continue }
-      const parsed = JSON.parse(r.dati_text) as unknown
+      if (!r.datitext) { giaCifrate++; continue }
+      const parsed = JSON.parse(r.datitext) as unknown
       const next   = protectCf(parsed)
       const nextText = JSON.stringify(next)
 
