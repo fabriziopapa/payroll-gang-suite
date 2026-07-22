@@ -289,6 +289,10 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 - Tabella del gruppo: colonne **Importo/Parti** condizionali con editing inline (decimali), ordinamento per parti, totali per gruppo aggiornati. Totali globali (sidebar) escludono l'importo dei gruppi in sola modalità parti.
 - Estesi i tre flussi di *Aggiungi nominativo*: inserimento singolo, **Incolla lista** (il numero incollato va a importo o parti secondo i flag; colonna parti editabile in anteprima) e **Copia nominativi** (le parti vengono copiate).
 
+**Feature — Sezione Audit (solo admin)**
+- Nuova pagina **Audit** (voce di menu visibile solo agli amministratori) per leggere il registro `audit_log` senza interrogare il DB: azioni tradotte in italiano con codice colore, `dettagli` JSON decodificati in frasi leggibili, colonna utente (join username), entità, IP e timestamp locale. Click su una riga → dettagli grezzi (JSON) + User-Agent.
+- Filtri: ricerca libera (utente/entità/IP), azione, intervallo di date; paginazione server-side. Nuovo endpoint **admin-only** `GET /api/v1/audit` (+ `/azioni`), `PgAuditRepository.query()` con join utenti. Sola lettura: la tabella resta append-only.
+
 **UI — Input numerici**
 - Rimosse le frecce su/giù (spin button) da tutti gli `input[type=number]` dell'app (webkit + firefox), via regola globale in `index.css`. L'input resta numerico.
 

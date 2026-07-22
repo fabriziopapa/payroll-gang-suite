@@ -145,6 +145,44 @@ export const authApi = {
 
 // ── Utenti (admin only) ───────────────────────────────────────
 
+export interface AuditEntryApi {
+  id:        number
+  userId:    string | null
+  username:  string | null
+  azione:    string
+  entita:    string | null
+  entitaId:  string | null
+  dettagli:  unknown
+  ip:        string | null
+  userAgent: string | null
+  timestamp: string
+}
+
+export interface AuditListResult {
+  rows:     AuditEntryApi[]
+  total:    number
+  page:     number
+  pageSize: number
+}
+
+export const auditApi = {
+  list: (params: {
+    page?: number; pageSize?: number; azione?: string
+    search?: string; from?: string; to?: string
+  } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.page)     qs.set('page', String(params.page))
+    if (params.pageSize) qs.set('pageSize', String(params.pageSize))
+    if (params.azione)   qs.set('azione', params.azione)
+    if (params.search)   qs.set('search', params.search)
+    if (params.from)     qs.set('from', params.from)
+    if (params.to)       qs.set('to', params.to)
+    const q = qs.toString()
+    return apiFetch<AuditListResult>(`/audit${q ? `?${q}` : ''}`)
+  },
+  azioni: () => apiFetch<string[]>('/audit/azioni'),
+}
+
 export const usersApi = {
   list: () =>
     apiFetch<UserManagementEntry[]>('/users'),
