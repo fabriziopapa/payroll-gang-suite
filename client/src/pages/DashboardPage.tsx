@@ -9,7 +9,7 @@ import { showToast } from '../components/ToastManager'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import CopiaLiquidazioneModal from '../components/CopiaLiquidazioneModal'
 import { useDebounce } from '../hooks/useDebounce'
-import { bozzaMatchesGroups, hasCriteria, type GroupSearchCriteria } from '../utils/groupSearch'
+import { bozzaMatchesGroups, hasCriteria, hasTargeted, EMPTY_CRITERIA, type GroupSearchCriteria } from '../utils/groupSearch'
 import type { BozzaDati } from '../store/useStore'
 import ArchiviaLiquidazioneModal from '../components/ArchiviaLiquidazioneModal'
 
@@ -34,19 +34,19 @@ export default function DashboardPage() {
   // Bozza in attesa dei dati di archiviazione (data liquidazione + ID CSA)
   const [archiviaTarget, setArchiviaTarget] = useState<BozzaApi | null>(null)
 
-  // ── Ricerca gruppi liquidazione ───────────────────────────
-  const [search, setSearch]       = useState('')
-  const [compFrom, setCompFrom]   = useState('')
-  const [compTo, setCompTo]       = useState('')
+  // ── Ricerca liquidazioni / gruppi ─────────────────────────
+  const [crit, setCrit]           = useState<GroupSearchCriteria>(EMPTY_CRITERIA)
   const [advanced, setAdvanced]   = useState(false)
-  const debSearch                 = useDebounce(search, 250)
+  const setField = (k: keyof GroupSearchCriteria) => (v: string) =>
+    setCrit(c => ({ ...c, [k]: v }))
+  // Debounce dell'intera criteria (serializzata) per non rifiltrare a ogni tasto
+  const debKey   = useDebounce(JSON.stringify(crit), 250)
+  const criteria = useMemo(() => JSON.parse(debKey) as GroupSearchCriteria, [debKey])
+  const searchActive = hasCriteria(criteria)
   // I dati completi dei gruppi (JSONB) non sono nella lista leggera (FIX H-1):
   // li carichiamo una sola volta, solo quando l'utente inizia a cercare.
   const [fullLoaded, setFullLoaded] = useState(false)
   const [loadingFull, setLoadingFull] = useState(false)
-
-  const criteria: GroupSearchCriteria = { text: debSearch, compFrom, compTo }
-  const searchActive = hasCriteria(criteria)
 
   // Carica bozze al mount
   useEffect(() => {
@@ -81,9 +81,9 @@ export default function DashboardPage() {
       if (filter !== 'tutte' && b.stato !== filter) return false
       if (!searchActive) return true
       const dati = (b.dati ?? undefined) as Partial<BozzaDati> | undefined
-      return bozzaMatchesGroups(dati?.dettagli, criteria)
+      return bozzaMatchesGroups(b.nome, dati?.dettagli, criteria)
     })
-  }, [bozze, filter, searchActive, debSearch, compFrom, compTo])
+  }, [bozze, filter, searchActive, criteria])
 
   const totalPages  = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const pagedItems  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
@@ -92,7 +92,7 @@ export default function DashboardPage() {
   const countArchiviate = bozze.filter(b => b.stato === 'archiviata').length
 
   // reset page on filter change
-  useEffect(() => { setPage(1) }, [filter, debSearch, compFrom, compTo])
+  useEffect(() => { setPage(1) }, [filter, criteria])
 
   // FIX H-1: GET /bozze lista non include `dati` JSONB.
   // Prima del caricamento in editor/viewer, fetcha bozza completa via GET /bozze/:id.
@@ -166,7 +166,7 @@ export default function DashboardPage() {
         <StatCard label="Archiviate"      value={countArchiviate} color="slate" />
       </div>
 
-      {/* Ricerca gruppi liquidazione */}
+      {/* Ricerca liquidazioni / gruppi */}
       <div className="mb-4 space-y-2">
         <div className="flex gap-2">
           <div className="relative flex-1">
@@ -177,16 +177,16 @@ export default function DashboardPage() {
             </svg>
             <input
               type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Cerca: titolo gruppo, voce, capitolo, ID provvedimento, centro di costo, note…"
+              value={crit.text}
+              onChange={e => setField('text')(e.target.value)}
+              placeholder="Cerca ovunque: nome liquidazione, titolo gruppo, voce, capitolo, ID provvedimento, centro di costo, note…"
               className="w-full pl-9 pr-9 py-2 rounded-lg bg-slate-800 border border-slate-700
                          text-white text-sm placeholder:text-slate-500
                          focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-transparent"
             />
-            {(search || compFrom || compTo) && (
+            {searchActive && (
               <button
-                onClick={() => { setSearch(''); setCompFrom(''); setCompTo('') }}
+                onClick={() => setCrit(EMPTY_CRITERIA)}
                 title="Azzera ricerca"
                 className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-slate-500 hover:text-white hover:bg-slate-700 transition"
               >
@@ -198,32 +198,42 @@ export default function DashboardPage() {
           </div>
           <button
             onClick={() => setAdvanced(v => !v)}
-            title="Filtro per data competenza"
+            title="Ricerca mirata per campo"
             className={`px-3 py-2 rounded-lg text-sm border transition shrink-0
-              ${advanced || compFrom || compTo
+              ${advanced || hasTargeted(criteria)
                 ? 'bg-indigo-600/20 text-indigo-400 border-indigo-700'
                 : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}
           >
-            Data competenza
+            Ricerca mirata
           </button>
         </div>
-        {(advanced || compFrom || compTo) && (
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <label className="flex items-center gap-1.5 text-slate-400">
-              Dal
-              <input type="date" value={compFrom} onChange={e => setCompFrom(e.target.value)}
-                className="px-2 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-sm
-                           [color-scheme:dark] focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-            </label>
-            <label className="flex items-center gap-1.5 text-slate-400">
-              Al
-              <input type="date" value={compTo} onChange={e => setCompTo(e.target.value)}
-                className="px-2 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-sm
-                           [color-scheme:dark] focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-            </label>
-            <span className="text-xs text-slate-600">sulla data competenza voce dei gruppi</span>
+
+        {(advanced || hasTargeted(criteria)) && (
+          <div className="p-3 rounded-lg bg-slate-800/40 border border-slate-700 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            <FieldMini label="Titolo gruppo"    value={crit.titolo}      onChange={setField('titolo')} />
+            <FieldMini label="Voce"             value={crit.voce}        onChange={setField('voce')} />
+            <FieldMini label="Capitolo"         value={crit.capitolo}    onChange={setField('capitolo')} />
+            <FieldMini label="ID provvedimento" value={crit.idProv}      onChange={setField('idProv')} mono />
+            <FieldMini label="Centro di costo"  value={crit.centroCosto} onChange={setField('centroCosto')} />
+            <FieldMini label="Note"             value={crit.note}        onChange={setField('note')} />
+            <div className="sm:col-span-2 lg:col-span-3 flex flex-wrap items-center gap-2 pt-1">
+              <span className="text-xs text-slate-500">Data competenza voce:</span>
+              <label className="flex items-center gap-1.5 text-slate-400 text-sm">
+                dal
+                <input type="date" value={crit.compFrom} onChange={e => setField('compFrom')(e.target.value)}
+                  className="px-2 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-sm
+                             [color-scheme:dark] focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+              </label>
+              <label className="flex items-center gap-1.5 text-slate-400 text-sm">
+                al
+                <input type="date" value={crit.compTo} onChange={e => setField('compTo')(e.target.value)}
+                  className="px-2 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-sm
+                             [color-scheme:dark] focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+              </label>
+            </div>
           </div>
         )}
+
         {searchActive && (
           <p className="text-xs text-slate-500">
             {loadingFull ? 'Caricamento gruppi…' : `${filtered.length} liquidazioni corrispondono`}
@@ -359,6 +369,25 @@ export default function DashboardPage() {
 }
 
 // ── Sub-components ────────────────────────────────────────────
+
+function FieldMini({ label, value, onChange, mono }: {
+  label: string; value: string; onChange: (v: string) => void; mono?: boolean
+}) {
+  return (
+    <label className="block">
+      <span className="block text-[11px] font-medium text-slate-500 mb-1">{label}</span>
+      <input
+        type="text"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className={`w-full px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700
+                    text-white text-sm placeholder:text-slate-600
+                    focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-transparent
+                    ${mono ? 'font-mono' : ''}`}
+      />
+    </label>
+  )
+}
 
 function StatCard({ label, value, color }: {
   label: string; value: number; color: 'indigo' | 'slate'

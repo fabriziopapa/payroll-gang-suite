@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.07.22-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.07.23-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -280,6 +280,11 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 ---
 
 ## Changelog
+
+### 26.07.23
+**Fix — Ricerca liquidazioni (Dashboard + Ricerca)**
+- Il full-text ora include anche il **nome della liquidazione** (prima cercava solo dentro i campi dei gruppi: digitando testo presente solo nel titolo — es. «ore» o un numero di protocollo — spariva tutto).
+- Aggiunta **ricerca mirata per singolo campo**, attivabile dal pulsante «Ricerca mirata»/«Mirata»: titolo gruppo, voce, capitolo, ID provvedimento, centro di costo, note — combinabili in AND tra loro, con il full-text e con il range data competenza. Stesso comportamento in Dashboard e nella pagina Ricerca.
 
 ### 26.07.22
 **Feature — Valori per nominativo: importo e/o parti (per gruppo)**
