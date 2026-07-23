@@ -259,6 +259,8 @@ export interface IBozzeRepository {
   findAllSummary(userId?: string): Promise<BozzaSummaryRow[]>
   /** Ricerca server-side sul JSONB; ritorna solo i riepiloghi (senza dati). */
   search(opts: BozzaSearchOpts): Promise<BozzaSummaryRow[]>
+  /** Come search() ma con `dati` completo (per la pagina Ricerca). */
+  searchFull(opts: BozzaSearchOpts): Promise<BozzaRow[]>
   findById(id: string): Promise<BozzaRow | null>
   create(data: BozzaInput): Promise<BozzaRow>
   update(id: string, data: Partial<BozzaInput>): Promise<BozzaRow>

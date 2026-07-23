@@ -252,6 +252,20 @@ export const bozzeApi = {
     return apiFetch<BozzaApi[]>(`/bozze/search${q ? `?${q}` : ''}`)
   },
 
+  /** Come search ma con `dati` completo (per la pagina Ricerca). */
+  searchWithData: (params: {
+    stato?: 'bozza' | 'archiviata'
+    text?: string; titolo?: string; voce?: string; capitolo?: string
+    idProv?: string; centroCosto?: string; note?: string; from?: string; to?: string
+  }) => {
+    const qs = new URLSearchParams()
+    for (const [k, v] of Object.entries(params)) {
+      if (v != null && String(v).trim() !== '') qs.set(k, String(v))
+    }
+    qs.set('withData', 'true')
+    return apiFetch<BozzaApi[]>(`/bozze/search?${qs.toString()}`)
+  },
+
   /**
    * FIX H-1: recupera una bozza completa (con campo `dati`) via GET /bozze/:id.
    * Usata dall'editor/viewer per caricare i dati di una singola bozza.
