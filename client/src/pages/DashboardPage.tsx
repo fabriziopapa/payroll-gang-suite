@@ -2,7 +2,7 @@
 // PAYROLL GANG SUITE — Dashboard (lista bozze)
 // ============================================================
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { bozzeApi, type BozzaApi } from '../api/endpoints'
 import { showToast } from '../components/ToastManager'
@@ -45,8 +45,10 @@ export default function DashboardPage() {
   const searchActive = hasCriteria(criteria)
   // I dati completi dei gruppi (JSONB) non sono nella lista leggera (FIX H-1):
   // li carichiamo una sola volta, solo quando l'utente inizia a cercare.
-  const [fullLoaded, setFullLoaded] = useState(false)
+  // `datiReady` = tutte le bozze in store hanno già il campo `dati`.
+  const datiReady = useMemo(() => bozze.every(b => b.dati !== undefined), [bozze])
   const [loadingFull, setLoadingFull] = useState(false)
+  const loadAttempted = useRef(false)
 
   // Carica bozze al mount
   useEffect(() => {
@@ -64,24 +66,27 @@ export default function DashboardPage() {
     load()
   }, [setBozze, setLoading])
 
-  // Lazy-load dei dati gruppi alla prima ricerca (una volta sola)
+  // Lazy-load dei dati gruppi alla prima ricerca (una volta sola).
+  // NB: `loadingFull` NON è nelle deps — altrimenti l'effect si ri-eseguirebbe
+  // e annullerebbe la propria fetch, restando bloccato su "Caricamento".
   useEffect(() => {
-    if (!searchActive || fullLoaded || loadingFull) return
-    let cancelled = false
+    if (!searchActive || datiReady || loadAttempted.current) return
+    loadAttempted.current = true
     setLoadingFull(true)
     bozzeApi.listWithData()
-      .then(full => { if (!cancelled) { setBozze(full); setFullLoaded(true) } })
-      .catch(() => { /* mantiene la lista leggera */ })
-      .finally(() => { if (!cancelled) setLoadingFull(false) })
-    return () => { cancelled = true }
-  }, [searchActive, fullLoaded, loadingFull, setBozze])
+      .then(full => setBozze(full))
+      .catch(() => { loadAttempted.current = false })  // consenti un nuovo tentativo
+      .finally(() => setLoadingFull(false))
+  }, [searchActive, datiReady, setBozze])
 
   const filtered = useMemo(() => {
     return bozze.filter(b => {
       if (filter !== 'tutte' && b.stato !== filter) return false
       if (!searchActive) return true
-      const dati = (b.dati ?? undefined) as Partial<BozzaDati> | undefined
-      return bozzaMatchesGroups(b.nome, dati?.dettagli, criteria)
+      // Dati gruppi non ancora caricati → non nascondere nulla (evita lista vuota)
+      if (b.dati === undefined) return true
+      const dati = b.dati as Partial<BozzaDati>
+      return bozzaMatchesGroups(b.nome, dati.dettagli, criteria)
     })
   }, [bozze, filter, searchActive, criteria])
 
@@ -264,6 +269,10 @@ export default function DashboardPage() {
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
+        </div>
+      ) : filtered.length === 0 && searchActive ? (
+        <div className="text-center py-16 text-slate-500 text-sm">
+          {loadingFull ? 'Caricamento gruppi…' : 'Nessuna liquidazione corrisponde alla ricerca.'}
         </div>
       ) : filtered.length === 0 ? (
         <EmptyState onNew={() => newLiquidazione()} filter={filter} />
