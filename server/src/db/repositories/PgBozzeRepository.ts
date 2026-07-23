@@ -3,11 +3,11 @@
 // dati JSONB: serializzazione completa liquidazioni + nominativi
 // ============================================================
 
-import { eq, and } from 'drizzle-orm'
+import { eq, and, sql, type SQL } from 'drizzle-orm'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import * as schema from '../schema.js'
 import { encrypt, decrypt } from '../../services/cryptoService.js'
-import type { IBozzeRepository, BozzaRow, BozzaSummaryRow, BozzaInput, LiquidazioneInfo } from '../IRepository.js'
+import type { IBozzeRepository, BozzaRow, BozzaSummaryRow, BozzaInput, LiquidazioneInfo, BozzaSearchOpts } from '../IRepository.js'
 
 type DB = PostgresJsDatabase<typeof schema>
 
@@ -127,6 +127,60 @@ export class PgBozzeRepository implements IBozzeRepository {
       : await base.orderBy(schema.bozze.updatedAt)
 
     return rows.map(toSummaryRow)
+  }
+
+  /**
+   * Ricerca server-side sul JSONB `dati.dettagli` — ritorna solo i riepiloghi
+   * (nessun `dati` sul filo). I campi ricercabili del gruppo sono in chiaro
+   * (solo i CF sono cifrati), quindi la query è diretta.
+   * · mirate per campo → EXISTS di UN dettaglio che soddisfa TUTTI i criteri;
+   * · full-text (token AND) → ogni token nel nome liquidazione o in un gruppo.
+   * ILIKE = case-insensitive (accenti non normalizzati lato DB).
+   */
+  async search(o: BozzaSearchOpts): Promise<BozzaSummaryRow[]> {
+    const conds: SQL[] = []
+    if (o.userId) conds.push(sql`b.created_by = ${o.userId}`)
+    if (o.stato)  conds.push(sql`b.stato = ${o.stato}`)
+
+    const like = (v: string) => `%${v.trim()}%`
+    const t: SQL[] = []
+    if (o.titolo?.trim())      t.push(sql`(d->>'nomeDescrittivo') ILIKE ${like(o.titolo)}`)
+    if (o.voce?.trim())        t.push(sql`(d->>'voce') ILIKE ${like(o.voce)}`)
+    if (o.capitolo?.trim())    t.push(sql`(d->>'capitolo') ILIKE ${like(o.capitolo)}`)
+    if (o.idProv?.trim())      t.push(sql`(d->>'identificativoProvvedimento') ILIKE ${like(o.idProv)}`)
+    if (o.centroCosto?.trim()) t.push(sql`(d->>'centroCosto') ILIKE ${like(o.centroCosto)}`)
+    if (o.note?.trim())        t.push(sql`(d->>'note') ILIKE ${like(o.note)}`)
+    if (o.from)                t.push(sql`(d->>'dataCompetenzaVoce') >= ${o.from}`)
+    if (o.to)                  t.push(sql`(d->>'dataCompetenzaVoce') <= ${o.to}`)
+    if (t.length) {
+      conds.push(sql`EXISTS (SELECT 1 FROM jsonb_array_elements(b.dati->'dettagli') d WHERE ${sql.join(t, sql` AND `)})`)
+    }
+
+    // haystack di un dettaglio (nome liquidazione incluso) per il full-text
+    const hay = sql`(coalesce(b.nome,'') || ' ' || coalesce(d->>'nomeDescrittivo','') || ' ' || coalesce(d->>'voce','') || ' ' || coalesce(d->>'capitolo','') || ' ' || coalesce(d->>'identificativoProvvedimento','') || ' ' || coalesce(d->>'centroCosto','') || ' ' || coalesce(d->>'note','') || ' ' || coalesce(d->>'competenzaLiquidazione',''))`
+    for (const tok of (o.text ?? '').trim().split(/\s+/).filter(Boolean)) {
+      const pat = `%${tok}%`
+      conds.push(sql`(b.nome ILIKE ${pat} OR EXISTS (SELECT 1 FROM jsonb_array_elements(b.dati->'dettagli') d WHERE ${hay} ILIKE ${pat}))`)
+    }
+
+    const where = conds.length ? sql`WHERE ${sql.join(conds, sql` AND `)}` : sql``
+
+    const rows = await this.db.execute(sql`
+      SELECT b.id, b.nome, b.stato,
+             b.protocollo_display,
+             b.data_liquidazione,
+             b.id_liquidazione_csa,
+             b.created_by,
+             u.username AS created_by_username,
+             b.created_at,
+             b.updated_at
+      FROM bozze b
+      LEFT JOIN users u ON u.id = b.created_by
+      ${where}
+      ORDER BY b.updated_at DESC
+    `)
+
+    return (rows as unknown as SummaryRowShape[]).map(toSummaryRow)
   }
 
   async findById(id: string): Promise<BozzaRow | null> {

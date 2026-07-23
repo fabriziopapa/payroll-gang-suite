@@ -235,10 +235,30 @@ export interface LiquidazioneInfo {
   idLiquidazioneCsa?: string | null
 }
 
+/** Criteri di ricerca server-side sui gruppi (JSONB dati.dettagli). */
+export interface BozzaSearchOpts {
+  userId?:      string
+  stato?:       'bozza' | 'archiviata'
+  /** full-text (token AND) su nome liquidazione + campi gruppo */
+  text?:        string
+  // mirate per campo (ILIKE)
+  titolo?:      string
+  voce?:        string
+  capitolo?:    string
+  idProv?:      string
+  centroCosto?: string
+  note?:        string
+  /** range su dataCompetenzaVoce (ISO YYYY-MM-DD) */
+  from?:        string
+  to?:          string
+}
+
 export interface IBozzeRepository {
   findAll(userId?: string): Promise<BozzaRow[]>
   /** FIX H-1: lista senza dati JSONB — usata dal GET /bozze */
   findAllSummary(userId?: string): Promise<BozzaSummaryRow[]>
+  /** Ricerca server-side sul JSONB; ritorna solo i riepiloghi (senza dati). */
+  search(opts: BozzaSearchOpts): Promise<BozzaSummaryRow[]>
   findById(id: string): Promise<BozzaRow | null>
   create(data: BozzaInput): Promise<BozzaRow>
   update(id: string, data: Partial<BozzaInput>): Promise<BozzaRow>
