@@ -285,7 +285,7 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 **Fix — Ricerca liquidazioni (Dashboard + Ricerca)**
 - Il full-text ora include anche il **nome della liquidazione** (prima cercava solo dentro i campi dei gruppi: digitando testo presente solo nel titolo — es. «ore» o un numero di protocollo — spariva tutto).
 - Aggiunta **ricerca mirata per singolo campo**, attivabile dal pulsante «Ricerca mirata»/«Mirata»: titolo gruppo, voce, capitolo, ID provvedimento, centro di costo, note — combinabili in AND tra loro, con il full-text e con il range data competenza. Stesso comportamento in Dashboard e nella pagina Ricerca.
-- Fix lazy-load Dashboard: i dati dei gruppi si caricano una sola volta alla prima ricerca senza più restare bloccati su «Caricamento gruppi…» (l'effetto non si auto-annulla più la fetch), e durante il caricamento la lista non viene più svuotata.
+- **Ricerca Dashboard spostata lato server**: nuovo endpoint `GET /api/v1/bozze/search` che filtra sul JSONB `dati.dettagli` in Postgres (`jsonb_array_elements` + ILIKE su campi, range su `dataCompetenzaVoce`, full-text token AND su nome liquidazione + campi gruppo) e ritorna **solo i riepiloghi** — nessun trasferimento del JSONB al client, Dashboard sempre leggera. Rispetta l'ownership (utente non admin: solo le proprie). Segnaletica di caricamento con **skeleton** durante la ricerca. Risolto il precedente blocco su «Caricamento gruppi…». La pagina Ricerca resta client-side (i dati completi sono già caricati per tabella/report).
 
 ### 26.07.22
 **Feature — Valori per nominativo: importo e/o parti (per gruppo)**

@@ -39,6 +39,26 @@ export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(await repo.findAll(userId))
   })
 
+  // GET /search — ricerca server-side sui gruppi (JSONB), ritorna riepiloghi.
+  // DEVE precedere GET /:id (route statiche battono le parametriche solo se
+  // registrate prima). Utente normale: solo le proprie; admin: tutte.
+  app.get('/search', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const q = z.object({
+      stato:       z.enum(['bozza', 'archiviata']).optional(),
+      text:        z.string().max(200).optional(),
+      titolo:      z.string().max(200).optional(),
+      voce:        z.string().max(50).optional(),
+      capitolo:    z.string().max(50).optional(),
+      idProv:      z.string().max(50).optional(),
+      centroCosto: z.string().max(100).optional(),
+      note:        z.string().max(500).optional(),
+      from:        z.string().max(20).optional(),
+      to:          z.string().max(20).optional(),
+    }).parse(req.query)
+    const userId = req.user!.isAdmin ? undefined : req.user!.id
+    return reply.send(await repo.search({ ...q, userId }))
+  })
+
   // GET /:id — admin può accedere a qualsiasi bozza; utente solo la propria
   app.get('/:id', { preHandler: [app.authenticate] }, async (req, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params)

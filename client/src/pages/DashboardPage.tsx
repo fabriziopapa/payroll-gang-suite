@@ -2,15 +2,14 @@
 // PAYROLL GANG SUITE — Dashboard (lista bozze)
 // ============================================================
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { bozzeApi, type BozzaApi } from '../api/endpoints'
 import { showToast } from '../components/ToastManager'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import CopiaLiquidazioneModal from '../components/CopiaLiquidazioneModal'
 import { useDebounce } from '../hooks/useDebounce'
-import { bozzaMatchesGroups, hasCriteria, hasTargeted, EMPTY_CRITERIA, type GroupSearchCriteria } from '../utils/groupSearch'
-import type { BozzaDati } from '../store/useStore'
+import { hasCriteria, hasTargeted, EMPTY_CRITERIA, type GroupSearchCriteria } from '../utils/groupSearch'
 import ArchiviaLiquidazioneModal from '../components/ArchiviaLiquidazioneModal'
 
 const PAGE_SIZE = 6
@@ -43,14 +42,16 @@ export default function DashboardPage() {
   const debKey   = useDebounce(JSON.stringify(crit), 250)
   const criteria = useMemo(() => JSON.parse(debKey) as GroupSearchCriteria, [debKey])
   const searchActive = hasCriteria(criteria)
-  // I dati completi dei gruppi (JSONB) non sono nella lista leggera (FIX H-1):
-  // li carichiamo una sola volta, solo quando l'utente inizia a cercare.
-  // `datiReady` = tutte le bozze in store hanno già il campo `dati`.
-  const datiReady = useMemo(() => bozze.every(b => b.dati !== undefined), [bozze])
-  const [loadingFull, setLoadingFull] = useState(false)
-  const loadAttempted = useRef(false)
+  // Ricerca lato server: i campi dei gruppi vivono nel JSONB `dati` (non nella
+  // lista leggera). Il server filtra e ritorna solo i riepiloghi → nessun `dati`
+  // sul filo, Dashboard sempre leggera.
+  const [searchResults, setSearchResults] = useState<BozzaApi[] | null>(null)
+  const [searching, setSearching] = useState(false)
+  // Bump per rieseguire la ricerca dopo una mutazione (archivia/elimina/copia)
+  const [refreshTick, setRefreshTick] = useState(0)
+  const bumpSearch = () => setRefreshTick(t => t + 1)
 
-  // Carica bozze al mount
+  // Carica bozze al mount (lista leggera, per conteggi e vista di default)
   useEffect(() => {
     async function load() {
       setLoading(true)
@@ -66,29 +67,34 @@ export default function DashboardPage() {
     load()
   }, [setBozze, setLoading])
 
-  // Lazy-load dei dati gruppi alla prima ricerca (una volta sola).
-  // NB: `loadingFull` NON è nelle deps — altrimenti l'effect si ri-eseguirebbe
-  // e annullerebbe la propria fetch, restando bloccato su "Caricamento".
+  // Ricerca server-side (criteria già debounced). Nessun loading-flag nelle deps
+  // → l'effetto non si auto-annulla.
   useEffect(() => {
-    if (!searchActive || datiReady || loadAttempted.current) return
-    loadAttempted.current = true
-    setLoadingFull(true)
-    bozzeApi.listWithData()
-      .then(full => setBozze(full))
-      .catch(() => { loadAttempted.current = false })  // consenti un nuovo tentativo
-      .finally(() => setLoadingFull(false))
-  }, [searchActive, datiReady, setBozze])
+    if (!searchActive) { setSearchResults(null); setSearching(false); return }
+    let cancelled = false
+    setSearching(true)
+    bozzeApi.search({
+      stato:       filter === 'tutte' ? undefined : filter,
+      text:        criteria.text,
+      titolo:      criteria.titolo,
+      voce:        criteria.voce,
+      capitolo:    criteria.capitolo,
+      idProv:      criteria.idProv,
+      centroCosto: criteria.centroCosto,
+      note:        criteria.note,
+      from:        criteria.compFrom,
+      to:          criteria.compTo,
+    })
+      .then(res => { if (!cancelled) setSearchResults(res) })
+      .catch(() => { if (!cancelled) setSearchResults([]) })
+      .finally(() => { if (!cancelled) setSearching(false) })
+    return () => { cancelled = true }
+  }, [searchActive, criteria, filter, refreshTick])
 
   const filtered = useMemo(() => {
-    return bozze.filter(b => {
-      if (filter !== 'tutte' && b.stato !== filter) return false
-      if (!searchActive) return true
-      // Dati gruppi non ancora caricati → non nascondere nulla (evita lista vuota)
-      if (b.dati === undefined) return true
-      const dati = b.dati as Partial<BozzaDati>
-      return bozzaMatchesGroups(b.nome, dati.dettagli, criteria)
-    })
-  }, [bozze, filter, searchActive, criteria])
+    if (searchActive) return searchResults ?? []
+    return bozze.filter(b => filter === 'tutte' ? true : b.stato === filter)
+  }, [searchActive, searchResults, bozze, filter])
 
   const totalPages  = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const pagedItems  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
@@ -121,6 +127,7 @@ export default function DashboardPage() {
     setArchiving(b.id)
     try {
       upsertBozza(await bozzeApi.restore(b.id))
+      if (searchActive) bumpSearch()
     } catch { showToast('Errore durante l\'operazione', 'error') }
     finally { setArchiving(null) }
   }
@@ -140,6 +147,7 @@ export default function DashboardPage() {
     try {
       await bozzeApi.delete(id)
       removeBozza(id)
+      if (searchActive) bumpSearch()
     } catch { showToast("Errore durante l'eliminazione della bozza", 'error') }
     finally { setDeleting(null) }
   }
@@ -240,8 +248,16 @@ export default function DashboardPage() {
         )}
 
         {searchActive && (
-          <p className="text-xs text-slate-500">
-            {loadingFull ? 'Caricamento gruppi…' : `${filtered.length} liquidazioni corrispondono`}
+          <p className="text-xs text-slate-500 flex items-center gap-1.5">
+            {searching ? (
+              <>
+                <svg className="animate-spin w-3.5 h-3.5 text-indigo-400" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Ricerca in corso…
+              </>
+            ) : `${filtered.length} liquidazioni corrispondono`}
           </p>
         )}
       </div>
@@ -270,9 +286,13 @@ export default function DashboardPage() {
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
         </div>
+      ) : searchActive && searching && filtered.length === 0 ? (
+        <div className="space-y-2" aria-busy="true" aria-label="Ricerca in corso">
+          {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
+        </div>
       ) : filtered.length === 0 && searchActive ? (
         <div className="text-center py-16 text-slate-500 text-sm">
-          {loadingFull ? 'Caricamento gruppi…' : 'Nessuna liquidazione corrisponde alla ricerca.'}
+          Nessuna liquidazione corrisponde alla ricerca.
         </div>
       ) : filtered.length === 0 ? (
         <EmptyState onNew={() => newLiquidazione()} filter={filter} />
@@ -354,6 +374,7 @@ export default function DashboardPage() {
             try {
               const updated = await bozzeApi.archive(archiviaTarget.id, info)
               upsertBozza(updated)
+              if (searchActive) bumpSearch()
               setArchiviaTarget(null)
               showToast(`«${updated.nome}» archiviata`, 'success')
             } catch { showToast("Errore durante l'archiviazione", 'error') }
@@ -378,6 +399,19 @@ export default function DashboardPage() {
 }
 
 // ── Sub-components ────────────────────────────────────────────
+
+function SkeletonCard() {
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center gap-4 animate-pulse">
+      <div className="w-9 h-9 rounded-lg bg-slate-800 shrink-0" />
+      <div className="flex-1 min-w-0 space-y-2">
+        <div className="h-3.5 bg-slate-800 rounded w-2/3" />
+        <div className="h-2.5 bg-slate-800/70 rounded w-1/3" />
+      </div>
+      <div className="w-16 h-5 rounded-full bg-slate-800 shrink-0" />
+    </div>
+  )
+}
 
 function FieldMini({ label, value, onChange, mono }: {
   label: string; value: string; onChange: (v: string) => void; mono?: boolean

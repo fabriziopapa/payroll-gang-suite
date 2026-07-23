@@ -236,6 +236,23 @@ export const bozzeApi = {
     apiFetch<BozzaApi[]>('/bozze/all-with-data'),
 
   /**
+   * Ricerca server-side sui gruppi (JSONB) — ritorna solo i riepiloghi
+   * (senza `dati`). Usata dalla Dashboard: nessun trasferimento del JSONB.
+   */
+  search: (params: {
+    stato?: 'bozza' | 'archiviata'
+    text?: string; titolo?: string; voce?: string; capitolo?: string
+    idProv?: string; centroCosto?: string; note?: string; from?: string; to?: string
+  }) => {
+    const qs = new URLSearchParams()
+    for (const [k, v] of Object.entries(params)) {
+      if (v != null && String(v).trim() !== '') qs.set(k, String(v))
+    }
+    const q = qs.toString()
+    return apiFetch<BozzaApi[]>(`/bozze/search${q ? `?${q}` : ''}`)
+  },
+
+  /**
    * FIX H-1: recupera una bozza completa (con campo `dati`) via GET /bozze/:id.
    * Usata dall'editor/viewer per caricare i dati di una singola bozza.
    */
