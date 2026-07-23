@@ -128,22 +128,30 @@ export default function RicercaPage() {
   const [pageSize, setPageSize]   = useState(20)
   const [reportMode, setReportMode] = useState<ReportMode>('matricola')
 
-  // Carica tutte le bozze con dati JSONB in una sola richiesta.
-  // GET /bozze/all-with-data restituisce l'intera collezione con `dati` incluso:
-  // 1 query DB invece del pattern precedente (1 lista + N GET /bozze/:id).
+  // Ricerca lato server: il filtro (testo/mirata/date/stato) gira nel DB e
+  // vengono caricate SOLO le liquidazioni corrispondenti (con `dati`), su cui
+  // il client raffina le righe. Senza criteri → ritorna tutto (vista completa).
+  // NB: nessun loading-flag nelle deps → l'effetto non si auto-annulla.
   useEffect(() => {
     let cancelled = false
-    async function load() {
-      setLoading(true)
-      try {
-        const full = await bozzeApi.listWithData()
-        if (!cancelled) setBozze(full)
-      } catch { /* usa dati già in store se disponibili */ }
-      finally { if (!cancelled) setLoading(false) }
-    }
-    load()
+    setLoading(true)
+    bozzeApi.searchWithData({
+      stato:       filtroStato === 'tutte' ? undefined : filtroStato,
+      text:        debouncedQuery,
+      titolo:      advc.titolo,
+      voce:        advc.voce,
+      capitolo:    advc.capitolo,
+      idProv:      advc.idProv,
+      centroCosto: advc.centroCosto,
+      note:        advc.note,
+      from:        compFrom,
+      to:          compTo,
+    })
+      .then(res => { if (!cancelled) setBozze(res) })
+      .catch(() => { /* mantiene i dati già in store */ })
+      .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [setBozze])
+  }, [debouncedQuery, advc, compFrom, compTo, filtroStato, setBozze])
 
   // Flat join di tutte le bozze
   const allRows = useMemo(
@@ -424,7 +432,7 @@ export default function RicercaPage() {
 
           {/* Tabella risultati */}
           {loading ? (
-            <LoadingSpinner />
+            <TableSkeleton />
           ) : filtered.length === 0 ? (
             <EmptyResults query={query} />
           ) : (
@@ -648,6 +656,21 @@ function FieldMini({ label, value, onChange, mono }: {
                     ${mono ? 'font-mono' : ''}`}
       />
     </label>
+  )
+}
+
+function TableSkeleton() {
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2" aria-busy="true" aria-label="Ricerca in corso">
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-4 animate-pulse">
+          <div className="h-3 bg-slate-800 rounded flex-1" />
+          <div className="h-3 bg-slate-800 rounded w-24" />
+          <div className="h-3 bg-slate-800 rounded w-20" />
+          <div className="h-3 bg-slate-800/70 rounded w-16" />
+        </div>
+      ))}
+    </div>
   )
 }
 

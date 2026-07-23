@@ -54,9 +54,14 @@ export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
       note:        z.string().max(500).optional(),
       from:        z.string().max(20).optional(),
       to:          z.string().max(20).optional(),
+      // true → ritorna le bozze complete (con dati) per la pagina Ricerca
+      withData:    z.enum(['true', 'false']).optional(),
     }).parse(req.query)
     const userId = req.user!.isAdmin ? undefined : req.user!.id
-    return reply.send(await repo.search({ ...q, userId }))
+    const opts = { ...q, userId }
+    return reply.send(
+      q.withData === 'true' ? await repo.searchFull(opts) : await repo.search(opts),
+    )
   })
 
   // GET /:id — admin può accedere a qualsiasi bozza; utente solo la propria

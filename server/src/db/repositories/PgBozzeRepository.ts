@@ -137,7 +137,8 @@ export class PgBozzeRepository implements IBozzeRepository {
    * · full-text (token AND) → ogni token nel nome liquidazione o in un gruppo.
    * ILIKE = case-insensitive (accenti non normalizzati lato DB).
    */
-  async search(o: BozzaSearchOpts): Promise<BozzaSummaryRow[]> {
+  /** Costruisce la clausola WHERE condivisa (senza la keyword WHERE). */
+  private searchWhere(o: BozzaSearchOpts): SQL {
     const conds: SQL[] = []
     if (o.userId) conds.push(sql`b.created_by = ${o.userId}`)
     if (o.stato)  conds.push(sql`b.stato = ${o.stato}`)
@@ -158,13 +159,28 @@ export class PgBozzeRepository implements IBozzeRepository {
 
     // haystack di un dettaglio (nome liquidazione incluso) per il full-text
     const hay = sql`(coalesce(b.nome,'') || ' ' || coalesce(d->>'nomeDescrittivo','') || ' ' || coalesce(d->>'voce','') || ' ' || coalesce(d->>'capitolo','') || ' ' || coalesce(d->>'identificativoProvvedimento','') || ' ' || coalesce(d->>'centroCosto','') || ' ' || coalesce(d->>'note','') || ' ' || coalesce(d->>'competenzaLiquidazione',''))`
+    // haystack di un nominativo (per cercare per matricola/cognome/ruolo)
+    const hayNom = sql`(coalesce(n->>'matricola','') || ' ' || coalesce(n->>'cognomeNome','') || ' ' || coalesce(n->>'ruolo',''))`
     for (const tok of (o.text ?? '').trim().split(/\s+/).filter(Boolean)) {
       const pat = `%${tok}%`
-      conds.push(sql`(b.nome ILIKE ${pat} OR EXISTS (SELECT 1 FROM jsonb_array_elements(b.dati->'dettagli') d WHERE ${hay} ILIKE ${pat}))`)
+      conds.push(sql`(
+        b.nome ILIKE ${pat}
+        OR EXISTS (SELECT 1 FROM jsonb_array_elements(b.dati->'dettagli') d WHERE ${hay} ILIKE ${pat})
+        OR EXISTS (SELECT 1 FROM jsonb_array_elements(b.dati->'nominativi') n WHERE ${hayNom} ILIKE ${pat})
+      )`)
     }
 
-    const where = conds.length ? sql`WHERE ${sql.join(conds, sql` AND `)}` : sql``
+    return conds.length ? sql.join(conds, sql` AND `) : sql`TRUE`
+  }
 
+  /**
+   * Ricerca server-side sul JSONB `dati.dettagli` — ritorna solo i riepiloghi
+   * (nessun `dati` sul filo). I campi ricercabili del gruppo sono in chiaro
+   * (solo i CF sono cifrati), quindi la query è diretta.
+   * ILIKE = case-insensitive (accenti non normalizzati lato DB).
+   */
+  async search(o: BozzaSearchOpts): Promise<BozzaSummaryRow[]> {
+    const where = this.searchWhere(o)
     const rows = await this.db.execute(sql`
       SELECT b.id, b.nome, b.stato,
              b.protocollo_display,
@@ -176,11 +192,35 @@ export class PgBozzeRepository implements IBozzeRepository {
              b.updated_at
       FROM bozze b
       LEFT JOIN users u ON u.id = b.created_by
-      ${where}
+      WHERE ${where}
       ORDER BY b.updated_at DESC
     `)
-
     return (rows as unknown as SummaryRowShape[]).map(toSummaryRow)
+  }
+
+  /**
+   * Come search() ma ritorna le bozze COMPLETE (con `dati`, CF decifrati):
+   * usata dalla pagina Ricerca, che deve costruire righe/report/export solo
+   * sulle liquidazioni corrispondenti.
+   */
+  async searchFull(o: BozzaSearchOpts): Promise<BozzaRow[]> {
+    const where = this.searchWhere(o)
+    const rows = await this.db.execute(sql`
+      SELECT b.id, b.nome, b.stato,
+             b.protocollo_display,
+             b.dati,
+             b.data_liquidazione,
+             b.id_liquidazione_csa,
+             b.created_by,
+             u.username AS created_by_username,
+             b.created_at,
+             b.updated_at
+      FROM bozze b
+      LEFT JOIN users u ON u.id = b.created_by
+      WHERE ${where}
+      ORDER BY b.updated_at DESC
+    `)
+    return (rows as unknown as RowShape[]).map(toRow)
   }
 
   async findById(id: string): Promise<BozzaRow | null> {
