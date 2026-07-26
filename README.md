@@ -101,7 +101,8 @@ payroll-gang-suite/
 - **Export TXT Ruoli** — file per ruolo con deduplicazione matricole
 - **Comunicazioni** — generazione email con allegato PDF nominale
 - **Gestione utenti** — admin panel, TOTP onboarding, ruoli admin/base, lockout anti-brute-force
-- **Certificati giuridico-stipendiali** — upload cedolino Cineca (PDF) → parsing dinamico per-sezione → ricalcolo per categoria (verificato al centesimo) → generazione DOCX con stampa unione (segnaposto `{{path}}`, tag genere `[[m|f]]`), protocollo progressivo atomico per anno, template editabili (CRUD)
+- **Certificati giuridico-stipendiali** — **doppia sorgente**: (a) upload cedolino Cineca (PDF) → parsing dinamico per-sezione; (b) **Recupera cedolino da API** (anno/mese/matricola) → costruzione dagli aggregati del liquidato CINECA. In entrambi i casi ricalcolo per categoria (verificato al centesimo) → generazione DOCX con stampa unione (segnaposto `{{path}}`, tag genere `[[m|f]]`), protocollo progressivo atomico per anno, template editabili (CRUD)
+- **Verifica liquidato** *(admin)* — confronto del liquidato CINECA (`/liquidazioni/liquidato/dettaglio`) con gli invii PGS ricostruiti (join per `matricola|voce|capitolo|dataCompVoce|riferimento`), classificazione NUOVO / CONGUAGLIO / STORNO / RETTIFICA; ogni lettura è auditata
 - **PDF Region Editor** *(in rollout, kill-switch off)* — strumento admin: disegno regioni di riconoscimento layout direttamente sul cedolino renderizzato (canvas), template versionati e immutabili riusabili per l'estrazione automatica delle voci
 
 ---
@@ -117,7 +118,9 @@ Genera certificati a partire dai cedolini Cineca, replicando le regole di calcol
 - **Protocollo atomico** — `AAAA/NNN` assegnato in transazione via `certificato_progressivi` (UPSERT `ultimo+1`), nessuna collisione in concorrenza.
 - **Audit** — `CERTIFICATO_CREATO/SCARICATO`, `TEMPLATE_*` nell'audit log append-only.
 
-**API** (tutte sotto `/api/v1`, JWT): `POST /certificati/parse` (PDF base64, validazione magic bytes `%PDF`, mai su disco), `POST /certificati` (crea + DOCX), `GET /certificati`, `GET /certificati/:id/docx`, CRUD `/templati-certificato` (scrittura admin).
+- **Sorgente API (liquidato)** (`liquidatoAggregatiToCedolino.ts` + `certificatoDaAggregati.ts`) — in alternativa al PDF, il cedolino è ricostruito dagli **aggregati** del liquidato CINECA (`01096` lordo, `00990` previdenziali, `00991` fiscali, `00994` extraerariali), **indipendenti dal ruolo**, con inglobamento addizionali (`00816/01797/02787`) nelle fiscali e Abb.TFR (`01323`, 2,5% sull'80% dell'imponibile) nelle previdenziali. Selezione del mese corrente = capitolo `000100` **e** `flagc=0`. Auto-controllo di **quadratura** col netto in busta (voce `03003`) esposto in UI. La matematica del certificato resta `computeCertificato()` (identica al percorso PDF).
+
+**API** (tutte sotto `/api/v1`, JWT): `POST /certificati/parse` (PDF base64, validazione magic bytes `%PDF`, mai su disco), `POST /certificati/da-liquidato` (anno/mese/matricola → CedolinoParsed dagli aggregati, **admin + audit**), `POST /certificati` (crea + DOCX), `GET /certificati`, `GET /certificati/:id/docx`, CRUD `/templati-certificato` (scrittura admin).
 
 **Schema DB**: tabelle e seed template inclusi in `server/sql/setup.sql` (consolidato). La migrazione storica `0005_certificati.sql` resta solo come riferimento del DB di produzione esistente.
 
@@ -125,6 +128,19 @@ Genera certificati a partire dai cedolini Cineca, replicando le regole di calcol
 ```bash
 CEDOLINO_SAMPLE="/percorso/Cedolino_....pdf" npm run test --workspace=server
 ```
+
+---
+
+## Sezione Verifica liquidato
+
+*(admin)* Riconcilia ciò che l'ateneo ha **inviato** (PGS) con ciò che CINECA ha **liquidato**.
+
+- **Proxy server-side** (`server/src/routes/verificaLiquidato.ts`) verso `GET /v1/liquidazioni/liquidato/dettaglio` — nessuna credenziale CINECA lato client; **solo admin**; ogni lettura logga `CINECA_LIQUIDATO_LOOKUP` nell'audit.
+- **Ricostruzione invii** (`services/verificaLiquidato/riconciliazione.ts`) — il liquidato è denormalizzato (voci input + righe derivate contributi/ritenute): si filtra alle voci input, si nettano conguagli tariffa (`flagc 5/6`) e storni, e si ricostruiscono gli invii PGS. Chiave di join: `matricola | voce | capitolo | dataCompVoce | riferimento-normalizzato` (la competenza è `dataCompVoce`, **non** anno/mese di erogazione; `idContrattoCsa` è sempre 0 → inutilizzabile).
+- **Encoding-safe** — i `riferimento` arrivano in mojibake: `normRiferimento` applica NFD + rimozione diacritici/non-ASCII prima del confronto.
+- **Classi**: NUOVO, CONGUAGLIO_TARIFFA, STORNO, RETTIFICA_ANNULLO, RETTIFICA.
+
+**API** (`/api/v1/verifica-liquidato`, JWT + admin): `GET /dettaglio?anno&mese&matricola` (dettaglio + ricostruzione), `POST /riconcilia` (`{…, righePGS[]}` → abbinamenti value-aware, soli-PGS, soli-CINECA, ambigui).
 
 ---
 
@@ -280,6 +296,12 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 ---
 
 ## Changelog
+
+### 26.07.26
+**Feature — Certificato da API (liquidato) + Verifica liquidato**
+- **Certificati, seconda sorgente**: oltre all'upload PDF, nuovo pulsante **«Recupera cedolino» da API** (anno/mese/matricola) che costruisce il cedolino dagli **aggregati** del liquidato CINECA — `01096` lordo, `00990` previdenziali, `00991` fiscali, `00994` extraerariali — **indipendenti dal ruolo** (ND/PO). Inglobamento addizionali (`00816/01797/02787`) nelle fiscali e Abb.TFR (`01323`, 2,5% sull'80% dell'imponibile) nelle previdenziali; selezione mese corrente = capitolo `000100` **e** `flagc=0`. Badge di **quadratura** col netto in busta (voce `03003`). La matematica resta `computeCertificato()` — identica al percorso PDF (validato al centesimo su 4 cedolini reali, ruoli ND+PO). Nuovo endpoint `POST /api/v1/certificati/da-liquidato` (admin + audit).
+- **Nuova sezione «Verifica liquidato»** *(admin)*: riconcilia il liquidato CINECA con gli invii PGS ricostruiti (join `matricola|voce|capitolo|dataCompVoce|riferimento`, netting conguagli/storni, encoding-safe), classi NUOVO/CONGUAGLIO/STORNO/RETTIFICA. Endpoint `GET /api/v1/verifica-liquidato/dettaglio` e `POST /riconcilia`, entrambi admin + audit (`CINECA_LIQUIDATO_LOOKUP`).
+- **Note**: adapter `liquidatoAggregatiToCedolino.ts` + motore `certificatoDaAggregati.ts` con test (dati sintetici); nessun dato personale nei file versionati.
 
 ### 26.07.23
 **Fix — Ricerca liquidazioni (Dashboard + Ricerca)**

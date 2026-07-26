@@ -37,6 +37,15 @@ export default function CertificatiPage() {
   const [generating, setGenerating] = useState(false)
   const [dragOver, setDragOver]   = useState(false)
 
+  // Sorgente cedolino: PDF (upload) oppure API liquidato (anno/mese/matricola).
+  const [fonte, setFonte] = useState<'pdf' | 'api'>('pdf')
+  const nowMese = String(new Date().getMonth() + 1).padStart(2, '0')
+  const [liqAnno, setLiqAnno] = useState(String(new Date().getFullYear()))
+  const [liqMese, setLiqMese] = useState(nowMese)
+  const [liqMatricola, setLiqMatricola] = useState('')
+  const [recupero, setRecupero] = useState(false)
+  const [quadratura, setQuadratura] = useState<boolean | null>(null)
+
   const [templates, setTemplates] = useState<TemplateApi[]>([])
   const [templateId, setTemplateId] = useState('')
   const [sigla, setSigla]         = useState('')
@@ -97,6 +106,25 @@ export default function CertificatiPage() {
     if (file) void handleFile(file)
   }
 
+  // ── recupera cedolino da API liquidato ──────────────────────
+  async function handleRecuperaCedolino() {
+    if (!/^\d{4}$/.test(liqAnno) || !/^\d{2}$/.test(liqMese) || !liqMatricola.trim()) {
+      showToast('Compila anno (AAAA), mese (MM) e matricola', 'error'); return
+    }
+    setRecupero(true); setParsed(null); setQuadratura(null)
+    try {
+      const res = await certificatiApi.daLiquidato(liqAnno, liqMese, liqMatricola.trim())
+      setParsed(res.parsed)
+      setQuadratura(res.quadratura)
+      showToast(res.quadratura ? 'Cedolino recuperato (quadra col netto)' : 'Cedolino recuperato — verifica il netto', res.quadratura ? 'success' : 'info')
+    } catch (err) {
+      const code = err instanceof ApiError ? err.code : 'ERRORE'
+      showToast(`Recupero fallito: ${code}`, 'error')
+    } finally {
+      setRecupero(false)
+    }
+  }
+
   // ── helpers editing anteprima ───────────────────────────────
   function setAnag(field: keyof CedolinoParsedApi['anagrafica'], value: string) {
     setParsed(p => p ? { ...p, anagrafica: { ...p.anagrafica, [field]: value } } : p)
@@ -129,6 +157,7 @@ export default function CertificatiPage() {
       downloadDocx(created.docx.base64, created.docx.filename)
       showToast(`Certificato ${created.protocollo} generato`, 'success')
       setParsed(null)
+      setQuadratura(null)
       setSigla('')
       refreshLista()
     } catch (err) {
@@ -184,37 +213,79 @@ export default function CertificatiPage() {
         )}
       </div>
 
-      {/* Upload */}
+      {/* Sorgente + Upload */}
       {!parsed && (
-        <div
-          onDragOver={e => { e.preventDefault(); setDragOver(true) }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={onDrop}
-          className={`rounded-xl border-2 border-dashed p-10 text-center transition-colors
-            ${dragOver ? 'border-indigo-500 bg-indigo-500/5' : 'border-slate-700 bg-slate-900/40'}`}
-        >
-          <input
-            ref={fileRef} type="file" accept="application/pdf" className="hidden"
-            onChange={e => { const f = e.target.files?.[0]; if (f) void handleFile(f); e.target.value = '' }}
-          />
-          <p className="text-slate-300 mb-2">Trascina qui il cedolino PDF</p>
-          <p className="text-slate-600 text-sm mb-4">oppure</p>
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={parsing}
-            className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium disabled:opacity-50"
-          >
-            {parsing ? 'Analisi in corso…' : 'Scegli file'}
-          </button>
+        <div className="space-y-4">
+          {/* Selettore sorgente */}
+          <div className="inline-flex rounded-lg border border-slate-700 p-0.5 bg-slate-900/40">
+            <button
+              onClick={() => setFonte('pdf')}
+              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${fonte === 'pdf' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+            >Da PDF</button>
+            <button
+              onClick={() => setFonte('api')}
+              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${fonte === 'api' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+            >Da cedolino (API)</button>
+          </div>
+
+          {fonte === 'pdf' ? (
+            <div
+              onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={onDrop}
+              className={`rounded-xl border-2 border-dashed p-10 text-center transition-colors
+                ${dragOver ? 'border-indigo-500 bg-indigo-500/5' : 'border-slate-700 bg-slate-900/40'}`}
+            >
+              <input
+                ref={fileRef} type="file" accept="application/pdf" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) void handleFile(f); e.target.value = '' }}
+              />
+              <p className="text-slate-300 mb-2">Trascina qui il cedolino PDF</p>
+              <p className="text-slate-600 text-sm mb-4">oppure</p>
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={parsing}
+                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium disabled:opacity-50"
+              >
+                {parsing ? 'Analisi in corso…' : 'Scegli file'}
+              </button>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+              <p className="text-slate-300 text-sm mb-3">Recupera il cedolino direttamente dal liquidato CINECA (mese di erogazione corrente).</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end">
+                <Field label="Anno (AAAA)" value={liqAnno} onChange={setLiqAnno} />
+                <Field label="Mese (MM)"  value={liqMese} onChange={setLiqMese} />
+                <Field label="Matricola"  value={liqMatricola} onChange={setLiqMatricola} />
+                <button
+                  onClick={handleRecuperaCedolino}
+                  disabled={recupero}
+                  className="h-[38px] px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium disabled:opacity-50"
+                >
+                  {recupero ? 'Recupero…' : 'Recupera cedolino'}
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-600 mt-2">Solo admin. I dati anagrafici vengono precompilati dal registro PGS e sono modificabili in anteprima.</p>
+            </div>
+          )}
         </div>
       )}
 
       {/* Anteprima editabile */}
       {parsed && ana && cert && (
         <div className="space-y-5">
-          <div className="flex items-center justify-between">
-            <h2 className="text-white font-medium">Anteprima dati estratti</h2>
-            <button onClick={() => setParsed(null)} className="text-sm text-slate-400 hover:text-white">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3">
+              <h2 className="text-white font-medium">Anteprima dati estratti</h2>
+              {quadratura !== null && (
+                <span className={`text-xs px-2 py-0.5 rounded-full border ${quadratura
+                  ? 'border-emerald-700/50 bg-emerald-600/10 text-emerald-300'
+                  : 'border-amber-700/50 bg-amber-600/10 text-amber-300'}`}>
+                  {quadratura ? '✓ Netto quadra col liquidato' : '⚠ Netto da verificare'}
+                </span>
+              )}
+            </div>
+            <button onClick={() => { setParsed(null); setQuadratura(null) }} className="text-sm text-slate-400 hover:text-white">
               Annulla / nuovo cedolino
             </button>
           </div>

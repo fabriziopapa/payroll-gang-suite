@@ -34,6 +34,7 @@ export type PageId =
   | 'audit'
   | 'certificati'
   | 'certificati-template'
+  | 'verifica-liquidato'
   | 'pdf-region-templates'
   | 'pdf-region-editor'
 

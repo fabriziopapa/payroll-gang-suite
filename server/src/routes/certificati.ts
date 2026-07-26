@@ -21,8 +21,17 @@ import { PgTemplatiCertificatoRepository } from '../db/repositories/PgTemplatiCe
 import { PgAuditRepository } from '../db/repositories/PgAuditRepository.js'
 import { parseCedolino } from '../services/cedolino/parser.js'
 import { buildCertificatoDocx } from '../services/certificato/docx.js'
-import type { CedolinoParsed } from '../services/cedolino/types.js'
+import type { CedolinoParsed, AnagraficaCedolino } from '../services/cedolino/types.js'
 import type { CertificatoTemplate, CertificatoMeta } from '../services/certificato/types.js'
+import { PgAnagraficheRepository } from '../db/repositories/PgAnagraficheRepository.js'
+import { liquidatoAggregatiToCedolino } from '../services/certificato/liquidatoAggregatiToCedolino.js'
+import {
+  getLiquidatoDettaglio, CinecaApiError, CinecaNotConfiguredError,
+} from '../services/cinecaService.js'
+import { cinecaConfigured } from '../config/env.js'
+
+const MESI_IT = ['GENNAIO', 'FEBBRAIO', 'MARZO', 'APRILE', 'MAGGIO', 'GIUGNO',
+  'LUGLIO', 'AGOSTO', 'SETTEMBRE', 'OTTOBRE', 'NOVEMBRE', 'DICEMBRE']
 
 const MAX_PDF_BYTES = 8 * 1024 * 1024
 
@@ -126,6 +135,59 @@ export async function certificatiRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(422).send({ error: 'PARSING_FALLITO' })
     }
     return reply.send(parsed)
+  })
+
+  // ── POST /da-liquidato — costruisce il cedolino dagli AGGREGATI dell'API ─
+  // Sorgente ALTERNATIVA al PDF: anno/mese/matricola → liquidato CINECA →
+  // CedolinoParsed (stessa shape di /parse). PII/CINECA ⇒ admin + audit.
+  const anagRepo = new PgAnagraficheRepository(app.db)
+  app.post('/da-liquidato', { preHandler: [app.authenticate, requireAdmin] }, async (req, reply) => {
+    const q = z.object({
+      anno:      z.string().regex(/^\d{4}$/),
+      mese:      z.string().regex(/^\d{2}$/),
+      matricola: z.string().min(1).max(20),
+    }).parse(req.body)
+
+    await audit.log({
+      userId: req.user?.id, azione: 'CINECA_LIQUIDATO_LOOKUP',
+      entita: 'certificato-da-liquidato', dettagli: { ...q },
+      ip: req.ip, userAgent: req.headers['user-agent'],
+    })
+
+    let dettaglio
+    try {
+      dettaglio = await getLiquidatoDettaglio(q)
+    } catch (err) {
+      if (!cinecaConfigured || err instanceof CinecaNotConfiguredError)
+        return reply.code(503).send({ error: 'CINECA_NON_CONFIGURATO' })
+      if (err instanceof CinecaApiError) return reply.code(502).send({ error: 'CINECA_API_ERROR' })
+      throw err
+    }
+    if (dettaglio.length === 0) return reply.code(404).send({ error: 'LIQUIDATO_VUOTO' })
+
+    // Anagrafica dal registro PGS (best-effort: l'operatore completa in anteprima).
+    const rows = await anagRepo.findByMatricola(q.matricola)
+    const row = rows.find(r => !r.finRap) ?? rows[rows.length - 1] ?? null
+    const meseIdx = parseInt(q.mese, 10) - 1
+    const anagrafica: AnagraficaCedolino = {
+      periodo_retribuzione: `${MESI_IT[meseIdx] ?? q.mese} ${q.anno}`,
+      matricola:            q.matricola,
+      cognome:              row?.cognome ?? row?.cognNome ?? null,
+      nome:                 row?.nome ?? null,
+      codice_fiscale:       row?.codFis ?? null,
+      data_nascita:         row?.dtNascita ?? null,
+      luogo_nascita:        null,
+      inquadramento:        row?.druolo ?? row?.ruolo ?? null,
+      area_profilo:         null,
+      ruolo:                row?.ruolo ?? null,
+      inizio_rapporto:      row?.decorInq ?? null,
+      anzianita_servizio:   null,
+      afferenza:            null,
+      sede:                 null,
+    }
+
+    const { parsed, quadratura, nettoCedolino } = liquidatoAggregatiToCedolino(dettaglio, { anagrafica })
+    return reply.send({ parsed, quadratura, nettoCedolino })
   })
 
   // ── POST / — crea record (protocollo atomico) + genera DOCX ────────────

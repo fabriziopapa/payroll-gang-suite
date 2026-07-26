@@ -53,6 +53,16 @@ export interface RisultatoCertificatoAggregati {
   quadratura: boolean
   /** Competenze del mese corrente, per la tabella RETRIBUZIONE (informativo). */
   retribuzione: RigaRetribuzione[]
+  /** Componenti aggregate individuali — per costruire un CedolinoParsed coerente. */
+  componenti: {
+    lordo:            number   // 01096
+    fiscaliNette:     number   // 00991
+    addizionali:      number   // Σ 00816/01797/02787
+    addizionaliRighe: { codice: string; valore: number }[]
+    previdenziali:    number   // 00990
+    abbTfr:           number   // 01323
+    extraerariali:    number   // 00994
+  }
   scope: { capitolo: string; flagc: string }
 }
 
@@ -83,9 +93,13 @@ export function certificatoDaAggregati(
   const sumVoci  = (codes: readonly string[]) =>
     codes.reduce((a, c) => a.plus(sumVoce(c)), new Decimal(0))
 
-  const lordo = sumVoce(VOCE_LORDO)
-  const fisc  = sumVoce(VOCE_FISCALI).plus(sumVoci(VOCI_ADDIZIONALI))
-  const prev  = sumVoce(VOCE_PREVIDENZIALI).plus(sumVoce(VOCE_ABB_TFR))
+  const lordo        = sumVoce(VOCE_LORDO)
+  const fiscaliNette = sumVoce(VOCE_FISCALI)
+  const addizionali  = sumVoci(VOCI_ADDIZIONALI)
+  const previdenziali = sumVoce(VOCE_PREVIDENZIALI)
+  const abbTfr       = sumVoce(VOCE_ABB_TFR)
+  const fisc  = fiscaliNette.plus(addizionali)
+  const prev  = previdenziali.plus(abbTfr)
   const extra = sumVoce(VOCE_EXTRAERARIALI)
   const nettoLegge  = lordo.minus(fisc).minus(prev)
   const nettoPagare = nettoLegge.minus(extra)
@@ -124,5 +138,17 @@ export function certificatoDaAggregati(
     settimo:                money(nettoLegge.div(7)),
   }
 
-  return { certificato, nettoCedolino, quadratura, retribuzione, scope: { capitolo, flagc } }
+  const componenti = {
+    lordo:         money(lordo) ?? 0,
+    fiscaliNette:  money(fiscaliNette) ?? 0,
+    addizionali:   money(addizionali) ?? 0,
+    addizionaliRighe: VOCI_ADDIZIONALI
+      .map(c => ({ codice: c, valore: money(sumVoce(c)) ?? 0 }))
+      .filter(r => r.valore !== 0),
+    previdenziali: money(previdenziali) ?? 0,
+    abbTfr:        money(abbTfr) ?? 0,
+    extraerariali: money(extra) ?? 0,
+  }
+
+  return { certificato, nettoCedolino, quadratura, retribuzione, componenti, scope: { capitolo, flagc } }
 }

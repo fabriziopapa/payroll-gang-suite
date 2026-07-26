@@ -33,6 +33,7 @@ import ViewerPage         from './pages/ViewerPage'
 import RicercaPage        from './pages/RicercaPage'
 import CertificatiPage    from './pages/CertificatiPage'
 import CertificatiTemplatePage from './pages/CertificatiTemplatePage'
+import VerificaLiquidatoPage from './pages/VerificaLiquidatoPage'
 import PdfRegionTemplatesPage from './pages/PdfRegionTemplatesPage'
 
 // Lazy: unica pagina che porta pdfjs-dist (canvas rendering, Step 7/usePdfDocument)
@@ -271,6 +272,7 @@ export default function App() {
       {currentPage === 'ricerca'      && <RicercaPage />}
       {currentPage === 'certificati'  && <CertificatiPage />}
       {currentPage === 'certificati-template' && <CertificatiTemplatePage />}
+      {currentPage === 'verifica-liquidato' && user?.isAdmin && <VerificaLiquidatoPage />}
       {currentPage === 'pdf-region-templates' && <PdfRegionTemplatesPage />}
       {currentPage === 'pdf-region-editor' && user?.isAdmin && (
         <Suspense fallback={<PdfEditorLoadingFallback />}>

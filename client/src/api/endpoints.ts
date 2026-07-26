@@ -562,12 +562,26 @@ export interface CreaCertificatoBody {
   bolloTesto?:    string
 }
 
+export interface CedolinoDaLiquidatoApi {
+  parsed:        CedolinoParsedApi
+  /** true se il netto ricalcolato quadra con la voce 03003 del liquidato. */
+  quadratura:    boolean
+  nettoCedolino: number | null
+}
+
 export const certificatiApi = {
   /** Estrae i dati dal PDF (base64). Nessuna persistenza. */
   parse: (pdfBase64: string) =>
     apiFetch<CedolinoParsedApi>('/certificati/parse', {
       method: 'POST',
       body:   JSON.stringify({ pdf: pdfBase64 }),
+    }),
+
+  /** Costruisce il cedolino dagli aggregati del liquidato CINECA (admin). */
+  daLiquidato: (anno: string, mese: string, matricola: string) =>
+    apiFetch<CedolinoDaLiquidatoApi>('/certificati/da-liquidato', {
+      method: 'POST',
+      body:   JSON.stringify({ anno, mese, matricola }),
     }),
 
   /** Crea record (protocollo atomico) + genera DOCX. */
@@ -765,4 +779,61 @@ export const settingsApi = {
   // Senza autenticazione — espone solo chiavi pubbliche (es. turnstileEnabled)
   getPublic: () =>
     apiFetch<{ turnstileEnabled: boolean }>('/settings/public'),
+}
+
+// ── Verifica liquidato (CINECA) ──────────────────────────────
+
+export interface LiquidatoVoceApi {
+  flVoce:        boolean
+  capitolo:      string
+  flagc:         string
+  voce:          string
+  progrVoce:     string
+  dataCompVoce:  string
+  aliquota:      number
+  parti:         number
+  importo:       number
+  importoTotale: number
+  riferimento:   string | null
+  progrLiquidazione: string
+}
+
+export interface RigaRicostruitaApi {
+  chiave:            string
+  matricola:         string
+  voce:              string
+  capitolo:          string
+  dataCompVoce:      string
+  riferimento:       string | null
+  modalita:          'importo' | 'parti'
+  nRighe:            number
+  tipo:              string
+  importoTotale?:    number
+  parti?:            number
+  importoUnitario?:  number
+  valore?:           number
+  valoreNetto?:      number
+}
+
+export interface RicostruzioneApi {
+  inviiPGS:   RigaRicostruitaApi[]
+  conguagli:  RigaRicostruitaApi[]
+  storni:     RigaRicostruitaApi[]
+  rettifiche: RigaRicostruitaApi[]
+}
+
+export interface LiquidatoDettaglioApi {
+  anno:          string
+  mese:          string
+  matricola:     string
+  dettaglio:     LiquidatoVoceApi[]
+  ricostruzione: RicostruzioneApi
+}
+
+export const verificaLiquidatoApi = {
+  /** Dettaglio liquidato + ricostruzione invii PGS (admin). */
+  dettaglio: (anno: string, mese: string, matricola: string) => {
+    const q = new URLSearchParams({ anno, mese, matricola })
+    return apiFetch<LiquidatoDettaglioApi>(`/verifica-liquidato/dettaglio?${q.toString()}`)
+  },
 }
