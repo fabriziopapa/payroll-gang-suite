@@ -194,7 +194,7 @@ export interface BozzaRow {
   dati:               unknown
   /** ISO YYYY-MM-DD — valorizzata all'archiviazione */
   dataLiquidazione:   string | null
-  /** ID liquidazione CSA, es. "1ND001950001220240442801" */
+  /** ID liquidazione CSA, es. "1ND999999001220240442801" */
   idLiquidazioneCsa:  string | null
   createdBy:          string | null
   createdByUsername:  string | null

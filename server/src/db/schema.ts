@@ -216,7 +216,7 @@ export const bozze = pgTable('bozze', {
    * NULL per le bozze attive e per le archiviate legacy (pre-migrazione 0010).
    */
   dataLiquidazione:  date('data_liquidazione'),
-  /** ID liquidazione generato da CSA, es. "1ND001950001220240442801". Facoltativo. */
+  /** ID liquidazione generato da CSA, es. "1ND999999001220240442801". Facoltativo. */
   idLiquidazioneCsa: varchar('id_liquidazione_csa', { length: 40 }),
   createdBy:         uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   createdAt:         timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

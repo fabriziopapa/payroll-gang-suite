@@ -71,7 +71,7 @@ export interface BozzaApi {
   dati?:              unknown
   /** Data di liquidazione ISO YYYY-MM-DD — valorizzata all'archiviazione */
   dataLiquidazione:   string | null
-  /** ID liquidazione CSA, es. "1ND001950001220240442801" — facoltativo */
+  /** ID liquidazione CSA, es. "1ND999999001220240442801" — facoltativo */
   idLiquidazioneCsa:  string | null
   createdBy:          string | null
   createdByUsername:  string | null

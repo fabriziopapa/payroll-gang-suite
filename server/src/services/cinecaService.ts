@@ -7,6 +7,7 @@
 // ============================================================
 
 import { env, cinecaConfigured, cinecaProxyConfigured } from '../config/env.js'
+import type { LiquidatoVoce } from './verificaLiquidato/types.js'
 
 export class CinecaNotConfiguredError extends Error {
   constructor() {
@@ -196,4 +197,26 @@ export async function getFamiliari(opts: { idAb?: number | null; matricola?: str
     sesso:             (f.sesso as string) ?? null,
     dataNasc:          normDate(f.dataNascita),
   })).filter(f => f.codFisc)
+}
+
+/**
+ * Dettaglio del liquidato di un cedolino:
+ *   GET /v1/liquidazioni/liquidato/dettaglio/?anno=&mese=&matricola=
+ * Ritorna l'array grezzo delle voci (esploso: input + derivate). La
+ * riconciliazione con gli invii PGS è nel service verificaLiquidato.
+ */
+export async function getLiquidatoDettaglio(
+  opts: { anno: string; mese: string; matricola: string },
+): Promise<LiquidatoVoce[]> {
+  if (!cinecaConfigured) throw new CinecaNotConfiguredError()
+  const qs = new URLSearchParams({ anno: opts.anno, mese: opts.mese, matricola: opts.matricola }).toString()
+  const res = await authedGet(`/v1/liquidazioni/liquidato/dettaglio/?${qs}`)
+  if (!res.ok) {
+    throw new CinecaApiError(
+      `Lettura liquidato dettaglio (${opts.matricola} ${opts.anno}/${opts.mese}) fallita (${res.status})`,
+      res.status,
+    )
+  }
+  const body = await res.json()
+  return Array.isArray(body) ? (body as LiquidatoVoce[]) : []
 }

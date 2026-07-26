@@ -95,7 +95,7 @@ export default function ArchiviaLiquidazioneModal({ mode, nome, initialData, onC
             value={idCsa}
             onChange={e => setIdCsa(e.target.value)}
             maxLength={40}
-            placeholder="es. 1ND001950001220240442801"
+            placeholder="es. 1ND999999001220240442801"
             spellCheck={false}
             autoComplete="off"
             className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700

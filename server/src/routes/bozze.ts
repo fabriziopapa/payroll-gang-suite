@@ -100,7 +100,7 @@ export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
   // ── Schema dati di archiviazione ───────────────────────────
   // dataLiquidazione  — obbligatoria (ISO YYYY-MM-DD)
   // idLiquidazioneCsa — facoltativo, ID generato da CSA
-  //                     (es. "1ND001950001220240442801"); integrabile dopo
+  //                     (es. "1ND999999001220240442801"); integrabile dopo
   const LiquidazioneInfoSchema = z.object({
     dataLiquidazione:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data liquidazione non valida (YYYY-MM-DD)'),
     idLiquidazioneCsa: z.string().trim().max(40).optional()
