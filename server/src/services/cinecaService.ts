@@ -209,11 +209,16 @@ export async function getLiquidatoDettaglio(
   opts: { anno: string; mese: string; matricola: string },
 ): Promise<LiquidatoVoce[]> {
   if (!cinecaConfigured) throw new CinecaNotConfiguredError()
-  const qs = new URLSearchParams({ anno: opts.anno, mese: opts.mese, matricola: opts.matricola }).toString()
+  // Matricola canonica CSA-WS/PGS = 6 cifre con zero-padding (come importService):
+  // '1950' → '001950'. Senza padding CINECA risponde in errore (502 a valle).
+  const matricola = /^\d+$/.test(opts.matricola.trim())
+    ? opts.matricola.trim().padStart(6, '0')
+    : opts.matricola.trim()
+  const qs = new URLSearchParams({ anno: opts.anno, mese: opts.mese, matricola }).toString()
   const res = await authedGet(`/v1/liquidazioni/liquidato/dettaglio/?${qs}`)
   if (!res.ok) {
     throw new CinecaApiError(
-      `Lettura liquidato dettaglio (${opts.matricola} ${opts.anno}/${opts.mese}) fallita (${res.status})`,
+      `Lettura liquidato dettaglio (${matricola} ${opts.anno}/${opts.mese}) fallita (${res.status})`,
       res.status,
     )
   }
