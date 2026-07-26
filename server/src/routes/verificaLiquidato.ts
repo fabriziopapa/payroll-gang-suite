@@ -73,11 +73,17 @@ export async function verificaLiquidatoRoutes(app: FastifyInstance): Promise<voi
   })
 }
 
-// Errori CINECA → codice generico, MAI il message interno (può contenere PII/path)
+// Errori CINECA → codice generico + solo lo STATUS numerico (mai il message
+// interno, che può contenere PII/path). Distingue "irraggiungibile" (timeout/
+// geo-block/proxy off → nessuno status) da "errore API" (status upstream).
 function errReply(reply: FastifyReply, err: unknown) {
   if (!cinecaConfigured || err instanceof CinecaNotConfiguredError) {
     return reply.code(503).send({ error: 'CINECA_NON_CONFIGURATO' })
   }
-  if (err instanceof CinecaApiError) return reply.code(502).send({ error: 'CINECA_API_ERROR' })
+  if (err instanceof CinecaApiError) {
+    return err.status != null
+      ? reply.code(502).send({ error: 'CINECA_API_ERROR', status: err.status })
+      : reply.code(504).send({ error: 'CINECA_UNREACHABLE' })
+  }
   throw err
 }

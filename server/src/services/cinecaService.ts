@@ -47,7 +47,10 @@ let cachedToken: string | null = null
 let tokenExpiresAt = 0   // epoch ms
 
 // Timeout per ogni chiamata verso CSA-WS — evita hang illimitati (DoS/UX).
-const FETCH_TIMEOUT_MS = 8000
+// NB: via reverse proxy (geo-block extra-UE) le chiamate CSA-WS sono lente
+// (~8s); il liquidato/dettaglio, con payload grande, sforava gli 8s e veniva
+// abortito → 502. Alzato a 30s (override con CINECA_TIMEOUT_MS se serve).
+const FETCH_TIMEOUT_MS = Number(process.env.CINECA_TIMEOUT_MS) || 30000
 
 // ── Modalità proxy (runtime, toggle 'cinecaUseProxy' in Impostazioni) ─
 // CSA-WS geo-blocca gli IP extra-UE: con proxy attivo le chiamate passano

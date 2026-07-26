@@ -160,7 +160,10 @@ export async function certificatiRoutes(app: FastifyInstance): Promise<void> {
     } catch (err) {
       if (!cinecaConfigured || err instanceof CinecaNotConfiguredError)
         return reply.code(503).send({ error: 'CINECA_NON_CONFIGURATO' })
-      if (err instanceof CinecaApiError) return reply.code(502).send({ error: 'CINECA_API_ERROR' })
+      if (err instanceof CinecaApiError)
+        return err.status != null
+          ? reply.code(502).send({ error: 'CINECA_API_ERROR', status: err.status })
+          : reply.code(504).send({ error: 'CINECA_UNREACHABLE' })
       throw err
     }
     if (dettaglio.length === 0) return reply.code(404).send({ error: 'LIQUIDATO_VUOTO' })

@@ -111,9 +111,13 @@ export default function CertificatiPage() {
     if (!/^\d{4}$/.test(liqAnno) || !/^\d{2}$/.test(liqMese) || !liqMatricola.trim()) {
       showToast('Compila anno (AAAA), mese (MM) e matricola', 'error'); return
     }
+    // Matricola canonica = 6 cifre con zero-padding (001950). Il server la
+    // normalizza comunque, ma la mostriamo già corretta nel campo.
+    const mat = /^\d+$/.test(liqMatricola.trim()) ? liqMatricola.trim().padStart(6, '0') : liqMatricola.trim()
+    if (mat !== liqMatricola) setLiqMatricola(mat)
     setRecupero(true); setParsed(null); setQuadratura(null)
     try {
-      const res = await certificatiApi.daLiquidato(liqAnno, liqMese, liqMatricola.trim())
+      const res = await certificatiApi.daLiquidato(liqAnno, liqMese, mat)
       setParsed(res.parsed)
       setQuadratura(res.quadratura)
       showToast(res.quadratura ? 'Cedolino recuperato (quadra col netto)' : 'Cedolino recuperato — verifica il netto', res.quadratura ? 'success' : 'info')

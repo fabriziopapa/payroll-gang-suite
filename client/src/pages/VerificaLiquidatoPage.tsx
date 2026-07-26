@@ -26,9 +26,12 @@ export default function VerificaLiquidatoPage() {
     if (!/^\d{4}$/.test(anno) || !/^\d{2}$/.test(mese) || !matricola.trim()) {
       showToast('Compila anno (AAAA), mese (MM) e matricola', 'error'); return
     }
+    // Matricola canonica = 6 cifre con zero-padding (001950).
+    const mat = /^\d+$/.test(matricola.trim()) ? matricola.trim().padStart(6, '0') : matricola.trim()
+    if (mat !== matricola) setMatricola(mat)
     setLoading(true); setData(null)
     try {
-      const res = await verificaLiquidatoApi.dettaglio(anno, mese, matricola.trim())
+      const res = await verificaLiquidatoApi.dettaglio(anno, mese, mat)
       setData(res)
       if (res.dettaglio.length === 0) showToast('Nessuna riga nel liquidato per il periodo', 'info')
     } catch (err) {
