@@ -25,10 +25,10 @@ test('aggregati mese corrente: certificato e quadratura con voce 03003', () => {
     riga({ voce: '00994', importoTotale: 80 }),     // extraerariali
     riga({ voce: '00850', importoTotale: 80, riferimento: 'DF@30/06/2030@' }), // dettaglio extra
     riga({ voce: '03003', importoTotale: 570 }),    // netto in busta (quadratura)
-    // rumore che NON deve entrare nel calcolo:
+    // rumore che NON deve entrare nel calcolo (arretrati → flagc '1'):
     riga({ voce: '01096', importoTotale: 999, flagc: '1' }),               // arretrato stesso capitolo
-    riga({ voce: '00991', importoTotale: 999, capitolo: '002296' }),       // run secondario
-    riga({ voce: '00816', importoTotale: 999, capitolo: '000103' }),       // addizionale rateizzata (altro cap.)
+    riga({ voce: '00991', importoTotale: 999, capitolo: '002296', flagc: '1' }), // run secondario
+    riga({ voce: '00816', importoTotale: 999, capitolo: '000103', flagc: '1' }), // addizionale arretrata
   ]
 
   const r = certificatoDaAggregati(dettaglio)

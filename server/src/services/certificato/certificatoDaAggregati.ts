@@ -85,28 +85,55 @@ export function certificatoDaAggregati(
   const capitolo = opts.capitolo ?? '000100'
   const flagc    = opts.flagcCorrente ?? '0'
 
-  const inScope = (v: LiquidatoVoce) => v.flVoce === true && v.capitolo === capitolo && v.flagc === flagc
+  // RUN PRINCIPALE del mese = il progrLiquidazione con il 01096 (lordo) più alto
+  // sul capitolo principale + flagc corrente. Serve a distinguere la liquidazione
+  // ORDINARIA da eventuali CONGUAGLI/arretrati che ricadono sullo STESSO
+  // capitolo/flagc (es. luglio: run "007" ordinaria + run "087" conguaglio, entrambe
+  // su 000100/flagc=0 → senza questo filtro le competenze si raddoppiano).
+  const baseRows = dettaglio.filter(
+    v => v.flVoce === true && v.capitolo === capitolo && v.flagc === flagc && v.voce === VOCE_LORDO,
+  )
+  const runPrincipale: string | undefined = baseRows.length
+    ? baseRows.reduce((best, v) => (v.importoTotale > best.importoTotale ? v : best)).progrLiquidazione
+    : undefined
+  const stessaRun = (v: LiquidatoVoce) => runPrincipale === undefined || v.progrLiquidazione === runPrincipale
+
+  // Scope BASE = capitolo principale (000100) + mese corrente (flagc=0) + run principale:
+  // lordo, previdenziali, fiscali nette, extraerariali, competenze, extra-righe.
+  // Esclude i capitoli-doppione (es. 001277 che replica le competenze), i run
+  // arretrati/conguagli e gli straordinari su altri capitoli (flagc!=0).
+  const inScope = (v: LiquidatoVoce) =>
+    v.flVoce === true && v.capitolo === capitolo && v.flagc === flagc && stessaRun(v)
   const righe   = dettaglio.filter(inScope)
-
-  const sumVoce  = (code: string) =>
+  const sumVoce = (code: string) =>
     righe.filter(v => v.voce === code).reduce((a, v) => a.plus(v.importoTotale), new Decimal(0))
-  const sumVoci  = (codes: readonly string[]) =>
-    codes.reduce((a, c) => a.plus(sumVoce(c)), new Decimal(0))
 
-  const lordo        = sumVoce(VOCE_LORDO)
-  const fiscaliNette = sumVoce(VOCE_FISCALI)
-  const addizionali  = sumVoci(VOCI_ADDIZIONALI)
+  // Scope MESE = mese corrente (flagc=0) + run principale, su QUALSIASI capitolo. Serve per:
+  //  - le ADDIZIONALI (stanno sul capitolo accessorio 000103, non su 000100);
+  //  - il NETTO in busta 03003, ripartito (000100 al lordo, 000103 che sottrae le
+  //    addizionali) → la somma dà il netto reale del cedolino ordinario.
+  // Restano fuori arretrati (flagc!=0) e conguagli (altra run).
+  const righeMese   = dettaglio.filter(v => v.flVoce === true && v.flagc === flagc && stessaRun(v))
+  const sumMese     = (code: string) =>
+    righeMese.filter(v => v.voce === code).reduce((a, v) => a.plus(v.importoTotale), new Decimal(0))
+  const sumMeseMany = (codes: readonly string[]) =>
+    codes.reduce((a, c) => a.plus(sumMese(c)), new Decimal(0))
+
+  const lordo         = sumVoce(VOCE_LORDO)
+  const fiscaliNette  = sumVoce(VOCE_FISCALI)
   const previdenziali = sumVoce(VOCE_PREVIDENZIALI)
-  const abbTfr       = sumVoce(VOCE_ABB_TFR)
+  const abbTfr        = sumVoce(VOCE_ABB_TFR)
+  const extra         = sumVoce(VOCE_EXTRAERARIALI)
+  const addizionali   = sumMeseMany(VOCI_ADDIZIONALI)   // inglobate nelle fiscali
   const fisc  = fiscaliNette.plus(addizionali)
   const prev  = previdenziali.plus(abbTfr)
-  const extra = sumVoce(VOCE_EXTRAERARIALI)
   const nettoLegge  = lordo.minus(fisc).minus(prev)
   const nettoPagare = nettoLegge.minus(extra)
 
-  const nettoCedDec = sumVoce(VOCE_NETTO)
-  const nettoCedolino = righe.some(v => v.voce === VOCE_NETTO) ? money(nettoCedDec) : null
-  const quadratura = nettoCedolino !== null && nettoPagare.minus(nettoCedolino).abs().lte(0.01)
+  // Netto in busta = Σ 03003 del mese corrente su tutti i capitoli.
+  const nettoCedDec   = sumMese(VOCE_NETTO)
+  const nettoCedolino = righeMese.some(v => v.voce === VOCE_NETTO) ? money(nettoCedDec) : null
+  const quadratura    = nettoCedolino !== null && nettoPagare.minus(nettoCedolino).abs().lte(0.01)
 
   // Dettaglio extraerariali (per il template): righe note che compongono 00994.
   const extraRows: ExtraerarialeRiga[] = righe
@@ -143,7 +170,7 @@ export function certificatoDaAggregati(
     fiscaliNette:  money(fiscaliNette) ?? 0,
     addizionali:   money(addizionali) ?? 0,
     addizionaliRighe: VOCI_ADDIZIONALI
-      .map(c => ({ codice: c, valore: money(sumVoce(c)) ?? 0 }))
+      .map(c => ({ codice: c, valore: money(sumMese(c)) ?? 0 }))
       .filter(r => r.valore !== 0),
     previdenziali: money(previdenziali) ?? 0,
     abbTfr:        money(abbTfr) ?? 0,

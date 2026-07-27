@@ -44,6 +44,9 @@ export default function CertificatiPage() {
   const [liqMese, setLiqMese] = useState(nowMese)
   const [liqMatricola, setLiqMatricola] = useState('')
   const [recupero, setRecupero] = useState(false)
+  // Mix: completa l'anagrafica (povera da API) col cedolino PDF, tenendo i numeri API.
+  const anagPdfRef = useRef<HTMLInputElement>(null)
+  const [anagLoading, setAnagLoading] = useState(false)
   const [quadratura, setQuadratura] = useState<boolean | null>(null)
 
   const [templates, setTemplates] = useState<TemplateApi[]>([])
@@ -104,6 +107,25 @@ export default function CertificatiPage() {
     e.preventDefault(); setDragOver(false)
     const file = e.dataTransfer.files?.[0]
     if (file) void handleFile(file)
+  }
+
+  // ── mix: sovrascrive SOLO l'anagrafica leggendola dal cedolino PDF ──────
+  async function handleAnagFromPdf(file: File) {
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      showToast('Seleziona un cedolino PDF', 'error'); return
+    }
+    setAnagLoading(true)
+    try {
+      const base64 = await readFileAsBase64(file)
+      const pdf = await certificatiApi.parse(base64)
+      setParsed(p => p ? { ...p, anagrafica: pdf.anagrafica } : p)
+      showToast('Anagrafica completata dal cedolino PDF (numeri invariati)', 'success')
+    } catch (err) {
+      const code = err instanceof ApiError ? err.code : 'ERRORE'
+      showToast(`Lettura PDF fallita: ${code}`, 'error')
+    } finally {
+      setAnagLoading(false)
+    }
   }
 
   // ── recupera cedolino da API liquidato ──────────────────────
@@ -289,9 +311,16 @@ export default function CertificatiPage() {
                 </span>
               )}
             </div>
-            <button onClick={() => { setParsed(null); setQuadratura(null) }} className="text-sm text-slate-400 hover:text-white">
-              Annulla / nuovo cedolino
-            </button>
+            <div className="flex items-center gap-4">
+              <label className={`text-sm cursor-pointer ${anagLoading ? 'text-slate-500' : 'text-indigo-400 hover:text-indigo-300'}`}>
+                {anagLoading ? 'Lettura PDF…' : 'Completa anagrafica da PDF'}
+                <input ref={anagPdfRef} type="file" accept="application/pdf" className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) void handleAnagFromPdf(f); e.target.value = '' }} />
+              </label>
+              <button onClick={() => { setParsed(null); setQuadratura(null) }} className="text-sm text-slate-400 hover:text-white">
+                Annulla / nuovo cedolino
+              </button>
+            </div>
           </div>
 
           {/* Anagrafica */}
