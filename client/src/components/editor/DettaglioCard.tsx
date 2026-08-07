@@ -9,6 +9,7 @@ import { showToast } from '../ToastManager'
 import { ConfirmDialog } from '../ConfirmDialog'
 import { calcolaImportoCSV, formatEur, finRapWarn, buildCsvRows, serializeCsv, downloadCsv, isImportoAttivo, isPartiAttivo } from '../../utils/biz'
 import type { DettaglioLiquidazione, Nominativo, VoceConfig } from '../../types'
+import { SortableTh, compareNomBy, normalizeSearch, type SortCol } from '../../utils/sorting'
 import { anagraficheApi, cinecaApi, type RuoloAtApiResult } from '../../api/endpoints'
 import ProgressBar from '../ProgressBar'
 import RuoloDisambiguaModal, { type DisambiguaItem } from '../RuoloDisambiguaModal'
@@ -1170,59 +1171,6 @@ function NominativoRow({ nom, dettaglio, cfTag, annoComp, coefficienti, coeffici
       </tr>
     )}
     </>
-  )
-}
-
-// ── Ordinamento e ricerca (helper puri, solo vista) ───────────
-
-type SortCol = 'nominativo' | 'matricola' | 'ruolo' | 'lordo' | 'parti'
-
-const sortCollator = new Intl.Collator('it', { sensitivity: 'base', numeric: true })
-
-function compareNomBy(col: SortCol, a: Nominativo, b: Nominativo): number {
-  switch (col) {
-    case 'nominativo': return sortCollator.compare(a.cognomeNome, b.cognomeNome)
-    case 'matricola':  return sortCollator.compare(a.matricola, b.matricola)
-    case 'ruolo':      return sortCollator.compare(a.ruolo, b.ruolo)
-    case 'lordo':      return a.importoLordo - b.importoLordo
-    case 'parti':      return (a.parti ?? 0) - (b.parti ?? 0)
-  }
-}
-
-/** lowercase + rimozione diacritici: "Buonì" matcha "buoni" */
-function normalizeSearch(s: string): string {
-  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-}
-
-function SortableTh({ label, col, sort, onSort, align = 'left', className = '' }: {
-  label:     string
-  col:       SortCol
-  sort:      { col: SortCol; dir: 'asc' | 'desc' } | null
-  onSort:    (col: SortCol) => void
-  align?:    'left' | 'right'
-  className?: string
-}) {
-  const active = sort?.col === col
-  const arrow  = active ? (sort.dir === 'asc' ? '▲' : '▼') : '⇅'
-  return (
-    <th
-      aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
-      className={`p-0 ${className}`}
-    >
-      <button
-        type="button"
-        onClick={() => onSort(col)}
-        title="Ordina la vista — non modifica l'ordine salvato"
-        className={`w-full flex items-center gap-1 px-4 py-2 text-xs font-medium transition
-          focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 rounded
-          ${align === 'right' ? 'justify-end' : ''}
-          ${active ? 'text-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}
-      >
-        {align === 'right' && <span className={`text-[10px] ${active ? '' : 'text-slate-700'}`} aria-hidden="true">{arrow}</span>}
-        {label}
-        {align === 'left' && <span className={`text-[10px] ${active ? '' : 'text-slate-700'}`} aria-hidden="true">{arrow}</span>}
-      </button>
-    </th>
   )
 }
 

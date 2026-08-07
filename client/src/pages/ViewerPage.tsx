@@ -1,9 +1,12 @@
 // ============================================================
 // PAYROLL GANG SUITE — ViewerPage
-// Visualizzazione sola lettura di una liquidazione archiviata
+// Visualizzazione sola lettura di una liquidazione archiviata.
+// Interattività "solo vista" (come le bozze): ordinamento colonne,
+// chiusura/apertura gruppi (+ comprimi/espandi tutti), ricerca Ctrl+F.
+// L'ordine canonico (export CSV/TXT, totali) resta invariato.
 // ============================================================
 
-import { useMemo, useEffect, useState } from 'react'
+import { useMemo, useEffect, useState, useRef, useCallback } from 'react'
 import { useStore, type BozzaDati } from '../store/useStore'
 import { bozzeApi } from '../api/endpoints'
 import ArchiviaLiquidazioneModal from '../components/ArchiviaLiquidazioneModal'
@@ -12,12 +15,59 @@ import {
   calcolaImportoCSV, calcolaTotali, buildCsvRows,
   serializeCsv, downloadCsv, formatEur,
 } from '../utils/biz'
-import type { DettaglioLiquidazione, Nominativo } from '../types'
+import { SortableTh, compareNomBy, normalizeSearch, type SortCol, type SortState } from '../utils/sorting'
+import type { DettaglioLiquidazione, Nominativo, CoefficienteScorporo } from '../types'
 
 export default function ViewerPage() {
   const { viewerBozza, navigate, settings, loadBozzaInViewer, upsertBozza } = useStore()
   // Modal modifica dati liquidazione (data + ID CSA) su archiviata
   const [editInfo, setEditInfo] = useState(false)
+
+  // ── Vista: collasso per-gruppo + ricerca globale (Ctrl+F) ──
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set())
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [query, setQuery]           = useState('')
+  const [matchPos, setMatchPos]     = useState(0)
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  const dati       = (viewerBozza?.dati ?? {}) as Partial<BozzaDati>
+  const dettagli   = dati.dettagli    ?? []
+  const nominativi = dati.nominativi  ?? []
+
+  // Match ricerca globale: cognome+matricola+ruolo, accent/case-insensitive,
+  // token in AND. Ordine documento (indipendente dal sort dei singoli gruppi).
+  const matches = useMemo(() => {
+    const q = normalizeSearch(query.trim())
+    if (!q) return [] as { detId: string; nomId: string }[]
+    const tokens = q.split(/\s+/)
+    const out: { detId: string; nomId: string }[] = []
+    for (const det of dettagli) {
+      for (const nom of nominativi.filter(n => n.dettaglioId === det.id)) {
+        const hay = normalizeSearch(`${nom.cognomeNome} ${nom.matricola} ${nom.ruolo}`)
+        if (tokens.every(t => hay.includes(t))) out.push({ detId: det.id, nomId: nom.id })
+      }
+    }
+    return out
+  }, [dettagli, nominativi, query])
+
+  const matchSet     = useMemo(() => new Set(matches.map(m => m.nomId)), [matches])
+  const safePos      = matches.length === 0 ? 0 : Math.min(matchPos, matches.length - 1)
+  const currentMatch = matches[safePos] ?? null
+  const currentNomId = currentMatch?.nomId ?? null
+
+  // Espandi il gruppo del match corrente e scrolla alla riga
+  useEffect(() => {
+    if (!currentMatch) return
+    setCollapsedIds(prev => {
+      if (!prev.has(currentMatch.detId)) return prev
+      const next = new Set(prev); next.delete(currentMatch.detId); return next
+    })
+    const id = currentMatch.nomId
+    const t  = setTimeout(() => {
+      rootRef.current?.querySelector(`[data-nom-id="${id}"]`)?.scrollIntoView({ block: 'center' })
+    }, 0)
+    return () => clearTimeout(t)
+  }, [currentMatch])
 
   // Guard: nessuna bozza in viewer → torna alla dashboard
   useEffect(() => {
@@ -26,9 +76,6 @@ export default function ViewerPage() {
 
   if (!viewerBozza) return null
 
-  const dati     = (viewerBozza.dati ?? {}) as Partial<BozzaDati>
-  const dettagli  = dati.dettagli      ?? []
-  const nominativi = dati.nominativi   ?? []
   const protocollo = dati.protocolloDisplay ?? viewerBozza.protocolloDisplay ?? ''
 
   const updatedAt = new Date(viewerBozza.updatedAt).toLocaleDateString('it-IT', {
@@ -40,6 +87,28 @@ export default function ViewerPage() {
         day: '2-digit', month: 'short', year: 'numeric',
       })
     : null
+
+  // ── Ricerca: helper ──────────────────────────────────────────
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false); setQuery(''); setMatchPos(0)
+  }, [])
+  function stepMatch(delta: 1 | -1) {
+    if (matches.length === 0) return
+    setMatchPos(p => (p + delta + matches.length) % matches.length)
+  }
+
+  // ── Collasso: singolo / tutti ────────────────────────────────
+  const allCollapsed = dettagli.length > 0 && dettagli.every(d => collapsedIds.has(d.id))
+  function toggleOne(id: string) {
+    setCollapsedIds(prev => {
+      const n = new Set(prev)
+      if (n.has(id)) n.delete(id); else n.add(id)
+      return n
+    })
+  }
+  function toggleAll() {
+    setCollapsedIds(allCollapsed ? new Set() : new Set(dettagli.map(d => d.id)))
+  }
 
   // ── Export CSV HR ────────────────────────────────────────────
   function handleExportCsv() {
@@ -96,7 +165,7 @@ export default function ViewerPage() {
       )}
 
       {/* ── Area principale ─────────────────────────────────── */}
-      <div className="flex-1 min-w-0 p-4 lg:p-6">
+      <div ref={rootRef} className="flex-1 min-w-0 p-4 lg:p-6">
 
         {/* Banner sola lettura */}
         <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg
@@ -138,7 +207,7 @@ export default function ViewerPage() {
                   </span>
                 </>
               )}
-              {/* Modifica data liquidazione / ID CSA (facoltativo, integrabile dopo) */}
+              {/* Modifica data liquidazione / ID CSA */}
               <button
                 onClick={() => setEditInfo(true)}
                 className="p-1 rounded text-slate-500 hover:text-amber-400 hover:bg-amber-950/30 transition"
@@ -152,8 +221,43 @@ export default function ViewerPage() {
             </div>
           </div>
 
-          {/* Azioni export */}
+          {/* Azioni */}
           <div className="flex items-center gap-2 shrink-0">
+            {/* Ricerca (evidenzia e scrolla) */}
+            {canExport && (
+              <button
+                onClick={() => searchOpen ? closeSearch() : setSearchOpen(true)}
+                title="Cerca nominativo / matricola / ruolo (evidenzia, non nasconde)"
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border transition
+                  ${searchOpen
+                    ? 'bg-indigo-700/30 text-indigo-300 border-indigo-800/50'
+                    : 'bg-slate-800/60 text-slate-400 border-slate-700 hover:text-indigo-300'}`}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
+                </svg>
+                <span className="hidden sm:inline">Cerca</span>
+              </button>
+            )}
+
+            {/* Comprimi / Espandi tutti */}
+            {dettagli.length > 0 && (
+              <button
+                onClick={toggleAll}
+                title={allCollapsed ? 'Espandi tutti i gruppi' : 'Comprimi tutti i gruppi'}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm
+                           bg-slate-800/60 text-slate-400 border border-slate-700
+                           hover:text-slate-200 transition"
+              >
+                <svg className={`w-4 h-4 transition-transform ${allCollapsed ? 'rotate-180' : ''}`}
+                     fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
+                </svg>
+                <span className="hidden sm:inline">{allCollapsed ? 'Espandi tutti' : 'Comprimi tutti'}</span>
+              </button>
+            )}
+
             <button
               onClick={handleExportCsv}
               disabled={!canExport}
@@ -189,6 +293,55 @@ export default function ViewerPage() {
           </div>
         </div>
 
+        {/* Barra ricerca globale (evidenzia-e-scrolla) */}
+        {searchOpen && canExport && (
+          <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg
+                          border border-slate-700 bg-slate-800/40">
+            <svg className="w-3.5 h-3.5 text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
+            </svg>
+            <input
+              autoFocus
+              type="search"
+              value={query}
+              onChange={e => { setQuery(e.target.value); setMatchPos(0) }}
+              onKeyDown={e => {
+                if (e.key === 'Enter')  { e.preventDefault(); stepMatch(e.shiftKey ? -1 : 1) }
+                if (e.key === 'Escape') { e.preventDefault(); closeSearch() }
+              }}
+              placeholder="Cerca nominativo, matricola o ruolo…"
+              aria-label="Cerca nella liquidazione archiviata"
+              className="flex-1 min-w-0 px-2 py-1 rounded bg-slate-800 border border-slate-700
+                         text-white text-sm placeholder-slate-500
+                         focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+            <span aria-live="polite" className="text-xs text-slate-500 shrink-0 font-mono">
+              {query.trim() ? `${matches.length === 0 ? 0 : safePos + 1} di ${matches.length}` : ''}
+            </span>
+            <button type="button" onClick={() => stepMatch(-1)} disabled={matches.length === 0}
+              title="Match precedente (Shift+Invio)"
+              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 transition">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7"/>
+              </svg>
+            </button>
+            <button type="button" onClick={() => stepMatch(1)} disabled={matches.length === 0}
+              title="Match successivo (Invio)"
+              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 transition">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
+              </svg>
+            </button>
+            <button type="button" onClick={closeSearch} title="Chiudi ricerca (Esc)"
+              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700 transition">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+        )}
+
         {/* Gruppi */}
         {dettagli.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -204,6 +357,11 @@ export default function ViewerPage() {
                 nominativi={nominativi.filter(n => n.dettaglioId === det.id)}
                 coefficienti={settings.coefficienti}
                 coefficientiContoTerzi={settings.coefficientiContoTerzi}
+                collapsed={collapsedIds.has(det.id)}
+                onToggleCollapsed={() => toggleOne(det.id)}
+                matchSet={matchSet}
+                currentNomId={currentNomId}
+                searchActive={query.trim().length > 0}
               />
             ))}
           </div>
@@ -223,21 +381,55 @@ export default function ViewerPage() {
 
 // ── ViewerDettaglioCard ───────────────────────────────────────
 
-function ViewerDettaglioCard({ det, idx, nominativi, coefficienti, coefficientiContoTerzi }: {
+function ViewerDettaglioCard({
+  det, idx, nominativi, coefficienti, coefficientiContoTerzi,
+  collapsed, onToggleCollapsed, matchSet, currentNomId, searchActive,
+}: {
   det:                     DettaglioLiquidazione
   idx:                     number
   nominativi:              Nominativo[]
   coefficienti:            Record<string, number>
   coefficientiContoTerzi?: Record<string, number>
+  collapsed:               boolean
+  onToggleCollapsed:       () => void
+  matchSet:                Set<string>
+  currentNomId:            string | null
+  searchActive:            boolean
 }) {
+  // Ordinamento snapshot (solo vista) — identico alle bozze
+  const [sort, setSort] = useState<SortState | null>(null)
+
+  const displayNoms = useMemo(() => {
+    if (!sort) return nominativi
+    const byId    = new Map(nominativi.map(n => [n.id, n]))
+    const ordered = sort.ids.map(id => byId.get(id)).filter((n): n is Nominativo => !!n)
+    if (ordered.length !== nominativi.length) {
+      const seen = new Set(sort.ids)
+      ordered.push(...nominativi.filter(n => !seen.has(n.id)))
+    }
+    return ordered
+  }, [nominativi, sort])
+
+  function handleSortClick(col: SortCol) {
+    setSort(prev => {
+      if (!prev || prev.col !== col) {
+        return { col, dir: 'asc', ids: [...nominativi].sort((a, b) => compareNomBy(col, a, b)).map(n => n.id) }
+      }
+      if (prev.dir === 'asc') {
+        return { col, dir: 'desc', ids: [...nominativi].sort((a, b) => compareNomBy(col, b, a)).map(n => n.id) }
+      }
+      return null
+    })
+  }
+
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-      {/* Header gruppo */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-800">
-        <span
-          className="w-3 h-3 rounded-full shrink-0"
-          style={{ backgroundColor: det.colore }}
-        />
+      {/* Header gruppo — click per collasso */}
+      <div
+        className="flex items-center gap-3 px-4 py-3 border-b border-slate-800 cursor-pointer select-none"
+        onClick={onToggleCollapsed}
+      >
+        <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: det.colore }} />
         <div className="flex-1 min-w-0">
           <p className="text-white font-medium text-sm truncate">
             {det.nomeDescrittivo || `Gruppo ${idx + 1}`}
@@ -250,59 +442,78 @@ function ViewerDettaglioCard({ det, idx, nominativi, coefficienti, coefficientiC
           </div>
         </div>
         <span className="shrink-0 text-xs text-slate-500">{nominativi.length} nom.</span>
+        <button
+          onClick={e => { e.stopPropagation(); onToggleCollapsed() }}
+          aria-expanded={!collapsed}
+          className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 transition shrink-0"
+          title={collapsed ? 'Espandi' : 'Comprimi'}
+          aria-label={collapsed ? 'Espandi gruppo' : 'Comprimi gruppo'}
+        >
+          <svg className={`w-4 h-4 transition-transform ${collapsed ? 'rotate-180' : ''}`}
+               fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
+          </svg>
+        </button>
       </div>
 
       {/* Tabella nominativi */}
-      {nominativi.length === 0 ? (
-        <p className="px-4 py-3 text-xs text-slate-600 italic">Nessun nominativo</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-slate-800 text-slate-500">
-                <th className="px-4 py-2 text-left font-medium">Matricola</th>
-                <th className="px-4 py-2 text-left font-medium">Cognome Nome</th>
-                <th className="px-4 py-2 text-left font-medium">Ruolo</th>
-                <th className="px-4 py-2 text-right font-medium">Importo lordo</th>
-                {det.flagScorporo && (
-                  <th className="px-4 py-2 text-right font-medium text-indigo-400">Lordo benef.</th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {nominativi.map(nom => {
-                const csv = calcolaImportoCSV(nom, det, coefficienti as Parameters<typeof calcolaImportoCSV>[2], coefficientiContoTerzi as Parameters<typeof calcolaImportoCSV>[3])
-                return (
-                  <tr key={nom.id} className="border-b border-slate-800/50 hover:bg-slate-800/20 transition">
-                    <td className="px-4 py-2 font-mono text-slate-300">{nom.matricola}</td>
-                    <td className="px-4 py-2 text-slate-300">{nom.cognomeNome}</td>
-                    <td className="px-4 py-2">
-                      <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
-                        {nom.ruolo}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 text-right font-mono text-slate-300">
-                      {formatEur(nom.importoLordo)}
-                    </td>
-                    {det.flagScorporo && (
-                      <td className="px-4 py-2 text-right font-mono text-indigo-400">
-                        {formatEur(csv)}
+      {!collapsed && (
+        nominativi.length === 0 ? (
+          <p className="px-4 py-3 text-xs text-slate-600 italic">Nessun nominativo</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-slate-800 text-slate-500">
+                  <SortableTh label="Matricola"     col="matricola"  sort={sort} onSort={handleSortClick} />
+                  <SortableTh label="Cognome Nome"  col="nominativo" sort={sort} onSort={handleSortClick} />
+                  <SortableTh label="Ruolo"         col="ruolo"      sort={sort} onSort={handleSortClick} />
+                  <SortableTh label="Importo lordo" col="lordo"      sort={sort} onSort={handleSortClick} align="right" />
+                  {det.flagScorporo && (
+                    <th className="px-4 py-2 text-right font-medium text-indigo-400">Lordo benef.</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {displayNoms.map(nom => {
+                  const csv = calcolaImportoCSV(nom, det, coefficienti as Parameters<typeof calcolaImportoCSV>[2], coefficientiContoTerzi as Parameters<typeof calcolaImportoCSV>[3])
+                  const isCurrent = searchActive && nom.id === currentNomId
+                  const isMatch   = searchActive && matchSet.has(nom.id)
+                  const rowCls    = isCurrent
+                    ? 'bg-indigo-500/20'
+                    : isMatch
+                      ? 'bg-amber-500/10'
+                      : 'hover:bg-slate-800/20'
+                  return (
+                    <tr key={nom.id} data-nom-id={nom.id} className={`border-b border-slate-800/50 transition ${rowCls}`}>
+                      <td className="px-4 py-2 font-mono text-slate-300">{nom.matricola}</td>
+                      <td className="px-4 py-2 text-slate-300">{nom.cognomeNome}</td>
+                      <td className="px-4 py-2">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
+                          {nom.ruolo}
+                        </span>
                       </td>
-                    )}
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+                      <td className="px-4 py-2 text-right font-mono text-slate-300">
+                        {formatEur(nom.importoLordo)}
+                      </td>
+                      {det.flagScorporo && (
+                        <td className="px-4 py-2 text-right font-mono text-indigo-400">
+                          {formatEur(csv)}
+                        </td>
+                      )}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
       )}
     </div>
   )
 }
 
 // ── ViewerSidebar ─────────────────────────────────────────────
-
-import type { CoefficienteScorporo } from '../types'
 
 function ViewerSidebar({ dettagli, nominativi, coefficienti, coefficientiContoTerzi }: {
   dettagli:                DettaglioLiquidazione[]
