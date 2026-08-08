@@ -6,6 +6,9 @@
 *.key
 *.p12
 *.pfx
+# .npmrc può contenere token di registry → mai committarlo.
+# Il registry si configura a livello macchina (npm config set registry ...).
+.npmrc
 
 # ── Dipendenze ───────────────────────────────────────────────
 node_modules/
