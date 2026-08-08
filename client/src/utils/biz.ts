@@ -258,13 +258,21 @@ export function formatDateItalian(isoDate: string): string {
 
 /**
  * Escaping CSV: avvolge in virgolette se contiene ; " o newline.
+ *
+ * SEC (F-10): neutralizza la CSV/DDE formula injection. Se il valore inizia
+ * con un carattere che Excel/LibreOffice interpretano come formula (= + - @)
+ * o con TAB/CR, anteponi un apostrofo: forza la cella a testo e l'apostrofo
+ * non viene mostrato. I campi numerici del CSV (importo, parti, segno) NON
+ * passano da qui, quindi gli importi negativi non vengono alterati.
  */
 function csvEscape(value: string): string {
   if (!value) return ''
-  if (value.includes(';') || value.includes('"') || value.includes('\n')) {
-    return `"${value.replace(/"/g, '""')}"`
+  let v = value
+  if (/^[=+\-@\t\r]/.test(v)) v = `'${v}`
+  if (v.includes(';') || v.includes('"') || v.includes('\n')) {
+    return `"${v.replace(/"/g, '""')}"`
   }
-  return value
+  return v
 }
 
 // ── Totalizzatori ─────────────────────────────────────────────

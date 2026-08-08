@@ -38,14 +38,17 @@ export async function cinecaRoutes(app: FastifyInstance): Promise<void> {
 
   const qMatricola = z.object({ matricola: z.string().min(1).max(20) })
 
-  function audit(userId: string | undefined, ip: string, dettagli: Record<string, unknown>) {
-    void auditRepo.log({
+  // F-3: audit degli accessi PII NON best-effort. È atteso (await) e, se la
+  // scrittura del log fallisce, l'eccezione si propaga → l'handler risponde 500
+  // e i dati personali NON vengono restituiti senza traccia (GDPR art. 5(2)/32).
+  async function audit(userId: string | undefined, ip: string, dettagli: Record<string, unknown>) {
+    await auditRepo.log({
       userId: userId ?? undefined,
       azione: 'CINECA_CF_LOOKUP',
       entita: 'cineca',
       dettagli,
       ip,
-    }).catch(() => { /* audit best-effort */ })
+    })
   }
 
   // idAb locale (da SGE) — preferito dall'API v1 familiari
@@ -115,7 +118,7 @@ export async function cinecaRoutes(app: FastifyInstance): Promise<void> {
   // GET /cf?matricola=  — CF dipendente dal dato locale (SGE)
   app.get('/cf', pii, async (request, reply) => {
     const { matricola } = qMatricola.parse(request.query)
-    audit(request.user?.id, request.ip, { endpoint: 'cf', matricola })
+    await audit(request.user?.id, request.ip, { endpoint: 'cf', matricola })
     const rows = await anagRepo.findByMatricola(matricola)
     const codFisc = rows.find(r => r.codFis)?.codFis ?? null
     if (!codFisc) return reply.code(404).send({ error: 'CF_NON_DISPONIBILE' })
@@ -125,7 +128,7 @@ export async function cinecaRoutes(app: FastifyInstance): Promise<void> {
   // GET /familiari?matricola=
   app.get('/familiari', pii, async (request, reply) => {
     const { matricola } = qMatricola.parse(request.query)
-    audit(request.user?.id, request.ip, { endpoint: 'familiari', matricola })
+    await audit(request.user?.id, request.ip, { endpoint: 'familiari', matricola })
     try {
       const { familiari, fromCache } = await resolveNucleo(matricola)
       return reply.send({ matricola, familiari, fromCache })
@@ -139,7 +142,7 @@ export async function cinecaRoutes(app: FastifyInstance): Promise<void> {
     const { matricole } = z.object({
       matricole: z.array(z.string().min(1).max(20)).min(1).max(2000),
     }).parse(request.body)
-    audit(request.user?.id, request.ip, { endpoint: 'cf-bulk', count: matricole.length })
+    await audit(request.user?.id, request.ip, { endpoint: 'cf-bulk', count: matricole.length })
     const map = await anagRepo.getCodFisByMatricole(matricole)
     const out: Record<string, { codFisc: string }> = {}
     for (const [mat, codFisc] of Object.entries(map)) out[mat] = { codFisc }
@@ -153,7 +156,7 @@ export async function cinecaRoutes(app: FastifyInstance): Promise<void> {
     const { matricole } = z.object({
       matricole: z.array(z.string().min(1).max(20)).min(1).max(200),
     }).parse(request.body)
-    audit(request.user?.id, request.ip, { endpoint: 'figli-giovane-bulk', count: matricole.length })
+    await audit(request.user?.id, request.ip, { endpoint: 'figli-giovane-bulk', count: matricole.length })
 
     const out: Record<string, FamiliareNorm | null> = {}
     let risolti = 0, errori = 0
@@ -180,7 +183,7 @@ export async function cinecaRoutes(app: FastifyInstance): Promise<void> {
     const { matricole } = z.object({
       matricole: z.array(z.string().min(1).max(20)).min(1).max(200),
     }).parse(request.body)
-    audit(request.user?.id, request.ip, { endpoint: 'figli-bulk', count: matricole.length })
+    await audit(request.user?.id, request.ip, { endpoint: 'figli-bulk', count: matricole.length })
 
     const out: Record<string, FamiliareNorm[]> = {}
     let conFigli = 0, errori = 0
@@ -202,7 +205,7 @@ export async function cinecaRoutes(app: FastifyInstance): Promise<void> {
   // GET /figlio-giovane?matricola=
   app.get('/figlio-giovane', pii, async (request, reply) => {
     const { matricola } = qMatricola.parse(request.query)
-    audit(request.user?.id, request.ip, { endpoint: 'figlio-giovane', matricola })
+    await audit(request.user?.id, request.ip, { endpoint: 'figlio-giovane', matricola })
     try {
       const { familiari, fromCache } = await resolveNucleo(matricola)
       const figlio = figlioPiuGiovane(familiari)

@@ -36,20 +36,23 @@ export async function verificaLiquidatoRoutes(app: FastifyInstance): Promise<voi
   const auditRepo = new PgAuditRepository(app.db)
   const pii = { preHandler: [app.authenticate, requireAdmin] }
 
-  function audit(userId: string | undefined, ip: string, dettagli: Record<string, unknown>) {
-    void auditRepo.log({
+  // F-3: audit degli accessi PII NON best-effort — awaited e fail-closed. Se il
+  // log non viene scritto, l'handler risponde 500 e il liquidato (dati sensibili)
+  // non viene restituito senza traccia (GDPR art. 5(2)/32).
+  async function audit(userId: string | undefined, ip: string, dettagli: Record<string, unknown>) {
+    await auditRepo.log({
       userId: userId ?? undefined,
       azione: 'CINECA_LIQUIDATO_LOOKUP',
       entita: 'verifica-liquidato',
       dettagli,
       ip,
-    }).catch(() => { /* audit best-effort */ })
+    })
   }
 
   // GET /dettaglio?anno&mese&matricola → { dettaglio grezzo, ricostruzione invii PGS }
   app.get('/dettaglio', pii, async (request, reply) => {
     const q = z.object(periodo).parse(request.query)
-    audit(request.user?.id, request.ip, { endpoint: 'dettaglio', ...q })
+    await audit(request.user?.id, request.ip, { endpoint: 'dettaglio', ...q })
     try {
       const dettaglio = await getLiquidatoDettaglio(q)
       return reply.send({ ...q, dettaglio, ricostruzione: ricostruisciInviiPGS(dettaglio) })
@@ -61,7 +64,7 @@ export async function verificaLiquidatoRoutes(app: FastifyInstance): Promise<voi
   // POST /riconcilia { anno, mese, matricola, righePGS[] } → risultato riconciliazione
   app.post('/riconcilia', pii, async (request, reply) => {
     const b = z.object({ ...periodo, righePGS: z.array(rigaPGSSchema).max(5000) }).parse(request.body)
-    audit(request.user?.id, request.ip, {
+    await audit(request.user?.id, request.ip, {
       endpoint: 'riconcilia', anno: b.anno, mese: b.mese, matricola: b.matricola, nRighePGS: b.righePGS.length,
     })
     try {

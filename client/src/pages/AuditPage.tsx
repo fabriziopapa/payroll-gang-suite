@@ -41,6 +41,13 @@ const AZIONE_META: Record<string, AzioneMeta> = {
   TEMPLATE_CREATO:               { label: 'Template certificato creato', tono: 'ok' },
   TEMPLATE_MODIFICATO:           { label: 'Template certificato modificato', tono: 'info' },
   TEMPLATE_ELIMINATO:            { label: 'Template certificato eliminato', tono: 'danger' },
+  CINECA_LIQUIDATO_LOOKUP:       { label: 'Lookup liquidato CINECA',      tono: 'info' },
+  BOZZA_CREATA:                  { label: 'Liquidazione creata',          tono: 'ok' },
+  BOZZA_MODIFICATA:              { label: 'Liquidazione modificata',      tono: 'info' },
+  BOZZA_ARCHIVIATA:              { label: 'Liquidazione archiviata',      tono: 'info' },
+  BOZZA_LIQUIDAZIONE_INFO:       { label: 'Dati liquidazione aggiornati', tono: 'info' },
+  BOZZA_RIPRISTINATA:            { label: 'Liquidazione ripristinata',    tono: 'warn' },
+  BOZZA_ELIMINATA:               { label: 'Liquidazione eliminata',       tono: 'danger' },
 }
 
 const TONO_CLS: Record<Tono, string> = {
@@ -59,6 +66,8 @@ const ENTITA_LABEL: Record<string, string> = {
   app_settings:         'Impostazioni',
   templato_pdf_region:  'Template PDF',
   templato_certificato: 'Template certificato',
+  bozze:                'Liquidazione',
+  'verifica-liquidato': 'Verifica liquidato',
 }
 
 function metaFor(azione: string): AzioneMeta {

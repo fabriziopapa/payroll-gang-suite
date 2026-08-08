@@ -6,6 +6,7 @@
 import { eq, lte, gte, or, isNull, and, desc, sql, inArray } from 'drizzle-orm'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import * as schema from '../schema.js'
+import { encrypt, decrypt } from '../../services/cryptoService.js'
 import type {
   IAnagraficheRepository,
   AnagraficaInput,
@@ -197,7 +198,10 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
       .from(schema.anagrafiche)
       .where(inArray(schema.anagrafiche.matricola, uniq))
     for (const r of rows) {
-      if (r.codFis && !out[r.matricola]) out[r.matricola] = r.codFis
+      if (r.codFis && !out[r.matricola]) {
+        const cf = decCf(r.codFis)     // F-1: decifra il CF a riposo
+        if (cf) out[r.matricola] = cf
+      }
     }
     return out
   }
@@ -241,7 +245,9 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
         nome:              item.nome               ?? null,
         dtNascita:         item.dtNascita           ?? null,
         genere:            item.genere             ?? null,
-        codFis:            item.codFis             ?? null,
+        // F-1: cifra il CF a riposo (encrypt sul plaintext sorgente). EXCLUDED.
+        // cod_fis nell'ON CONFLICT eredita questo valore già cifrato.
+        codFis:            item.codFis ? encrypt(item.codFis) : null,
         hashRecord:        item.hashRecord          ?? null,
       }))
 
@@ -330,6 +336,15 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
 }
 
 // ------------------------------------------------------------
+// F-1: CF cifrato a riposo. decCf decifra in lettura con fallback al valore
+// grezzo per le righe pre-cifratura (in chiaro) o non decifrabili — così una
+// base dati mista (backfill in corso) resta leggibile. La cifratura in
+// scrittura usa encrypt() sul PLAINTEXT (importService passa il CF grezzo),
+// quindi nessun rischio di doppia cifratura sui re-import.
+function decCf(v: string | null | undefined): string | null {
+  if (!v) return null
+  try { return decrypt(v) } catch { return v }
+}
 
 function toRow(r: typeof schema.anagrafiche.$inferSelect): AnagraficaRow {
   return {
@@ -347,7 +362,7 @@ function toRow(r: typeof schema.anagrafiche.$inferSelect): AnagraficaRow {
     nome:              r.nome             ?? null,
     dtNascita:         r.dtNascita        ?? null,
     genere:            r.genere           ?? null,
-    codFis:            r.codFis           ?? null,
+    codFis:            decCf(r.codFis),   // F-1: decifra a riposo
     hashRecord:        r.hashRecord       ?? null,
   }
 }
@@ -373,7 +388,7 @@ function toRowRaw(r: unknown): AnagraficaRow {
     nome:              (row['nome'] as string | null) ?? null,
     dtNascita:         (row['dtNascita'] as string | null) ?? null, // dt_nascita → dtNascita
     genere:            (row['genere'] as string | null) ?? null,
-    codFis:            (row['codFis'] as string | null) ?? null,    // cod_fis → codFis
+    codFis:            decCf(row['codFis'] as string | null),       // cod_fis → codFis, F-1 decifra
     hashRecord:        (row['hashRecord'] as string | null) ?? null, // hash_record → hashRecord
   }
 }

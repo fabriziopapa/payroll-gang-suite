@@ -8,7 +8,8 @@
 // ------------------------------------------------------------
 
 export const APP_NAME = 'Payroll Gang Suite' as const;
-export const APP_VERSION = '26.07.27' as const;
+// Convenzione: gli aggiornamenti di sicurezza usano il suffisso ".S"
+export const APP_VERSION = '26.08.08.S' as const;
 
 // ------------------------------------------------------------
 // RUOLI

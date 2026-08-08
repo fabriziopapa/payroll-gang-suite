@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.07.23-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.08.08.S-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -296,6 +296,17 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 ---
 
 ## Changelog
+
+> Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.08.08.S
+**Sicurezza — hardening a seguito dell'audit del 2026-08-07**
+- **CF anagrafiche cifrato a riposo (F-1)**: `anagrafiche.cod_fis` ora è cifrato AES-256-GCM come gli altri store CF (era l'unico in chiaro). Cifratura in scrittura, decifratura trasparente in lettura (con fallback per le righe pre-cifratura), colonna portata a `VARCHAR(255)`. **Richiede una migrazione DB** (`ALTER TABLE anagrafiche ALTER COLUMN cod_fis TYPE VARCHAR(255)`) **prima** del deploy, poi lo script idempotente `server/src/db/encrypt-anagrafiche-cf-backfill.ts` per lo storico. L'import differenziale (hash sul plaintext) resta invariato.
+- **Audit accessi PII non più best-effort (F-3)**: i lookup CF/liquidato CINECA scrivono l'audit in modo sincrono e fail-closed — se la registrazione fallisce, i dati personali non vengono restituiti senza traccia.
+- **Audit del ciclo di vita delle liquidazioni (F-7)**: creazione, modifica, archiviazione, ripristino ed eliminazione delle bozze ora sono tracciate (`BOZZA_*`), senza mai registrare CF o importi nei dettagli.
+- **Dipendenza `pdfjs-dist` server aggiornata a 6.2.108 (F-5)**: chiude GHSA-hq66 (esecuzione JS all'apertura di PDF ostili) sull'estrazione lato server.
+- **Export CSV — anti formula/DDE injection (F-10)**: i campi di testo che iniziano con `= + - @` vengono neutralizzati (apostrofo) per proteggere le postazioni HR; gli importi numerici restano invariati.
+- **Guardrail pre-commit attivo di default (F-11)**: uno script `prepare` imposta `core.hooksPath` al primo `npm install`, così il blocco anti-CF/segreti è attivo su ogni clone.
 
 ### 26.07.26
 **Feature — Certificato da API (liquidato) + Verifica liquidato**

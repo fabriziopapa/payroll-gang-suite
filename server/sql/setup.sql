@@ -124,7 +124,8 @@ CREATE TABLE IF NOT EXISTS anagrafiche (
   nome               VARCHAR(100),
   dt_nascita         DATE,
   genere             VARCHAR(1),
-  cod_fis            VARCHAR(16),
+  -- F-1: CF CIFRATO a riposo (AES-256-GCM "iv:tag:cipher" base64) → 255
+  cod_fis            VARCHAR(255),
   -- SHA-256 sui campi funzionali — confronto O(1) import differenziale
   hash_record        VARCHAR(64),
   created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
@@ -135,6 +136,11 @@ CREATE INDEX IF NOT EXISTS idx_anag_matricola    ON anagrafiche (matricola);
 CREATE INDEX IF NOT EXISTS idx_anag_storico      ON anagrafiche (matricola, decor_inq, fin_rap);
 CREATE INDEX IF NOT EXISTS idx_anagrafiche_ruolo ON anagrafiche (ruolo);
 CREATE INDEX IF NOT EXISTS idx_anag_hash         ON anagrafiche (hash_record);
+-- F-1: sui DB pre-esistenti allarga cod_fis per ospitare il CF cifrato.
+-- Idempotente: l'aumento di lunghezza VARCHAR è metadata-only (nessuna
+-- riscrittura tabella). DEVE essere applicata PRIMA del deploy del codice che
+-- cifra in scrittura, altrimenti l'import fallisce (valore > 16 char).
+ALTER TABLE anagrafiche ALTER COLUMN cod_fis TYPE VARCHAR(255);
 
 -- ------------------------------------------------------------
 -- IMPORT LOG ANAGRAFICHE SGE

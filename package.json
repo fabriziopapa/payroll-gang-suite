@@ -1,6 +1,6 @@
 {
   "name": "payroll-gang-suite",
-  "version": "26.07.27",
+  "version": "26.08.08.S",
   "private": true,
   "workspaces": [
     "client",
@@ -8,6 +8,7 @@
     "shared"
   ],
   "scripts": {
+    "prepare": "node -e \"try{require('child_process').execSync('git config core.hooksPath .githooks')}catch(e){}\"",
     "dev": "concurrently \"npm run dev --workspace=server\" \"npm run dev --workspace=client\"",
     "build": "npm run build --workspace=server && npm run build --workspace=client",
     "build:server": "npm run build --workspace=server",

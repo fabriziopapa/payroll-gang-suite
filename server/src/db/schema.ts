@@ -118,8 +118,13 @@ export const anagrafiche = pgTable('anagrafiche', {
   nome:              varchar('nome', { length: 100 }),
   dtNascita:         date('dt_nascita'),
   genere:            varchar('genere', { length: 1 }),
-  codFis:            varchar('cod_fis', { length: 16 }),
-  // SHA-256 sui campi funzionali — confronto O(1) per import differenziale
+  // F-1: CF CIFRATO a riposo (AES-256-GCM "iv:tag:cipher" base64) → colonna
+  // larga. Cifra/decifra nel PgAnagraficheRepository; le righe pre-cifratura
+  // (in chiaro) restano leggibili via fallback finché il backfill non le
+  // converte. La colonna va portata a VARCHAR(255) PRIMA del deploy (setup.sql).
+  codFis:            varchar('cod_fis', { length: 255 }),
+  // SHA-256 sui campi funzionali (calcolato sul PLAINTEXT lato import) —
+  // confronto O(1) per import differenziale. Invariato dalla cifratura.
   hashRecord:        varchar('hash_record', { length: 64 }),
 }, (t) => [
   uniqueIndex('anagrafiche_matricola_decor_inq_key').on(t.matricola, t.decorInq),

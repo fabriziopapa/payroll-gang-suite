@@ -5,12 +5,17 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { PgBozzeRepository } from '../db/repositories/PgBozzeRepository.js'
+import { PgAuditRepository } from '../db/repositories/PgAuditRepository.js'
 import { BozzaDatiSchema } from '../schemas/bozzaDati.js'
 // BozzaSummaryRow is used by the list endpoint — no dati JSONB (FIX H-1)
 
 export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
 
-  const repo = new PgBozzeRepository(app.db)
+  const repo      = new PgBozzeRepository(app.db)
+  // F-7: audit del ciclo di vita delle bozze (contengono nominativi/CF/importi
+  // nel JSONB `dati`). NB: nei `dettagli` va SOLO l'id + il nome-liquidazione,
+  // MAI il contenuto di `dati` (niente CF né importi nel log).
+  const auditRepo = new PgAuditRepository(app.db)
 
   // ── Helper: verifica proprietà bozza ───────────────────────
 
@@ -80,6 +85,7 @@ export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
     })
     const body  = schema.parse(req.body)
     const bozza = await repo.create({ nome: body.nome, protocolloDisplay: body.protocolloDisplay, dati: body.dati, createdBy: req.user!.id })
+    await auditRepo.log({ userId: req.user!.id, azione: 'BOZZA_CREATA', entita: 'bozze', entitaId: bozza.id, dettagli: { nome: bozza.nome }, ip: req.ip })
     return reply.code(201).send(bozza)
   })
 
@@ -94,6 +100,7 @@ export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
     const existing = await requireOwner(id, req.user!.id, req.user!.isAdmin, reply)
     if (!existing) return
     const bozza = await repo.update(id, schema.parse(req.body))
+    await auditRepo.log({ userId: req.user!.id, azione: 'BOZZA_MODIFICATA', entita: 'bozze', entitaId: id, dettagli: { nome: bozza.nome }, ip: req.ip })
     return reply.send(bozza)
   })
 
@@ -113,7 +120,9 @@ export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
     const info = LiquidazioneInfoSchema.parse(req.body ?? {})
     const existing = await requireOwner(id, req.user!.id, req.user!.isAdmin, reply)
     if (!existing) return
-    return reply.send(await repo.archive(id, info))
+    const bozza = await repo.archive(id, info)
+    await auditRepo.log({ userId: req.user!.id, azione: 'BOZZA_ARCHIVIATA', entita: 'bozze', entitaId: id, dettagli: { dataLiquidazione: info.dataLiquidazione, idLiquidazioneCsa: info.idLiquidazioneCsa }, ip: req.ip })
+    return reply.send(bozza)
   })
 
   // PATCH dati liquidazione su bozza GIÀ archiviata (ID CSA aggiunto in seguito)
@@ -125,14 +134,18 @@ export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
     if (existing.stato !== 'archiviata') {
       return reply.code(409).send({ error: 'NOT_ARCHIVED' })
     }
-    return reply.send(await repo.updateLiquidazioneInfo(id, info))
+    const bozza = await repo.updateLiquidazioneInfo(id, info)
+    await auditRepo.log({ userId: req.user!.id, azione: 'BOZZA_LIQUIDAZIONE_INFO', entita: 'bozze', entitaId: id, dettagli: { dataLiquidazione: info.dataLiquidazione, idLiquidazioneCsa: info.idLiquidazioneCsa }, ip: req.ip })
+    return reply.send(bozza)
   })
 
   app.post('/:id/restore', { preHandler: [app.authenticate] }, async (req, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params)
     const existing = await requireOwner(id, req.user!.id, req.user!.isAdmin, reply)
     if (!existing) return
-    return reply.send(await repo.restore(id))
+    const bozza = await repo.restore(id)
+    await auditRepo.log({ userId: req.user!.id, azione: 'BOZZA_RIPRISTINATA', entita: 'bozze', entitaId: id, dettagli: { nome: bozza.nome }, ip: req.ip })
+    return reply.send(bozza)
   })
 
   // DELETE — solo il proprietario può eliminare; l'admin NON può eliminare bozze altrui
@@ -148,6 +161,7 @@ export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(403).send({ error: 'CANNOT_DELETE_OTHERS_BOZZA' })
     }
     await repo.delete(id)
+    await auditRepo.log({ userId: req.user!.id, azione: 'BOZZA_ELIMINATA', entita: 'bozze', entitaId: id, dettagli: { nome: bozza.nome }, ip: req.ip })
     return reply.code(204).send()
   })
 }
