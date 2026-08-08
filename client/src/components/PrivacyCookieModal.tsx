@@ -97,19 +97,19 @@ export default function PrivacyCookieModal({ onClose }: Props) {
               </span>
             </div>
             <div className="px-4 py-1">
-              <CookieRow label="Scopo"        value="Mantenere la sessione autenticata" />
+              <CookieRow label="Scopo"        value="Mantenere la sessione autenticata (token opaco, solo HttpOnly/HTTPS)" />
               <CookieRow label="Durata"       value="7 giorni" />
-              <CookieRow label="Attributi"    value="HttpOnly · Secure · SameSite=Strict" mono />
+              <CookieRow label="Attributi"    value="HttpOnly · Secure · SameSite=Strict · Path /api/v1/auth" mono />
               <CookieRow label="Impostato da" value={window.location.hostname} />
             </div>
           </div>
 
-          {/* Cookie 2 — server_name_session (Cloudflare) */}
+          {/* Cookie 2 — __cf_bm (Cloudflare Bot Management) */}
           <div className="bg-slate-800/50 border border-slate-700/80 rounded-xl overflow-hidden">
             <div className="flex items-center justify-between gap-2 px-4 py-2.5
                             bg-slate-800 border-b border-slate-700/80 flex-wrap">
               <span className="font-mono text-xs text-slate-300 font-medium break-all">
-                server_name_session
+                __cf_bm
               </span>
               <span className="text-xs px-2 py-0.5 rounded-full whitespace-nowrap
                                bg-slate-700 text-slate-400 border border-slate-600">
@@ -117,8 +117,9 @@ export default function PrivacyCookieModal({ onClose }: Props) {
               </span>
             </div>
             <div className="px-4 py-1">
-              <CookieRow label="Scopo"        value="Routing e affidabilità rete (Cloudflare)" />
-              <CookieRow label="Durata"       value="24 ore" />
+              <CookieRow label="Scopo"        value="Distinguere il traffico umano dai bot (protezione anti-abuso, opera con Turnstile). Nessuna profilazione." />
+              <CookieRow label="Durata"       value="30 minuti" />
+              <CookieRow label="Attributi"    value="HttpOnly · Secure · SameSite=Lax" mono />
               <CookieRow label="Impostato da" value="Cloudflare Inc." />
               <CookieRow label="Trasferimento" value="USA — EU‑US Data Privacy Framework" />
             </div>
@@ -162,6 +163,11 @@ export default function PrivacyCookieModal({ onClose }: Props) {
                 label="Dati elaborati"
                 value="Segnali browser (timing, canvas, WebGL, navigator), indirizzo IP — inviati a Cloudflare per analisi anti-bot"
               />
+              <CookieRow
+                label="Cookie"
+                value="cf_clearance — impostato solo se viene presentata una verifica interattiva; memorizza l'esito del controllo. Nessun cookie in modalità invisibile."
+                mono
+              />
               <CookieRow label="Gestore"         value="Cloudflare Inc., 101 Townsend St., San Francisco, CA 94107, USA" />
               <CookieRow label="Trasferimento"   value="USA — EU‑US Data Privacy Framework (decisione di adeguatezza CE 10 luglio 2023)" />
               <CookieRow label="Base giuridica"  value="Art. 6(1)(f) GDPR — legittimo interesse alla sicurezza del sistema" />
@@ -202,7 +208,7 @@ export default function PrivacyCookieModal({ onClose }: Props) {
             </p>
             <p>
               <span className="text-slate-400">Aggiornamento: </span>
-              Maggio 2026.
+              Agosto 2026.
             </p>
           </div>
 
