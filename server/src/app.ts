@@ -151,16 +151,24 @@ app.setErrorHandler((error, _req, reply) => {
 
 const totpModule  = new TOTPAuthModule()
 
-// Le repository vengono iniettate qui — swap driver = cambia solo questa sezione
-// In futuro: const { createRepositoryFactory } = await import('./db/factory.js')
-// const repos = createRepositoryFactory(env.DB_DRIVER)
-// Per ora importiamo le implementazioni PostgreSQL direttamente:
-const { PgUsersRepository }   = await import('./db/repositories/PgUsersRepository.js')
-const { PgAuditRepository }   = await import('./db/repositories/PgAuditRepository.js')
+// Le repository vengono iniettate qui — è l'UNICO punto dell'applicazione che
+// conosce le implementazioni concrete PostgreSQL. Nessun modulo sopra questo
+// layer (routes, services, middleware, auth) accede al database direttamente.
+const { PgUsersRepository }         = await import('./db/repositories/PgUsersRepository.js')
+const { PgAuditRepository }         = await import('./db/repositories/PgAuditRepository.js')
+const { PgRefreshTokensRepository } = await import('./db/repositories/PgRefreshTokensRepository.js')
+const { PgJwtBlocklistRepository }  = await import('./db/repositories/PgJwtBlocklistRepository.js')
+const { PgFamiliariRepository }     = await import('./db/repositories/PgFamiliariRepository.js')
 
-const usersRepo   = new PgUsersRepository(db)
-const auditRepo   = new PgAuditRepository(db)
-const authService = new AuthService(totpModule, usersRepo, auditRepo)
+const usersRepo        = new PgUsersRepository(db)
+const auditRepo        = new PgAuditRepository(db)
+const refreshTokensRepo = new PgRefreshTokensRepository(db)
+const jwtBlocklistRepo  = new PgJwtBlocklistRepository(db)
+const familiariRepo     = new PgFamiliariRepository(db)
+
+const authService = new AuthService(
+  totpModule, usersRepo, auditRepo, refreshTokensRepo, jwtBlocklistRepo,
+)
 const authenticate = makeAuthMiddleware(authService)
 
 const mailer = new MailerService({
@@ -228,12 +236,9 @@ app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOStrin
 // Rimuove i record scaduti per evitare crescita illimitata della tabella
 // ------------------------------------------------------------
 {
-  const { jwtBlocklist } = await import('./db/schema.js')
-  const { lt } = await import('drizzle-orm')
-
   const cleanupJwtBlocklist = async (): Promise<void> => {
     try {
-      await db.delete(jwtBlocklist).where(lt(jwtBlocklist.expiresAt, new Date()))
+      await jwtBlocklistRepo.purgeExpired(new Date())
     } catch (err) {
       app.log.warn({ err }, 'Cleanup jwt_blocklist fallito')
     }
@@ -263,14 +268,12 @@ app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOStrin
 // La cache (cod_fisc cifrato) non deve crescere/persistere illimitatamente.
 // ------------------------------------------------------------
 {
-  const { familiariCache } = await import('./db/schema.js')
-  const { lt } = await import('drizzle-orm')
   const PII_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 
   const purgeFamiliariCache = async (): Promise<void> => {
     try {
       const cutoff = new Date(Date.now() - PII_RETENTION_MS)
-      await db.delete(familiariCache).where(lt(familiariCache.aggiornatoAt, cutoff))
+      await familiariRepo.purgeOlderThan(cutoff)
     } catch (err) {
       app.log.warn({ err }, 'Purge familiari_cache fallito')
     }

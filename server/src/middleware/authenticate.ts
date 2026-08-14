@@ -59,21 +59,11 @@ export function makeAuthMiddleware(authService: AuthService) {
       return reply.code(401).send({ error: 'TOKEN_EXPIRED_OR_INVALID' })
     }
 
-    // SEC-C02: controlla la JWT blocklist (logout → revoca immediata)
-    if (payload.jti) {
-      const { db } = await import('../db/connection.js')
-      const { jwtBlocklist } = await import('../db/schema.js')
-      const { eq } = await import('drizzle-orm')
-
-      const [blocked] = await db
-        .select({ jti: jwtBlocklist.jti })
-        .from(jwtBlocklist)
-        .where(eq(jwtBlocklist.jti, payload.jti))
-        .limit(1)
-
-      if (blocked) {
-        return reply.code(401).send({ error: 'TOKEN_REVOKED' })
-      }
+    // SEC-C02: controlla la JWT blocklist (logout → revoca immediata).
+    // La query passa dal repository iniettato in AuthService: qui non c'è
+    // più alcun accesso diretto al database (né import dinamico per richiesta).
+    if (payload.jti && await authService.isAccessTokenRevoked(payload.jti)) {
+      return reply.code(401).send({ error: 'TOKEN_REVOKED' })
     }
 
     request.user = { id: payload.sub, username: payload.username, isAdmin: payload.isAdmin }

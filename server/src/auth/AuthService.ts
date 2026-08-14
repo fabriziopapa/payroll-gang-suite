@@ -8,7 +8,13 @@ import argon2 from 'argon2'
 import { randomBytes, createHash, randomUUID } from 'node:crypto'
 import { jwtKeys, env, REFRESH_TOKEN_MS } from '../config/env.js'
 import type { IAuthModule } from './IAuthModule.js'
-import type { IUsersRepository, IAuditRepository, UserRow } from '../db/IRepository.js'
+import type {
+  IUsersRepository,
+  IAuditRepository,
+  IRefreshTokensRepository,
+  IJwtBlocklistRepository,
+  UserRow,
+} from '../db/IRepository.js'
 
 // ------------------------------------------------------------
 // Tipi pubblici
@@ -39,9 +45,11 @@ export interface LoginResult {
 
 export class AuthService {
   constructor(
-    private readonly authModule: IAuthModule,
-    private readonly usersRepo:  IUsersRepository,
-    private readonly auditRepo:  IAuditRepository,
+    private readonly authModule:         IAuthModule,
+    private readonly usersRepo:          IUsersRepository,
+    private readonly auditRepo:          IAuditRepository,
+    private readonly refreshTokensRepo:  IRefreshTokensRepository,
+    private readonly jwtBlocklistRepo:   IJwtBlocklistRepository,
   ) {}
 
   // ----------------------------------------------------------
@@ -183,24 +191,13 @@ export class AuthService {
     userAgent: string,
     ip:        string,
   ): Promise<{ accessToken: string; newRefreshToken: string; user: { id: string; username: string; isAdmin: boolean } }> {
-    const { db } = await import('../db/connection.js')
-    const { refreshTokens, users } = await import('../db/schema.js')
-    const { eq, and, gt, isNull } = await import('drizzle-orm')
-
     // FIX C-1: estrai selector (primi 16 char hex = primi 8 byte) dal raw token (hex 64 chars)
     // Il raw token è ora 32 byte hex (64 chars); il selector sono i primi 16 chars.
     const tokenSelector = rawToken.slice(0, 16)
 
     // Lookup O(1) tramite selector — un solo record, nessuna iterazione Argon2
-    const [matchedToken] = await db
-      .select()
-      .from(refreshTokens)
-      .where(and(
-        eq(refreshTokens.tokenSelector, tokenSelector),
-        isNull(refreshTokens.revokedAt),
-        gt(refreshTokens.expiresAt, new Date()),
-      ))
-      .limit(1)
+    // (il repository filtra già i token revocati e scaduti)
+    const matchedToken = await this.refreshTokensRepo.findActiveBySelector(tokenSelector, new Date())
 
     if (!matchedToken) throw new Error('INVALID_REFRESH_TOKEN')
 
@@ -225,10 +222,7 @@ export class AuthService {
       })
       // Se userAgent è vuoto (non inviato dal client) → comportamento anomalo → revoca tutto
       if (!userAgent) {
-        await db
-          .update(refreshTokens)
-          .set({ revokedAt: new Date() })
-          .where(eq(refreshTokens.userId, matchedToken.userId))
+        await this.refreshTokensRepo.revokeAllForUser(matchedToken.userId, new Date())
 
         await this.auditRepo.log({
           userId: matchedToken.userId,
@@ -241,17 +235,10 @@ export class AuthService {
     }
 
     // Revoca token usato (rotazione)
-    await db
-      .update(refreshTokens)
-      .set({ revokedAt: new Date() })
-      .where(eq(refreshTokens.id, matchedToken.id))
+    await this.refreshTokensRepo.revokeById(matchedToken.id, new Date())
 
     // Recupera utente
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, matchedToken.userId))
-      .limit(1)
+    const user = await this.usersRepo.findById(matchedToken.userId)
 
     if (!user || !user.isActive) throw new Error('USER_INACTIVE')
 
@@ -270,30 +257,15 @@ export class AuthService {
   // ----------------------------------------------------------
 
   async logout(rawToken: string, rawAccessToken?: string): Promise<void> {
-    const { db } = await import('../db/connection.js')
-    const { refreshTokens, jwtBlocklist } = await import('../db/schema.js')
-    const { eq, and, isNull, gt } = await import('drizzle-orm')
-
     // FIX C-1: lookup O(1) tramite selector — evita la scansione O(n) con Argon2
     const tokenSelector = rawToken.slice(0, 16)
 
-    const [token] = await db
-      .select()
-      .from(refreshTokens)
-      .where(and(
-        eq(refreshTokens.tokenSelector, tokenSelector),
-        isNull(refreshTokens.revokedAt),
-        gt(refreshTokens.expiresAt, new Date()),
-      ))
-      .limit(1)
+    const token = await this.refreshTokensRepo.findActiveBySelector(tokenSelector, new Date())
 
     if (token) {
       // Verifica Argon2 su UN solo record
       if (await argon2.verify(token.tokenHash, rawToken)) {
-        await db
-          .update(refreshTokens)
-          .set({ revokedAt: new Date() })
-          .where(eq(refreshTokens.id, token.id))
+        await this.refreshTokensRepo.revokeById(token.id, new Date())
       }
     }
 
@@ -303,16 +275,22 @@ export class AuthService {
         const payload = this.verifyAccessToken(rawAccessToken)
         if (payload.jti && payload.exp) {
           const expiresAt = new Date(payload.exp * 1000)
-          // Inserisci in blocklist; ignora conflitti (logout doppio)
-          await db
-            .insert(jwtBlocklist)
-            .values({ jti: payload.jti, expiresAt })
-            .onConflictDoNothing()
+          // Inserisci in blocklist; il repository ignora i conflitti (logout doppio)
+          await this.jwtBlocklistRepo.add(payload.jti, expiresAt)
         }
       } catch {
         // Token già scaduto o invalido — non serve blocklisting
       }
     }
+  }
+
+  // ----------------------------------------------------------
+  // Blocklist access token (usata dal middleware a ogni richiesta)
+  // ----------------------------------------------------------
+
+  /** SEC-C02: true se il jti è stato revocato con il logout. */
+  async isAccessTokenRevoked(jti: string): Promise<boolean> {
+    return this.jwtBlocklistRepo.isBlocked(jti)
   }
 
   // ----------------------------------------------------------
@@ -340,9 +318,6 @@ export class AuthService {
   }
 
   async #issueRefreshToken(userId: string, userAgent: string, ip: string): Promise<string> {
-    const { db } = await import('../db/connection.js')
-    const { refreshTokens } = await import('../db/schema.js')
-
     // FIX C-1: rawToken = 32 byte hex (64 chars).
     // tokenSelector = primi 8 byte in hex = primi 16 chars del rawToken.
     // Il selector è non-segreto ma univoco — permette lookup O(1).
@@ -369,7 +344,7 @@ export class AuthService {
     // FIX: usa REFRESH_TOKEN_MS da env — unica sorgente di verità con il cookie
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_MS)
 
-    await db.insert(refreshTokens).values({ userId, tokenHash, tokenSelector, fingerprint, expiresAt })
+    await this.refreshTokensRepo.create({ userId, tokenHash, tokenSelector, fingerprint, expiresAt })
 
     return rawToken
   }

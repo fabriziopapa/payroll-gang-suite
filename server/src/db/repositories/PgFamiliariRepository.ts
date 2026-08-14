@@ -4,7 +4,7 @@
 // replaceForMatricola = snapshot atomico (delete + insert in transazione).
 // ============================================================
 
-import { eq } from 'drizzle-orm'
+import { eq, lt } from 'drizzle-orm'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import * as schema from '../schema.js'
 import type {
@@ -52,5 +52,15 @@ export class PgFamiliariRepository implements IFamiliariRepository {
         aggiornatoAt:      new Date(),
       })))
     })
+  }
+
+  /**
+   * H1 — retention PII: elimina le righe più vecchie del cutoff.
+   * Spostamento letterale del job che stava in app.ts.
+   */
+  async purgeOlderThan(cutoff: Date): Promise<void> {
+    await this.db
+      .delete(schema.familiariCache)
+      .where(lt(schema.familiariCache.aggiornatoAt, cutoff))
   }
 }

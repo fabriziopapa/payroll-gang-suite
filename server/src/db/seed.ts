@@ -9,6 +9,8 @@ import { users } from './schema.js'
 import { TOTPAuthModule } from '../auth/modules/TOTPAuthModule.js'
 import { PgUsersRepository } from './repositories/PgUsersRepository.js'
 import { PgAuditRepository } from './repositories/PgAuditRepository.js'
+import { PgRefreshTokensRepository } from './repositories/PgRefreshTokensRepository.js'
+import { PgJwtBlocklistRepository } from './repositories/PgJwtBlocklistRepository.js'
 import { AuthService } from '../auth/AuthService.js'
 import readline from 'node:readline/promises'
 
@@ -33,7 +35,13 @@ async function main(): Promise<void> {
   const authModule = new TOTPAuthModule()
   const usersRepo  = new PgUsersRepository(db)
   const auditRepo  = new PgAuditRepository(db)
-  const authService = new AuthService(authModule, usersRepo, auditRepo)
+  const authService = new AuthService(
+    authModule,
+    usersRepo,
+    auditRepo,
+    new PgRefreshTokensRepository(db),
+    new PgJwtBlocklistRepository(db),
+  )
 
   const { userId, qrCodeUrl, backupKey } = await authService.registerUser(
     username, true, '127.0.0.1',

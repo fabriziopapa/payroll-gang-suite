@@ -4,14 +4,15 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { sql } from 'drizzle-orm'
 import { requireAdmin } from '../middleware/authenticate.js'
 import { PgAnagraficheRepository } from '../db/repositories/PgAnagraficheRepository.js'
+import { PgImportLogRepository } from '../db/repositories/PgImportLogRepository.js'
 import { importAnagrafiche, importAnagraficheXlsx } from '../services/importService.js'
 
 export async function anagraficheRoutes(app: FastifyInstance): Promise<void> {
 
-  const repo = new PgAnagraficheRepository(app.db)
+  const repo    = new PgAnagraficheRepository(app.db)
+  const logRepo = new PgImportLogRepository(app.db)
 
   // GET /api/v1/anagrafiche[?data=YYYY-MM-DD] — lista attivi (autenticato)
   // Con ?data= restituisce solo i record attivi alla data indicata (1 per matricola)
@@ -124,24 +125,14 @@ export async function anagraficheRoutes(app: FastifyInstance): Promise<void> {
     const userId    = (request as any).user?.id ?? null
 
     // Crea log entry — ottieni ID importazione
-    const [logRow] = await app.db.execute(sql`
-      INSERT INTO anag_import_log (nome_file, utente_importazione)
-      VALUES (${nomeFile ?? null}, ${userId})
-      RETURNING id
-    `) as unknown as [{ id: number }]
-    const importId = logRow!.id
+    const importId = await logRepo.start(nomeFile ?? null, userId)
 
     let result
     try {
       result = await importAnagraficheXlsx(fileBuffer, repo, dataAgg)
     } catch (err: any) {
       // Aggiorna log con errore
-      await app.db.execute(sql`
-        UPDATE anag_import_log SET
-          esito = 'ERRORE',
-          messaggio_errore = ${err.message ?? 'Errore sconosciuto'}
-        WHERE id = ${importId}
-      `)
+      await logRepo.fail(importId, err.message ?? 'Errore sconosciuto')
       if (err.message?.startsWith('FILE_TOO_MANY_ROWS') || err.message?.startsWith('XLSX_EMPTY')) {
         return reply.status(413).send({ error: err.message })
       }
@@ -149,16 +140,14 @@ export async function anagraficheRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Aggiorna log con contatori finali
-    await app.db.execute(sql`
-      UPDATE anag_import_log SET
-        num_record_file       = ${result.inserted + result.updated + result.skipped + result.errors.length},
-        num_record_inseriti   = ${result.inserted},
-        num_record_aggiornati = ${result.updated},
-        num_record_invariati  = ${result.skipped},
-        num_errori            = ${result.errors.length},
-        esito                 = ${result.errors.length > 0 ? 'PARZIALE' : 'OK'}
-      WHERE id = ${importId}
-    `)
+    await logRepo.finish(importId, {
+      file:       result.inserted + result.updated + result.skipped + result.errors.length,
+      inseriti:   result.inserted,
+      aggiornati: result.updated,
+      invariati:  result.skipped,
+      errori:     result.errors.length,
+      esito:      result.errors.length > 0 ? 'PARZIALE' : 'OK',
+    })
 
     return reply.code(200).send({ ...result, importId })
   })

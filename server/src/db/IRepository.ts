@@ -180,6 +180,11 @@ export interface IFamiliariRepository {
   findByMatricola(matricola: string): Promise<FamiliareCacheRow[]>
   /** Sostituisce l'intero nucleo cachato per la matricola (snapshot). */
   replaceForMatricola(matricola: string, rows: FamiliareCacheInput[]): Promise<void>
+  /**
+   * H1 — retention PII: elimina le righe aggiornate prima del cutoff.
+   * Usata dal job periodico di purge (composition root).
+   */
+  purgeOlderThan(cutoff: Date): Promise<void>
 }
 
 // ------------------------------------------------------------
@@ -345,6 +350,79 @@ export interface IUsersRepository {
    * Caso d'uso: account bloccato per troppi OTP falliti, nessun auto-unlock disponibile.
    */
   unlockUser(userId: string): Promise<void>
+}
+
+// ------------------------------------------------------------
+// Refresh Tokens Repository
+// Sessione PGS: token rotanti con lookup O(1) per selector.
+// Il token grezzo non transita mai da qui — solo hash Argon2 e selector.
+// ------------------------------------------------------------
+
+export interface RefreshTokenRow {
+  id:            number
+  userId:        string
+  tokenHash:     string
+  tokenSelector: string
+  fingerprint:   string
+  expiresAt:     Date
+  revokedAt:     Date | null
+}
+
+export interface RefreshTokenInput {
+  userId:        string
+  tokenHash:     string
+  tokenSelector: string
+  fingerprint:   string
+  expiresAt:     Date
+}
+
+export interface IRefreshTokensRepository {
+  /** Inserisce un nuovo token (la rotazione crea sempre una riga nuova). */
+  create(input: RefreshTokenInput): Promise<void>
+  /**
+   * Lookup O(1) per selector. Restituisce SOLO token attivi:
+   * non revocati (revoked_at IS NULL) e non scaduti (expires_at > now).
+   */
+  findActiveBySelector(selector: string, now: Date): Promise<RefreshTokenRow | null>
+  /** Revoca puntuale (rotazione o logout). */
+  revokeById(id: number, now: Date): Promise<void>
+  /** Revoca massiva per utente (sospetto furto token). */
+  revokeAllForUser(userId: string, now: Date): Promise<void>
+}
+
+// ------------------------------------------------------------
+// JWT Blocklist Repository (SEC-C02 — revoca access token al logout)
+// ------------------------------------------------------------
+
+export interface IJwtBlocklistRepository {
+  /** Inserisce il jti revocato. Idempotente (logout doppio → nessun errore). */
+  add(jti: string, expiresAt: Date): Promise<void>
+  /** true se il jti è stato revocato. Interrogata a ogni richiesta autenticata. */
+  isBlocked(jti: string): Promise<boolean>
+  /** Pulizia periodica: rimuove i record già scaduti. */
+  purgeExpired(now: Date): Promise<void>
+}
+
+// ------------------------------------------------------------
+// Import Log Repository (anag_import_log — esito import xlsx SGE)
+// ------------------------------------------------------------
+
+export interface ImportLogCounters {
+  file:       number
+  inseriti:   number
+  aggiornati: number
+  invariati:  number
+  errori:     number
+  esito:      string
+}
+
+export interface IImportLogRepository {
+  /** Apre la riga di log e restituisce l'id dell'importazione. */
+  start(nomeFile: string | null, userId: string | null): Promise<number>
+  /** Chiude in errore (esito = 'ERRORE' + messaggio). */
+  fail(id: number, messaggio: string): Promise<void>
+  /** Chiude con i contatori finali. */
+  finish(id: number, counters: ImportLogCounters): Promise<void>
 }
 
 // ------------------------------------------------------------
