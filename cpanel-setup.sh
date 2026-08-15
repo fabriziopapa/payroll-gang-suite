@@ -210,17 +210,32 @@ else
     echo "  Se importerai dati da un altro ambiente DEVE essere identica a quella di origine,"
     echo "  altrimenti quei dati risulteranno illeggibili."
     echo "  Si puo' incollare la sola chiave o l'intera riga 'ENCRYPTION_KEY=...' del .env."
-    TENTATIVI=0
-    while [ "$TENTATIVI" -lt 3 ]; do
-      printf "  Chiave (64 hex) — INVIO per generarne una nuova: "
+    # Un incolla copiato dallo scrollback di un terminale puo' contenere un
+    # ritorno a capo nel punto in cui la riga era andata a capo: 'read' si
+    # ferma li' e il resto resta nel buffer. Accumuliamo finche' non abbiamo
+    # 64 caratteri esadecimali, cosi' il frammento successivo viene riunito
+    # da solo senza che l'utente debba fare nulla.
+    ENC_KEY=""; LETTURE=0
+    while [ "$LETTURE" -lt 8 ]; do
+      if [ -z "$ENC_KEY" ]; then
+        printf "  Chiave (64 hex) — INVIO per generarne una nuova: "
+      else
+        printf "  ...continuo a leggere (%s/64 caratteri) " "$(printf '%s' "$ENC_KEY" | wc -c)"
+      fi
       read -r -s RISPOSTA </dev/tty; echo
-      ENC_KEY=$(pulisci_chiave "$RISPOSTA")
-      [ -z "$ENC_KEY" ] && break
+      LETTURE=$((LETTURE+1))
+      PEZZO=$(pulisci_chiave "$RISPOSTA")
+      # INVIO su input vuoto al primo giro = genera una chiave nuova
+      [ -z "$PEZZO" ] && [ -z "$ENC_KEY" ] && break
+      ENC_KEY="$ENC_KEY$PEZZO"
       chiave_valida "$ENC_KEY" && break
-      TENTATIVI=$((TENTATIVI+1))
-      avv "Non valida: ricevuti $(printf '%s' "$ENC_KEY" | wc -c) caratteri dopo la pulizia, ne servono 64 esadecimali. Riprova."
-      ENC_KEY=""
+      LUNG=$(printf '%s' "$ENC_KEY" | wc -c)
+      if [ "$LUNG" -ge 64 ]; then
+        avv "Ricevuti $LUNG caratteri: non e' una chiave valida (64 esadecimali). Ricomincio."
+        ENC_KEY=""
+      fi
     done
+    chiave_valida "$ENC_KEY" || ENC_KEY=""
   fi
   if [ -z "$ENC_KEY" ]; then
     ENC_KEY=$(openssl rand -hex 32)
