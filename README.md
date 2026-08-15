@@ -80,6 +80,10 @@ payroll-gang-suite/
 ├── INSTALL_VPS.md               # ★ Indice guide installazione/migrazione VPS
 ├── INSTALL_VPS_AAPANEL.md       #   Guida completa aaPanel (+ hardening + Progetto 2)
 ├── INSTALL_VPS_NATIVE.md        #   Guida completa Ubuntu nativa (nginx/PM2/PG da apt)
+├── INSTALL_CPANEL.md            #   Guida completa cPanel/WHM (Apache+systemd+PG nativo)
+├── cpanel-proxy.conf.example    #   Include vhost Apache per cPanel (ProxyPass /api)
+├── cpanel-htaccess.example      #   .htaccess docroot: routing SPA + header sicurezza
+├── cpanel-check.sh              #   Verifica installazione cPanel (sola lettura)
 ├── CINECA_PROXY.md              # Setup proxy Italia per CSA-WS (Caddy)
 └── DEPLOY_AAPANEL.md            # (legacy — sostituito dalle guide INSTALL_VPS_*)
 ```
@@ -232,6 +236,7 @@ Guide complete (clone → avvio → hardening → migrazione dati): **[`INSTALL_
 |---|---|
 | aaPanel (come produzione attuale) | [`INSTALL_VPS_AAPANEL.md`](INSTALL_VPS_AAPANEL.md) |
 | Ubuntu 24.04 nativo (senza pannello) | [`INSTALL_VPS_NATIVE.md`](INSTALL_VPS_NATIVE.md) |
+| cPanel/WHM con accesso root | [`INSTALL_CPANEL.md`](INSTALL_CPANEL.md) |
 
 Sequenza (dettagli nelle guide): hardening SSH/firewall → clone → `setup.sql` → `.env` → build → seed admin → PM2 → nginx+SSL → verifica. Scenario migrazione: `pg_dump`/`pg_restore` + `.env` originale (stessa `ENCRYPTION_KEY` — obbligatoria per i dati cifrati).
 

@@ -1,0 +1,79 @@
+# ============================================================
+# PGS — .htaccess per la docroot del client (server cPanel)
+#
+# Destinazione: /home/<UTENTE>/public_html/.htaccess
+# Contiene il routing della SPA e gli header di sicurezza per le risposte
+# statiche servite da Apache. Le risposte dell'API sono già protette da
+# helmet lato applicazione.  Vedi INSTALL_CPANEL.md §6.
+# ============================================================
+
+# --- Forza HTTPS (attivare dopo l'emissione del certificato AutoSSL) ------
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # RewriteCond %{HTTPS} !=on
+    # RewriteCond %{REQUEST_URI} !^/\.well-known/
+    # RewriteRule ^(.*)$ https://%{HTTP_HOST}/$1 [R=301,L]
+
+    # --- Routing SPA ------------------------------------------------------
+    # Le rotte del client sono gestite da React Router: qualsiasi percorso che
+    # non corrisponda a un file reale deve restituire index.html.
+    # /api/ è escluso: quelle richieste sono inoltrate al processo Node dal
+    # reverse proxy e non devono mai essere riscritte qui.
+    RewriteCond %{REQUEST_URI} !^/api/
+    RewriteCond %{REQUEST_URI} !^/\.well-known/
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^ index.html [L]
+</IfModule>
+
+# --- Header di sicurezza --------------------------------------------------
+<IfModule mod_headers.c>
+    Header always set X-Frame-Options "DENY"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+
+    # HSTS: attivare solo quando il dominio è stabilmente in HTTPS.
+    # Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+    # CSP allineata a quella applicata dall'applicazione alle risposte API.
+    # challenges.cloudflare.com serve per il widget Turnstile: se Turnstile non
+    # è in uso si possono rimuovere le relative voci.
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
+</IfModule>
+
+# --- File che non devono essere serviti ------------------------------------
+# I source map esporrebbero il codice sorgente del client.
+<FilesMatch "\.map$">
+    Require all denied
+</FilesMatch>
+
+# Rete di sicurezza: nella docroot non deve esistere nulla di tutto questo.
+# Se una di queste regole scatta davvero, c'è un errore di deploy da correggere
+# (il codice applicativo non va MAI sotto public_html).
+<FilesMatch "^\.(env|git|htpasswd)|\.(sql|dump|bak|log|pem|key)$">
+    Require all denied
+</FilesMatch>
+
+Options -Indexes
+
+# --- Cache ----------------------------------------------------------------
+# Gli asset generati da Vite hanno un hash nel nome: sono immutabili.
+# index.html no: deve essere sempre riconvalidato, altrimenti dopo un
+# aggiornamento i browser continuerebbero a caricare gli asset vecchi.
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType text/css "access plus 1 year"
+    ExpiresByType application/javascript "access plus 1 year"
+    ExpiresByType image/png "access plus 30 days"
+    ExpiresByType image/jpeg "access plus 30 days"
+    ExpiresByType image/svg+xml "access plus 30 days"
+    ExpiresByType font/woff2 "access plus 1 year"
+</IfModule>
+
+<IfModule mod_headers.c>
+    <FilesMatch "index\.html$">
+        Header set Cache-Control "no-cache, must-revalidate"
+    </FilesMatch>
+</IfModule>

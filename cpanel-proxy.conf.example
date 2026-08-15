@@ -1,0 +1,44 @@
+# ============================================================
+# PGS — Reverse proxy Apache per server cPanel/WHM
+#
+# Destinazione (creare la stessa copia in std E in ssl):
+#   /etc/apache2/conf.d/userdata/std/2_4/<UTENTE>/<DOMINIO>/pgs-proxy.conf
+#   /etc/apache2/conf.d/userdata/ssl/2_4/<UTENTE>/<DOMINIO>/pgs-proxy.conf
+#
+# Poi:
+#   /scripts/ensure_vhost_includes --user=<UTENTE>
+#   apachectl configtest && /scripts/rebuildhttpdconf && systemctl restart httpd
+#
+# Richiede mod_proxy e mod_proxy_http attivi in EasyApache 4.
+# Vedi INSTALL_CPANEL.md §8.
+# ============================================================
+
+# --- 1. Esclusioni: DEVONO precedere le regole di proxy --------------------
+# AutoSSL valida i domini via /.well-known/acme-challenge: se queste richieste
+# finissero all'applicazione Node, il rinnovo dei certificati fallirebbe.
+ProxyPass /.well-known !
+
+# --- 2. API applicative ---------------------------------------------------
+# Solo /api/ va al processo Node. Tutto il resto resta servito da Apache come
+# sito statico dalla docroot (il client React compilato).
+ProxyPass        /api/ http://127.0.0.1:3001/api/
+ProxyPassReverse /api/ http://127.0.0.1:3001/api/
+
+# Timeout allineato alle operazioni più lente esposte dall'API
+# (import XML/XLSX, generazione certificati, chiamate a CSA-WS).
+ProxyTimeout 120
+
+# --- 3. Intestazioni verso l'applicazione ---------------------------------
+# L'applicazione gira con trustProxy attivo e usa questi header per il rate
+# limiting per IP e per l'audit log: senza, tutte le richieste risulterebbero
+# provenire da 127.0.0.1.
+<IfModule mod_headers.c>
+    RequestHeader set X-Forwarded-Proto "https" env=HTTPS
+</IfModule>
+
+# --- 4. Note --------------------------------------------------------------
+# · Non aggiungere qui "ProxyPass /": il client statico è servito da Apache.
+# · La porta deve coincidere con PORT nel file .env (default 3001).
+# · Se il dominio è servito anche senza HTTPS, la copia in std/ mantiene il
+#   funzionamento durante l'emissione del certificato; a certificato attivo
+#   conviene forzare il redirect a HTTPS dal .htaccess della docroot.
