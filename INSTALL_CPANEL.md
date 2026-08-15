@@ -519,6 +519,7 @@ Controlla sempre le note di rilascio: alcune versioni richiedono di rieseguire `
 | `502 Bad Gateway` su `/api/` | servizio Node fermo | `systemctl status pgs`, `journalctl -u pgs -n 50` |
 | L'app non parte, log con errore di configurazione | variabile mancante o non valida in `.env` | il messaggio elenca i campi: la validazione è fail-closed all'avvio |
 | L'app non parte, errore di connessione al DB | `DB_SSL=true` su loopback senza TLS | metti `DB_SSL=false` |
+| L'app non parte: `{ CINECA_BASE_URL: [ 'Invalid url' ] }` | variabile opzionale presente ma **vuota** | nello schema "opzionale" significa *assente*, non vuota: una riga `CINECA_BASE_URL=` viene validata lo stesso e fallisce. **Commentare** la riga invece di svuotarla. Vale anche per `CINECA_PROXY_URL`, `CINECA_PROXY_SECRET` e `COOKIE_SECRET` |
 | Login ok ma al reload risulta disconnesso | sito in HTTP, o `CLIENT_ORIGIN` diverso dal dominio reale | il cookie di refresh è `secure` + `SameSite=Strict` |
 | `403 ORIGIN_NOT_ALLOWED` sulle operazioni di scrittura | `CLIENT_ORIGIN` non coincide con l'origine del browser | confronta esattamente schema, host ed eventuale `www` |
 | Login rifiutato con `CAPTCHA_FAILED` | dominio non autorizzato in Turnstile | aggiungi il dominio in Cloudflare o disattiva il toggle in Impostazioni |

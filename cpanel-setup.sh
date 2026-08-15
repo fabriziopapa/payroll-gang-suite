@@ -347,22 +347,27 @@ REFRESH_RATE_LIMIT_MAX=30
 # Se si valorizza la secret, il dominio va autorizzato in Cloudflare: la
 # verifica è fail-closed e un dominio non autorizzato impedisce ogni login.
 # La site key finisce nel bundle del client: cambiandola serve un nuovo build.
-VITE_TURNSTILE_SITE_KEY=
-TURNSTILE_SECRET_KEY=
+#VITE_TURNSTILE_SITE_KEY=
+#TURNSTILE_SECRET_KEY=
+
+# ATTENZIONE alle variabili opzionali: nello schema di validazione "opzionale"
+# significa ASSENTE, non vuota. Una variabile presente con valore vuoto viene
+# validata lo stesso e fa fallire l'avvio (es. CINECA_BASE_URL= => "Invalid url").
+# Per disattivare un modulo, lasciare la riga COMMENTATA.
 
 # SMTP (opzionale) — senza, i QR di attivazione vanno consegnati a mano
-SMTP_HOST=
+#SMTP_HOST=smtp.esempio.it
+#SMTP_USER=
+#SMTP_PASS=
+#SMTP_FROM=PGS <noreply@esempio.it>
 SMTP_PORT=587
 SMTP_SECURE=false
-SMTP_USER=
-SMTP_PASS=
-SMTP_FROM=
 
 # CINECA CSA-WS (opzionale) — vedi CINECA_PROXY.md se il server è fuori UE
-CINECA_BASE_URL=
-CINECA_TENANT=
-CINECA_USER=
-CINECA_PASSWORD=
+#CINECA_BASE_URL=https://prod.csa-ws.cineca.it
+#CINECA_TENANT=
+#CINECA_USER=
+#CINECA_PASSWORD=
 CINECA_GROUPS=familiari,sge
 PARENTELA_FIGLIO=FG
 ENVEOF
