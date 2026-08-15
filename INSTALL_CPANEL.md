@@ -13,6 +13,53 @@ Documenti correlati: [`INSTALL_VPS_NATIVE.md`](INSTALL_VPS_NATIVE.md) (VPS senza
 
 ---
 
+## 0. Procedura automatica (consigliata)
+
+L'intera installazione è automatizzata da due script versionati nel repository:
+
+| Script | Ruolo |
+|---|---|
+| [`cpanel-setup.sh`](cpanel-setup.sh) | **installa**: pacchetti, database, `.env`, build, servizio, proxy |
+| [`cpanel-check.sh`](cpanel-check.sh) | **verifica**: sola lettura, non modifica nulla |
+
+Sono due file distinti di proposito: un installatore che si autocertifica non è una
+verifica: se sbaglia una scrittura, sbaglia allo stesso modo nel controllarla.
+`cpanel-setup.sh` invoca `cpanel-check.sh` al termine, quindi per chi installa resta
+un comando solo.
+
+```bash
+mkdir -p /home/pgs/apps && cd /home/pgs/apps
+git clone https://github.com/fabriziopapa/payroll-gang-suite.git
+cd payroll-gang-suite
+
+PGS_DOMAIN=dominio.tld bash cpanel-setup.sh
+```
+
+Lo script è **idempotente**: rileva ciò che è già presente e lo salta, quindi si può
+rilanciare dopo una correzione senza rifare tutto. In particolare non sovrascrive mai
+un `.env` esistente e non rigenera i segreti già presenti — rigenerare `ENCRYPTION_KEY`
+renderebbe illeggibili i dati cifrati già in archivio.
+
+Durante l'esecuzione chiede l'`ENCRYPTION_KEY`: se si importeranno dati da un altro
+ambiente **deve essere quella di origine**. Lo script ne stampa l'impronta (un hash, mai
+la chiave) per poterla confrontare con quella dell'ambiente sorgente.
+
+Variabili riconosciute: `PGS_USER` (default `pgs`), `PGS_DOMAIN`, `PGS_PORT` (3001),
+`PGS_ENCRYPTION_KEY`, `PGS_SKIP_PKG=1` per non installare pacchetti, `PGS_ASSUME_YES=1`
+per l'esecuzione non interattiva, `PGS_FORCE_NPM=1` e `PGS_FORCE_UNIT=1` per forzare
+rispettivamente la reinstallazione delle dipendenze e la riscrittura della unit systemd.
+
+> Entrambi gli script vanno **eseguiti con `bash`**, mai caricati con `source`: contengono
+> `exit` e chiuderebbero la shell di login. Vanno inoltre trasferiti come file (via
+> `git clone`/`git pull` o `scp`), non incollati nel terminale: un incolla viene
+> interpretato riga per riga dalla shell, che eseguirebbe l'`exit` finale chiudendo
+> la sessione SSH.
+
+I capitoli seguenti descrivono le stesse operazioni passo per passo, per farle a mano
+o per capire cosa fa lo script.
+
+---
+
 ## 1. Architettura su cPanel
 
 ```text
@@ -253,6 +300,9 @@ Valori specifici di un'installazione cPanel:
 
 ### 5.1 Servizi esterni
 
+- **Anti-abuso (CAPTCHA)**: è pianificata la migrazione da Cloudflare Turnstile a
+  **Friendly Captcha** (proof-of-work, senza cookie né profilazione, trattamento in UE),
+  per ridurre il trasferimento di dati personali a terzi. Fino ad allora vale quanto segue.
 - **Cloudflare Turnstile**: la site key è vincolata al dominio. Su un dominio nuovo occorre
   aggiungerlo nella configurazione Cloudflare, oppure disattivare la protezione dal toggle in
   *Impostazioni* (admin). Se la secret è presente e il toggle è attivo, la verifica è

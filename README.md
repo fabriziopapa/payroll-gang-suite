@@ -83,6 +83,7 @@ payroll-gang-suite/
 ├── INSTALL_CPANEL.md            #   Guida completa cPanel/WHM (Apache+systemd+PG nativo)
 ├── cpanel-proxy.conf.example    #   Include vhost Apache per cPanel (ProxyPass /api)
 ├── cpanel-htaccess.example      #   .htaccess docroot: routing SPA + header sicurezza
+├── cpanel-setup.sh              #   ★ Installazione cPanel automatica (idempotente)
 ├── cpanel-check.sh              #   Verifica installazione cPanel (sola lettura)
 ├── CINECA_PROXY.md              # Setup proxy Italia per CSA-WS (Caddy)
 └── DEPLOY_AAPANEL.md            # (legacy — sostituito dalle guide INSTALL_VPS_*)
@@ -237,6 +238,29 @@ Guide complete (clone → avvio → hardening → migrazione dati): **[`INSTALL_
 | aaPanel (come produzione attuale) | [`INSTALL_VPS_AAPANEL.md`](INSTALL_VPS_AAPANEL.md) |
 | Ubuntu 24.04 nativo (senza pannello) | [`INSTALL_VPS_NATIVE.md`](INSTALL_VPS_NATIVE.md) |
 | cPanel/WHM con accesso root | [`INSTALL_CPANEL.md`](INSTALL_CPANEL.md) |
+
+**Su cPanel l'installazione è automatizzata.** Due script versionati, uno che installa e
+uno che verifica (separati di proposito: un installatore che si autocertifica non è una
+verifica). `cpanel-setup.sh` richiama `cpanel-check.sh` al termine, quindi è un comando solo:
+
+```bash
+mkdir -p /home/pgs/apps && cd /home/pgs/apps
+git clone https://github.com/fabriziopapa/payroll-gang-suite.git
+cd payroll-gang-suite
+PGS_DOMAIN=dominio.tld bash cpanel-setup.sh      # installa: pacchetti, DB, .env, build, servizio, proxy
+bash cpanel-check.sh                             # verifica (sola lettura, exit 1 se trova problemi)
+```
+
+`cpanel-setup.sh` è idempotente: rilancialo dopo una correzione, salta ciò che è già fatto.
+Non sovrascrive mai un `.env` esistente e non rigenera i segreti già presenti (rigenerare
+`ENCRYPTION_KEY` renderebbe illeggibili i dati cifrati in archivio). `cpanel-check.sh`
+controlla anche vincoli che è facile perdere di vista: `audit_log` append-only, database in
+ascolto solo su loopback, `.env` a permessi 600 e fuori dalla docroot, esclusione di
+`/.well-known` dal proxy prima delle altre regole (senza, AutoSSL non rinnova).
+
+> Entrambi gli script vanno **eseguiti con `bash`** e trasferiti come file (`git pull` o
+> `scp`): incollarne il contenuto nel terminale li fa interpretare riga per riga dalla
+> shell, che sull'`exit` finale chiude la sessione SSH.
 
 Sequenza (dettagli nelle guide): hardening SSH/firewall → clone → `setup.sql` → `.env` → build → seed admin → PM2 → nginx+SSL → verifica. Scenario migrazione: `pg_dump`/`pg_restore` + `.env` originale (stessa `ENCRYPTION_KEY` — obbligatoria per i dati cifrati).
 
