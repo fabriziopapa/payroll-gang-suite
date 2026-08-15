@@ -16,6 +16,8 @@
 #   PGS_USER          utente cPanel proprietario dell'app      (default: pgs)
 #   PGS_DOMAIN        dominio servito da Apache                (richiesto)
 #   PGS_PORT          porta di loopback dell'applicazione      (default: 3001)
+#   PGS_ENCRYPTION_KEY_FILE  file contenente la chiave (preferibile: non finisce
+#                       nella cronologia della shell). Es. /root/.pgs_enckey
 #   PGS_ENCRYPTION_KEY  chiave AES a 64 hex — DEVE essere quella dell'ambiente
 #                       di origine se si clonano i dati; altrimenti CF,
 #                       certificati e segreti TOTP saranno illeggibili
@@ -181,25 +183,51 @@ JWT_PUB=$(leggi_env JWT_PUBLIC_KEY_BASE64)
 if [ -n "$DB_PASSWORD" ]; then ok "Password del database presa dal .env esistente"
 else DB_PASSWORD=$(openssl rand -hex 24); ok "Password del database generata"; fi
 
+# Normalizza l'input: gli appunti di Windows aggiungono un ritorno a capo, e
+# spesso si incolla l'intera riga "ENCRYPTION_KEY=..." presa dal .env di origine.
+# Meglio accettare tutte queste forme che far fallire l'installazione.
+pulisci_chiave() {
+  printf '%s' "$1" \
+    | tr -d '\r\n\t "'"'"' ' \
+    | sed 's/^ENCRYPTION_KEY=//' \
+    | tr 'A-F' 'a-f'
+}
+chiave_valida() { printf '%s' "$1" | grep -qE '^[0-9a-f]{64}$'; }
+
 if [ -n "$ENC_KEY" ]; then
+  ENC_KEY=$(pulisci_chiave "$ENC_KEY")
   ok "ENCRYPTION_KEY presa dal .env esistente"
+elif [ -n "$PGS_ENCRYPTION_KEY_FILE" ] && [ -r "$PGS_ENCRYPTION_KEY_FILE" ]; then
+  ENC_KEY=$(pulisci_chiave "$(cat "$PGS_ENCRYPTION_KEY_FILE")")
+  ok "ENCRYPTION_KEY letta da $PGS_ENCRYPTION_KEY_FILE"
 elif [ -n "$PGS_ENCRYPTION_KEY" ]; then
-  ENC_KEY="$PGS_ENCRYPTION_KEY"; ok "ENCRYPTION_KEY presa dall'ambiente"
+  ENC_KEY=$(pulisci_chiave "$PGS_ENCRYPTION_KEY")
+  ok "ENCRYPTION_KEY presa dall'ambiente"
 else
   if [ -t 0 ] && [ "$PGS_ASSUME_YES" != "1" ]; then
     echo
     echo "  ENCRYPTION_KEY cifra a riposo codici fiscali, certificati e segreti TOTP."
     echo "  Se importerai dati da un altro ambiente DEVE essere identica a quella di origine,"
     echo "  altrimenti quei dati risulteranno illeggibili."
-    printf "  Incolla la chiave (64 caratteri esadecimali) — INVIO per generarne una nuova: "
-    read -r -s ENC_KEY </dev/tty; echo
+    echo "  Si puo' incollare la sola chiave o l'intera riga 'ENCRYPTION_KEY=...' del .env."
+    TENTATIVI=0
+    while [ "$TENTATIVI" -lt 3 ]; do
+      printf "  Chiave (64 hex) — INVIO per generarne una nuova: "
+      read -r -s RISPOSTA </dev/tty; echo
+      ENC_KEY=$(pulisci_chiave "$RISPOSTA")
+      [ -z "$ENC_KEY" ] && break
+      chiave_valida "$ENC_KEY" && break
+      TENTATIVI=$((TENTATIVI+1))
+      avv "Non valida: ricevuti $(printf '%s' "$ENC_KEY" | wc -c) caratteri dopo la pulizia, ne servono 64 esadecimali. Riprova."
+      ENC_KEY=""
+    done
   fi
   if [ -z "$ENC_KEY" ]; then
     ENC_KEY=$(openssl rand -hex 32)
     avv "Generata una chiave NUOVA: i dati cifrati provenienti da altri ambienti non saranno decifrabili"
   fi
 fi
-echo "$ENC_KEY" | grep -qE '^[0-9a-f]{64}$' || die "ENCRYPTION_KEY non valida: servono 64 caratteri esadecimali."
+chiave_valida "$ENC_KEY" || die "ENCRYPTION_KEY non valida: servono 64 caratteri esadecimali (ricevuti $(printf '%s' "$ENC_KEY" | wc -c))."
 ok "Impronta ENCRYPTION_KEY: $(printf '%s\n' "$ENC_KEY" | sha256sum | cut -c1-12)  (deve coincidere con quella dell'ambiente di origine)"
 
 [ -n "$COOKIE_SECRET" ] || COOKIE_SECRET=$(openssl rand -hex 32)
