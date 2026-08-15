@@ -524,5 +524,8 @@ echo "  · il certificato HTTPS va emesso da cPanel (AutoSSL) prima del primo ac
 echo "    con NODE_ENV=production il cookie di sessione è 'secure' e su HTTP non verrebbe accettato;"
 echo "  · CLIENT_ORIGIN in .env deve corrispondere esattamente al dominio usato dal browser;"
 echo "  · dopo ogni modifica del .env: systemctl restart $SERVICE (e nuovo build del client"
-echo "    se sono cambiate variabili VITE_*)."
+echo "    se sono cambiate variabili VITE_*);"
+echo "  · gli aggiornamenti vanno fatti come utente '"'"'$PGS_USER'"'"', non come root:"
+echo "      sudo -H -u $PGS_USER git -C $APP_DIR pull origin main"
+echo "    (la directory e sua; un git da root eseguirebbe hook di un altro utente)."
 exit $ESITO

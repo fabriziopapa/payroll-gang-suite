@@ -496,8 +496,13 @@ PostgreSQL e diverse garanzie di concorrenza dipendono da costrutti specifici.
 ## 12. Aggiornamenti
 
 ```bash
+# Il repository appartiene all'utente applicativo: il pull va fatto come lui.
+# Un `git pull` da root su una directory di un altro utente viene rifiutato
+# ("detected dubious ownership") ed è una protezione sensata: il progetto
+# imposta core.hooksPath, quindi root eseguirebbe hook scrivibili da quell'utente.
+sudo -H -u pgs git -C /home/pgs/apps/payroll-gang-suite pull origin main
+
 cd /home/pgs/apps/payroll-gang-suite
-git pull origin main
 npm ci --no-audit --no-fund        # solo se package-lock.json è cambiato
 npm run build
 rsync -a --delete --exclude '.htaccess' client/dist/ /home/pgs/public_html/
@@ -526,6 +531,7 @@ Controlla sempre le note di rilascio: alcune versioni richiedono di rieseguire `
 | Ricaricando una rotta interna arriva `404` | manca il fallback SPA | verifica `.htaccess` in `public_html` |
 | AutoSSL non rinnova più | `/.well-known` inoltrato al proxy | l'esclusione deve stare **prima** delle altre regole |
 | Le personalizzazioni Apache spariscono | modificato il vhost invece dell'include | usa `conf.d/userdata/...` e `ensure_vhost_includes` |
+| `git pull` da root: *detected dubious ownership* | dopo il `chown` dell'installazione la directory è dell'utente applicativo | eseguire il pull come quell'utente: `sudo -H -u pgs git -C <dir> pull origin main`. L'eccezione `safe.directory` per root è l'ultima risorsa: con `core.hooksPath` impostato, root eseguirebbe hook scrivibili dall'utente |
 | `tsc: command not found` durante il build | `npm ci` interrotto a metà | ripeti `npm ci`; **non** riavviare il servizio in questo stato |
 
 ---

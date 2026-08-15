@@ -237,8 +237,12 @@ if [ -d "$APP_DIR" ]; then
   case "$APP_DIR" in "$DOCROOT"*) : ;; *) ok "Il codice è fuori dalla docroot" ;; esac
 
   if [ -d "$APP_DIR/.git" ]; then
-    HEAD=$(git -C "$APP_DIR" log --oneline -1 </dev/null 2>/dev/null)
-    DIRTY=$(git -C "$APP_DIR" status --porcelain </dev/null 2>/dev/null | head -5)
+    # -c safe.directory vale SOLO per questi due comandi di sola lettura: la
+    # directory e' di proprieta' dell'utente applicativo, non di root, e senza
+    # questo git rifiuterebbe di leggerla. Nessuna configurazione globale.
+    GITRO="git -C $APP_DIR -c safe.directory=$APP_DIR"
+    HEAD=$($GITRO log --oneline -1 </dev/null 2>/dev/null)
+    DIRTY=$($GITRO status --porcelain </dev/null 2>/dev/null | head -5)
     ok "Repository git presente — HEAD: ${HEAD:-?}"
     [ -n "$DIRTY" ] && avv "Working tree con modifiche locali non committate"
   fi
