@@ -483,6 +483,32 @@ Esce con codice `1` se trova qualcosa da correggere, `0` altrimenti.
 
 ---
 
+## 10.3 Ambienti di collaudo che contengono dati reali
+
+Se in un ambiente non di produzione viene caricata una copia dei dati veri, i segreti TOTP
+clonati sono **quelli di produzione**: chiunque riceva l'URL e possieda la propria app di
+autenticazione può entrare e operare lì, convinto di essere nell'ambiente reale. Il lavoro
+finirebbe nel posto sbagliato e la divergenza si scoprirebbe tardi.
+
+Il rimedio è una password a livello Apache davanti all'intero dominio:
+
+```bash
+bash cpanel-preprod-lock.sh on      # chiede la password e configura
+bash cpanel-preprod-lock.sh stato   # verifica
+bash cpanel-preprod-lock.sh off     # rimuove
+```
+
+Copre anche `/api`, perché l'autorizzazione è valutata prima dell'inoltro al processo Node,
+e il client continua a funzionare: una volta autenticato, il browser allega le credenziali
+anche alle chiamate XHR. Resta esclusa `/.well-known`, che deve restare raggiungibile
+altrimenti AutoSSL non rinnova i certificati — l'eccezione è già nel file di esempio
+[`cpanel-basicauth.conf.example`](cpanel-basicauth.conf.example).
+
+La password non viene mai scritta in chiaro: lo script ne genera l'hash con
+`openssl passwd -apr1` e salva solo quello in `/etc/pgs/preprod.htpasswd`.
+
+---
+
 ## 11. Alternative senza root
 
 Se il server è un hosting cPanel condiviso senza root: PostgreSQL non è installabile e

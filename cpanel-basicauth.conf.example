@@ -1,0 +1,37 @@
+# ============================================================
+# PGS — Autenticazione base davanti a un ambiente NON di produzione
+#
+# Scopo: impedire che qualcuno raggiunga per caso un ambiente di collaudo che
+# contiene una copia dei dati reali. I segreti TOTP clonati sono quelli veri,
+# quindi senza questa barriera un utente legittimo potrebbe autenticarsi e
+# lavorare nell'ambiente sbagliato credendolo la produzione.
+#
+# NON usare questo file in produzione.
+#
+# Destinazione (una copia in std E una in ssl), accanto a pgs-proxy.conf:
+#   /etc/apache2/conf.d/userdata/std/2_4/<UTENTE>/<DOMINIO>/pgs-basicauth.conf
+#   /etc/apache2/conf.d/userdata/ssl/2_4/<UTENTE>/<DOMINIO>/pgs-basicauth.conf
+#
+# Lo script cpanel-preprod-lock.sh fa tutto questo (compresa la creazione del
+# file delle password). Vedi INSTALL_CPANEL.md.
+# ============================================================
+
+<Location "/">
+    AuthType Basic
+    AuthName "PGS - ambiente di pre-produzione"
+    AuthUserFile /etc/pgs/preprod.htpasswd
+    Require valid-user
+</Location>
+
+# Eccezione obbligatoria: AutoSSL valida il dominio scaricando un file sotto
+# /.well-known/acme-challenge. Se anche quello chiedesse la password, il
+# rinnovo dei certificati fallirebbe silenziosamente alla scadenza.
+<Location "/.well-known">
+    AuthType None
+    Require all granted
+</Location>
+
+# Nota: la protezione copre anche /api, perche' l'autorizzazione viene valutata
+# prima dell'inoltro al processo Node. Il browser, una volta autenticato,
+# allega le credenziali anche alle chiamate XHR del client: l'applicazione
+# funziona normalmente dietro questa barriera.

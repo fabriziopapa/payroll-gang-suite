@@ -85,6 +85,8 @@ payroll-gang-suite/
 ├── cpanel-htaccess.example      #   .htaccess docroot: routing SPA + header sicurezza
 ├── cpanel-setup.sh              #   ★ Installazione cPanel automatica (idempotente)
 ├── cpanel-check.sh              #   Verifica installazione cPanel (sola lettura)
+├── cpanel-preprod-lock.sh       #   Password Apache davanti a un ambiente di collaudo
+├── cpanel-basicauth.conf.example#   Include Apache per l'autenticazione base
 ├── CINECA_PROXY.md              # Setup proxy Italia per CSA-WS (Caddy)
 └── DEPLOY_AAPANEL.md            # (legacy — sostituito dalle guide INSTALL_VPS_*)
 ```
@@ -261,6 +263,19 @@ ascolto solo su loopback, `.env` a permessi 600 e fuori dalla docroot, esclusion
 > Entrambi gli script vanno **eseguiti con `bash`** e trasferiti come file (`git pull` o
 > `scp`): incollarne il contenuto nel terminale li fa interpretare riga per riga dalla
 > shell, che sull'`exit` finale chiude la sessione SSH.
+
+**Ambienti di collaudo con dati reali.** Se una copia dei dati di produzione viene caricata
+in un ambiente non di produzione, i segreti TOTP clonati sono quelli veri: un utente
+legittimo che raggiunge quell'URL può autenticarsi e lavorarci credendolo la produzione.
+`cpanel-preprod-lock.sh` mette una password Apache davanti a tutto il dominio — `/api`
+compreso, perché l'autorizzazione precede l'inoltro al processo Node — lasciando fuori solo
+`/.well-known`, che deve restare accessibile o AutoSSL non rinnova i certificati.
+
+```bash
+bash cpanel-preprod-lock.sh on      # chiede la password, configura e ricarica Apache
+bash cpanel-preprod-lock.sh stato
+bash cpanel-preprod-lock.sh off
+```
 
 Sequenza (dettagli nelle guide): hardening SSH/firewall → clone → `setup.sql` → `.env` → build → seed admin → PM2 → nginx+SSL → verifica. Scenario migrazione: `pg_dump`/`pg_restore` + `.env` originale (stessa `ENCRYPTION_KEY` — obbligatoria per i dati cifrati).
 

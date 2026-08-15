@@ -43,15 +43,23 @@ async function main(): Promise<void> {
     new PgJwtBlocklistRepository(db),
   )
 
-  const { userId, qrCodeUrl, backupKey } = await authService.registerUser(
+  const { userId, activationToken, qrCodeUrl, backupKey } = await authService.registerUser(
     username, true, '127.0.0.1',
   )
+
+  // Il token di attivazione e' salvato in DB solo come hash SHA-256: se non lo
+  // si mostra QUI, non e' piu' recuperabile in alcun modo e l'account non puo'
+  // essere attivato. Vale 24 ore.
+  const { env } = await import('../config/env.js')
+  const activateUrl = `${env.CLIENT_ORIGIN[0]}?activate=${activationToken}`
 
   console.log('\n✅ Utente creato. ID:', userId)
   console.log('\n📱 Scansiona il QR con Google Authenticator / Authy:')
   console.log('   (QR code salvato in admin-qr.html)\n')
   console.log('🔑 Chiave di backup:', backupKey)
   console.log('\n⚠️  Conserva la chiave di backup in un luogo sicuro!\n')
+  console.log('🔗 LINK DI ATTIVAZIONE (valido 24 ore, mostrato una sola volta):')
+  console.log('  ', activateUrl, '\n')
 
   // Salva QR in file HTML apribile nel browser
   const html = `<!DOCTYPE html>
@@ -61,14 +69,18 @@ async function main(): Promise<void> {
 <p>Scansiona con Google Authenticator / Authy</p>
 <img src="${qrCodeUrl}" alt="QR Code TOTP" style="width:256px;height:256px"/>
 <p><strong>Chiave backup:</strong> ${backupKey}</p>
+<p><strong>Link di attivazione</strong> (valido 24 ore):<br>
+<a href="${activateUrl}">${activateUrl}</a></p>
 <p style="color:red"><strong>Elimina questo file dopo aver configurato l'app!</strong></p>
 </body></html>`
 
   const { writeFileSync } = await import('node:fs')
   writeFileSync('admin-qr.html', html, 'utf-8')
 
-  console.log('📄 Apri admin-qr.html nel browser, scansiona il QR, poi eliminalo.')
-  console.log('   Poi chiama POST /api/v1/auth/activate con userId e il primo OTP.\n')
+  console.log('📄 Apri admin-qr.html nel browser, scansiona il QR, poi eliminalo (shred -u).')
+  console.log('   Il file e\' scritto nella directory di lavoro corrente: con')
+  console.log('   `npm run seed --workspace=server` finisce in server/.')
+  console.log('   Per completare: apri il link di attivazione e inserisci il primo codice OTP.\n')
 
   await closeDb()
   rl.close()
