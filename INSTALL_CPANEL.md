@@ -544,11 +544,23 @@ bash cpanel-preprod-lock.sh stato   # verifica
 bash cpanel-preprod-lock.sh off     # rimuove
 ```
 
-Copre anche `/api`, perché l'autorizzazione è valutata prima dell'inoltro al processo Node,
-e il client continua a funzionare: una volta autenticato, il browser allega le credenziali
-anche alle chiamate XHR. Resta esclusa `/.well-known`, che deve restare raggiungibile
-altrimenti AutoSSL non rinnova i certificati — l'eccezione è già nel file di esempio
-[`cpanel-basicauth.conf.example`](cpanel-basicauth.conf.example).
+**La barriera protegge l'interfaccia, non l'API.** L'applicazione autentica le chiamate a
+`/api` con `Authorization: Bearer <JWT>`, e l'autenticazione base usa lo stesso header: i due
+schemi non possono coesistere sulla stessa richiesta. Con `/api` protetto, Apache risponde
+`AH01614: client used wrong authentication scheme` e l'applicazione smette di funzionare anche
+per chi ha inserito la password. Il file di esempio esclude quindi `/api` — così senza password
+non si carica il client e nessuno può usare l'ambiente dal browser, che è lo scopo. L'API resta
+raggiungibile per conto suo, ma continua a richiedere TOTP e token.
+
+Se serve chiudere anche l'API, l'unica strada priva di conflitti è una restrizione per
+indirizzo IP (`Require ip`) al posto della password.
+
+Resta esclusa anche `/.well-known`, altrimenti AutoSSL non rinnova i certificati. Entrambe le
+eccezioni sono già in [`cpanel-basicauth.conf.example`](cpanel-basicauth.conf.example).
+
+> Il file delle password sta in `/etc/pgs/`: quella directory deve essere attraversabile da
+> Apache (`755`). Se eredita un `umask` restrittivo dalla shell, il sintomo è un **500** con
+> `Could not open password file` nel log — non un errore di configurazione.
 
 La password non viene mai scritta in chiaro: lo script ne genera l'hash con
 `openssl passwd -apr1` e salva solo quello in `/etc/pgs/preprod.htpasswd`.

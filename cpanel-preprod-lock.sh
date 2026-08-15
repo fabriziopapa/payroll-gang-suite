@@ -80,9 +80,20 @@ case "$AZIONE" in
     unset P1 P2
 
     mkdir -p /etc/pgs
+    # Permessi ESPLICITI: senza questo la directory eredita l'umask della shell
+    # chiamante e, se e' 077, Apache non riesce ad attraversarla — il sintomo e'
+    # un 500 con "Could not open password file" nel log, non un errore evidente.
+    chmod 755 /etc/pgs
     printf '%s:%s\n' "$PGS_AUTH_USER" "$HASH" > "$HTFILE"
     chmod 644 "$HTFILE"      # contiene hash, non password; Apache deve leggerlo
     ok "File delle password scritto: $HTFILE"
+
+    # Verifica preventiva: Apache legge il file come utente del dominio.
+    if ! sudo -n -u "$PGS_USER" test -r "$HTFILE" 2>/dev/null; then
+      avv "L'utente '$PGS_USER' non riesce a leggere $HTFILE: Apache restituirebbe 500"
+    else
+      ok "File leggibile dall'utente del dominio"
+    fi
 
     SORG="$(dirname "$0")/cpanel-basicauth.conf.example"
     [ -f "$SORG" ] || die "Manca $SORG"

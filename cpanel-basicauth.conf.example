@@ -31,7 +31,21 @@
     Require all granted
 </Location>
 
-# Nota: la protezione copre anche /api, perche' l'autorizzazione viene valutata
-# prima dell'inoltro al processo Node. Il browser, una volta autenticato,
-# allega le credenziali anche alle chiamate XHR del client: l'applicazione
-# funziona normalmente dietro questa barriera.
+# ECCEZIONE OBBLIGATORIA su /api.
+# L'applicazione autentica le chiamate API con "Authorization: Bearer <JWT>".
+# L'autenticazione base usa lo STESSO header: i due schemi non possono
+# coesistere sulla stessa richiesta. Senza questa eccezione Apache risponde
+#   AH01614: client used wrong authentication scheme
+# e l'applicazione smette di funzionare anche per chi ha inserito la password.
+<Location "/api">
+    AuthType None
+    Require all granted
+</Location>
+
+# Cosa protegge davvero questa barriera, allora: l'interfaccia. Senza password
+# non si carica il client, quindi nessuno puo' usare l'ambiente dal browser —
+# che e' lo scopo, evitare che un utente legittimo ci lavori per errore.
+# L'API resta raggiungibile da sola, ma continua a richiedere autenticazione
+# TOTP e token: non e' un accesso libero ai dati.
+# Se serve chiudere anche l'API, l'unica strada senza conflitti e' una
+# restrizione per indirizzo IP (Require ip) al posto della password.
