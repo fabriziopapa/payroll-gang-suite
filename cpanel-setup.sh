@@ -42,6 +42,7 @@ HOME_DIR="/home/$PGS_USER"
 APP_DIR="${APP_DIR:-$HOME_DIR/apps/payroll-gang-suite}"
 DOCROOT="${DOCROOT:-$HOME_DIR/public_html}"
 ENVF="$APP_DIR/.env"
+COME_APP=""   # valorizzata nella FASE 6, dopo il chown
 
 if [ -t 1 ]; then
   C_OK=$'\033[32m'; C_ERR=$'\033[31m'; C_WRN=$'\033[33m'; C_DIM=$'\033[90m'; C_TTL=$'\033[1m'; C_N=$'\033[0m'
@@ -288,11 +289,21 @@ ok "Privilegi applicativi riapplicati (audit_log resta append-only)"
 fase "FASE 6 — Dipendenze"
 
 cd "$APP_DIR" || die "Impossibile entrare in $APP_DIR"
+
+# La directory appartiene all'utente applicativo: npm e il build girano come
+# LUI, non come root. Due motivi: (1) i pacchetti eseguono script di post
+# installazione (argon2, esbuild, core-js) che come root avrebbero privilegi
+# totali sulla macchina; (2) eseguire come root lascerebbe file suoi dentro
+# una directory di un altro utente, rompendo i successivi 'git pull'.
+chown -R "$PGS_USER":"$PGS_USER" "$APP_DIR"
+COME_APP="sudo -H -u $PGS_USER"
+
 if [ -d node_modules ] && [ "$PGS_FORCE_NPM" != "1" ]; then
   salta "node_modules già presente (PGS_FORCE_NPM=1 per reinstallare)"
 else
-  npm ci --no-audit --no-fund || die "npm ci fallito: NON avviare il servizio in questo stato (node_modules incompleto)."
-  ok "Dipendenze installate"
+  $COME_APP npm ci --no-audit --no-fund \
+    || die "npm ci fallito: NON avviare il servizio in questo stato (node_modules incompleto)."
+  ok "Dipendenze installate (come utente $PGS_USER)"
 fi
 
 # ------------------------------------------------------------ FASE 7
@@ -380,10 +391,10 @@ ok "Permessi .env: 600, proprietario $PGS_USER"
 # ------------------------------------------------------------ FASE 8
 fase "FASE 8 — Compilazione"
 
-npm run build || die "Build fallito."
+$COME_APP npm run build || die "Build fallito."
 [ -f "$APP_DIR/server/dist/app.js" ]      || die "Build del server non prodotto."
 [ -f "$APP_DIR/client/dist/index.html" ]  || die "Build del client non prodotto."
-ok "Server e client compilati"
+ok "Server e client compilati (come utente $PGS_USER)"
 
 # ------------------------------------------------------------ FASE 9
 fase "FASE 9 — Pubblicazione del client"
@@ -439,8 +450,11 @@ UNITEOF
   ok "Unit systemd scritta"
 fi
 
+# Rete di sicurezza: a questo punto tutto dovrebbe gia' appartenere all'utente
+# applicativo (npm e build girano come lui), ma un file lasciato da root
+# impedirebbe i 'git pull' successivi.
 chown -R "$PGS_USER":"$PGS_USER" "$APP_DIR"
-ok "Proprietà di $APP_DIR assegnata a $PGS_USER"
+ok "Proprietà di $APP_DIR verificata: $PGS_USER"
 
 systemctl daemon-reload
 systemctl enable "$SERVICE" >/dev/null 2>&1

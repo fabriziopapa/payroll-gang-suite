@@ -249,8 +249,14 @@ cd /home/pgs/apps
 git clone https://github.com/fabriziopapa/payroll-gang-suite.git
 cd payroll-gang-suite
 
-npm ci --no-audit --no-fund
+chown -R pgs:pgs /home/pgs/apps/payroll-gang-suite
+sudo -H -u pgs npm ci --no-audit --no-fund
 ```
+
+**Non eseguire npm come root.** L'installazione lancia gli script di post-installazione di
+alcuni pacchetti (`argon2`, `esbuild`, `core-js`): come root avrebbero privilegi totali sulla
+macchina. In più lascerebbe file di root dentro una directory dell'utente applicativo, e i
+`git pull` successivi fallirebbero con *index file open failed: Permission denied*.
 
 `npm ci` attiva anche gli hook git del progetto (script `prepare`), che bloccano il commit
 accidentale di codici fiscali e segreti.
@@ -529,8 +535,8 @@ PostgreSQL e diverse garanzie di concorrenza dipendono da costrutti specifici.
 sudo -H -u pgs git -C /home/pgs/apps/payroll-gang-suite pull origin main
 
 cd /home/pgs/apps/payroll-gang-suite
-npm ci --no-audit --no-fund        # solo se package-lock.json è cambiato
-npm run build
+sudo -H -u pgs npm ci --no-audit --no-fund   # solo se package-lock.json è cambiato
+sudo -H -u pgs npm run build
 rsync -a --delete --exclude '.htaccess' client/dist/ /home/pgs/public_html/
 chown -R pgs:pgs /home/pgs/public_html /home/pgs/apps/payroll-gang-suite
 systemctl restart pgs
@@ -557,6 +563,7 @@ Controlla sempre le note di rilascio: alcune versioni richiedono di rieseguire `
 | Ricaricando una rotta interna arriva `404` | manca il fallback SPA | verifica `.htaccess` in `public_html` |
 | AutoSSL non rinnova più | `/.well-known` inoltrato al proxy | l'esclusione deve stare **prima** delle altre regole |
 | Le personalizzazioni Apache spariscono | modificato il vhost invece dell'include | usa `conf.d/userdata/...` e `ensure_vhost_includes` |
+| `git pull` come utente app: *index file open failed: Permission denied* | qualcosa è stato eseguito come root nella directory (tipicamente `npm ci` o `npm run build`) lasciando file suoi in `.git/` | `chown -R pgs:pgs <dir>` e ripetere. Per non ripresentarsi, npm e build vanno eseguiti come l'utente applicativo: `cpanel-setup.sh` lo fa |
 | `git pull` da root: *detected dubious ownership* | dopo il `chown` dell'installazione la directory è dell'utente applicativo | eseguire il pull come quell'utente: `sudo -H -u pgs git -C <dir> pull origin main`. L'eccezione `safe.directory` per root è l'ultima risorsa: con `core.hooksPath` impostato, root eseguirebbe hook scrivibili dall'utente |
 | `tsc: command not found` durante il build | `npm ci` interrotto a metà | ripeti `npm ci`; **non** riavviare il servizio in questo stato |
 
