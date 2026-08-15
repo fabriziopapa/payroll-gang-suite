@@ -265,17 +265,30 @@ ascolto solo su loopback, `.env` a permessi 600 e fuori dalla docroot, esclusion
 > `scp`): incollarne il contenuto nel terminale li fa interpretare riga per riga dalla
 > shell, che sull'`exit` finale chiude la sessione SSH.
 
-**Ambienti di collaudo con dati reali.** Se una copia dei dati di produzione viene caricata
-in un ambiente non di produzione, i segreti TOTP clonati sono quelli veri: un utente
-legittimo che raggiunge quell'URL può autenticarsi e lavorarci credendolo la produzione.
-`cpanel-preprod-lock.sh` mette una password Apache davanti a tutto il dominio — `/api`
-compreso, perché l'autorizzazione precede l'inoltro al processo Node — lasciando fuori solo
-`/.well-known`, che deve restare accessibile o AutoSSL non rinnova i certificati.
+**Ambienti di collaudo con dati reali.** Clonando i dati di produzione si clonano anche i
+segreti TOTP: gli stessi utenti accedono con la stessa app di autenticazione, senza
+riconfigurare nulla. Il rovescio è che nulla, nell'app di autenticazione, distingue i due
+ambienti — chi riceve l'URL può lavorare in quello sbagliato credendolo la produzione.
+
+L'accesso resta comunque protetto da TOTP e token: **non serve nessuna barriera aggiuntiva
+perché l'ambiente sia sicuro**, il punto è solo evitare l'uso per errore. Se si vuole
+affrontarlo, ci sono tre strade con compromessi diversi:
+
+| Strada | Copre `/api` | Effetto sull'uso |
+|---|---|---|
+| Nessuna barriera (predefinito) | — | si accede come sempre, solo TOTP + JWT |
+| `cpanel-preprod-lock.sh` (password Apache) | ❌ | il browser chiede le credenziali prima dell'interfaccia |
+| Restrizione per IP (`Require ip`) | ✅ | invisibile dalla rete autorizzata, inaccessibile da fuori |
+
+La password **non può** coprire `/api`: l'applicazione usa `Authorization: Bearer <JWT>` e
+l'autenticazione base usa lo stesso header, quindi i due schemi si escludono a vicenda
+(Apache risponde `AH01614: client used wrong authentication scheme`). Il file di esempio
+esclude `/api` proprio per questo. Dettagli in [`INSTALL_CPANEL.md`](INSTALL_CPANEL.md) §10.3.
 
 ```bash
 bash cpanel-preprod-lock.sh on      # chiede la password, configura e ricarica Apache
 bash cpanel-preprod-lock.sh stato
-bash cpanel-preprod-lock.sh off
+bash cpanel-preprod-lock.sh off     # torna al funzionamento normale
 ```
 
 Sequenza (dettagli nelle guide): hardening SSH/firewall → clone → `setup.sql` → `.env` → build → seed admin → PM2 → nginx+SSL → verifica. Scenario migrazione: `pg_dump`/`pg_restore` + `.env` originale (stessa `ENCRYPTION_KEY` — obbligatoria per i dati cifrati).

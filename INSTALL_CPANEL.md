@@ -536,7 +536,19 @@ clonati sono **quelli di produzione**: chiunque riceva l'URL e possieda la propr
 autenticazione può entrare e operare lì, convinto di essere nell'ambiente reale. Il lavoro
 finirebbe nel posto sbagliato e la divergenza si scoprirebbe tardi.
 
-Il rimedio è una password a livello Apache davanti all'intero dominio:
+**L'ambiente è già protetto** da TOTP e token: chi non ha un'utenza non entra. Il problema è
+diverso e più sottile — è l'uso *per errore* da parte di chi un'utenza ce l'ha davvero.
+
+Non esiste una risposta giusta per tutti. Le opzioni, con i loro costi:
+
+| Strada | Copre `/api` | Costo per chi usa l'ambiente |
+|---|---|---|
+| **Nessuna barriera** | — | nessuno: si accede come in produzione, solo TOTP + JWT |
+| **Password Apache** (`cpanel-preprod-lock.sh`) | ❌ (vedi sotto) | una finestra di credenziali del browser prima dell'interfaccia |
+| **Restrizione per IP** (`Require ip`) | ✅ | invisibile dalla rete autorizzata; da fuori (rete mobile, casa) si resta chiusi fuori |
+| **Distinzione visiva** (banda "PRE-PRODUZIONE") | — | nessuno, ma richiede una piccola modifica al client |
+
+Se si sceglie la password:
 
 ```bash
 bash cpanel-preprod-lock.sh on      # chiede la password e configura
