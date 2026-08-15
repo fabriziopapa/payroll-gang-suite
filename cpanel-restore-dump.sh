@@ -74,14 +74,34 @@ fase "3 — Arresto del servizio"
 systemctl stop "$SERVICE" 2>/dev/null && ok "Servizio '$SERVICE' fermato" || avv "Servizio non attivo"
 
 fase "4 — Ripristino"
-sudo -n -u postgres pg_restore --clean --if-exists --no-owner -d "$DB_NAME" "$DUMP" \
+
+# L'utente 'postgres' non puo' leggere dentro /root (permessi 700): il dump va
+# messo in una directory che possa attraversare. Ne creiamo una temporanea di
+# sua proprieta' e con permessi 700, cosi' i dati personali non diventano
+# leggibili da altri utenti del sistema.
+STAGE=$(mktemp -d /tmp/pgs-restore-XXXXXX) || die "Impossibile creare la directory temporanea."
+cp "$DUMP" "$STAGE/dump.pgc" || die "Copia del dump fallita."
+chown -R postgres:postgres "$STAGE"
+chmod 700 "$STAGE"; chmod 600 "$STAGE/dump.pgc"
+ok "Dump reso accessibile a postgres in $STAGE"
+
+sudo -n -u postgres pg_restore --clean --if-exists --no-owner -d "$DB_NAME" "$STAGE/dump.pgc" \
   </dev/null >/tmp/pgs_restore.log 2>&1
-# pg_restore segnala come errori anche i DROP di oggetti inesistenti: si
-# valuta l'esito dai dati, non dal codice di uscita.
-grep -c "^pg_restore: error" /tmp/pgs_restore.log >/dev/null 2>&1
+ESITO_RESTORE=$?
+
+shred -u "$STAGE/dump.pgc" 2>/dev/null || rm -f "$STAGE/dump.pgc"
+rmdir "$STAGE" 2>/dev/null
+
 NERR=$(grep -c "^pg_restore: error" /tmp/pgs_restore.log 2>/dev/null || echo 0)
-[ "$NERR" -gt 0 ] && avv "$NERR righe di errore in /tmp/pgs_restore.log (spesso innocue: DROP di oggetti assenti)"
-ok "Ripristino eseguito"
+if [ "$ESITO_RESTORE" -ne 0 ] && [ "$NERR" -gt 0 ]; then
+  echo
+  sed -n '1,10p' /tmp/pgs_restore.log | sed 's/^/      /'
+  echo
+fi
+# I DROP di oggetti inesistenti sono normali con --clean su un database nuovo:
+# l'esito vero si giudica dai dati (fase 7), non dal codice di uscita.
+[ "$NERR" -gt 0 ] && avv "$NERR righe di errore in /tmp/pgs_restore.log"
+ok "pg_restore eseguito (codice $ESITO_RESTORE)"
 
 fase "5 — Riallineamento dello schema"
 DB_PASS=$(grep -E '^DB_PASSWORD=' "$APP_DIR/.env" | head -1 | cut -d= -f2- | tr -d '"'"'"' ')
@@ -114,6 +134,17 @@ DOPO_U=$(CONTA "SELECT count(*) FROM users")
 DOPO_A=$(CONTA "SELECT count(*) FROM anagrafiche")
 DOPO_B=$(CONTA "SELECT count(*) FROM bozze")
 ok "Contenuto ripristinato: utenti=${DOPO_U:-?} anagrafiche=${DOPO_A:-?} liquidazioni=${DOPO_B:-?}"
+
+# Un dump di dimensioni reali che lascia i conteggi identici significa che non
+# e' stato importato nulla: e' il caso in cui l'errore passerebbe inosservato.
+DIM=$(stat -c %s "$DUMP" 2>/dev/null || echo 0)
+if [ "$DOPO_U" = "$PRIMA_U" ] && [ "$DOPO_A" = "$PRIMA_A" ] && [ "$DOPO_B" = "$PRIMA_B" ] && [ "$DIM" -gt 51200 ]; then
+  echo
+  sed -n '1,10p' /tmp/pgs_restore.log | sed 's/^/      /'
+  echo
+  systemctl start "$SERVICE" 2>/dev/null
+  die "I conteggi sono identici a prima: il ripristino NON ha importato nulla. Sopra le prime righe del log."
+fi
 ORF=$(CONTA "SELECT count(*) FROM bozze b LEFT JOIN users u ON u.id=b.created_by WHERE b.created_by IS NOT NULL AND u.id IS NULL")
 [ "$ORF" = "0" ] && ok "Nessun riferimento orfano tra liquidazioni e utenti" || avv "Liquidazioni con autore inesistente: $ORF"
 
