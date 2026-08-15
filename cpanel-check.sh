@@ -146,11 +146,25 @@ else
 fi
 
 if command -v ss >/dev/null 2>&1; then
-  PUB=$(ss -lnt 2>/dev/null | awk '$4 ~ /:5432$/ {print $4}' | grep -vE '^(127\.0\.0\.1|\[::1\])' )
+  # Tutto 127.0.0.0/8 e' loopback (su Debian/Ubuntu 127.0.1.1 e' l'indirizzo
+  # dell'hostname): esposto verso la rete e' solo cio' che sta fuori da quel range.
+  BIND5432=$(ss -lnt 2>/dev/null | awk '$4 ~ /:5432$/ {print $4}')
+  PUB=$(printf '%s\n' "$BIND5432" | grep -vE '^(127\.[0-9]+\.[0-9]+\.[0-9]+|\[::1\])' | grep -v '^$')
   if [ -n "$PUB" ]; then
-    ko "PostgreSQL in ascolto su indirizzi non di loopback: $PUB"
-  elif ss -lnt 2>/dev/null | grep -q ':5432'; then
-    ok "Porta 5432 in ascolto solo su loopback"
+    ko "PostgreSQL in ascolto su indirizzi NON di loopback: $(echo $PUB) — il database e' raggiungibile dalla rete"
+  elif [ -n "$BIND5432" ]; then
+    ok "Porta 5432 solo su loopback ($(echo $BIND5432))"
+  fi
+
+  # Verifica che sia in ascolto proprio su 127.0.0.1: e' l'indirizzo che
+  # finira' in DB_HOST. Un bind sul solo 127.0.1.1 farebbe fallire la
+  # connessione dell'applicazione con un errore che sembra un bug dell'app.
+  if [ -n "$BIND5432" ]; then
+    if printf '%s\n' "$BIND5432" | grep -qE '^(127\.0\.0\.1|\*|0\.0\.0\.0):5432$'; then
+      ok "In ascolto su 127.0.0.1:5432 (l'indirizzo usato da DB_HOST)"
+    else
+      ko "NON in ascolto su 127.0.0.1:5432 ma su $(echo $BIND5432): con DB_HOST=127.0.0.1 l'applicazione non si connettera'. Impostare listen_addresses = '127.0.0.1' in postgresql.conf"
+    fi
   fi
 
   PUB_APP=$(ss -lnt 2>/dev/null | awk -v p=":$PGS_PORT\$" '$4 ~ p {print $4}' | grep -vE '^(127\.0\.0\.1|\[::1\])')
