@@ -85,6 +85,7 @@ payroll-gang-suite/
 ├── cpanel-htaccess.example      #   .htaccess docroot: routing SPA + header sicurezza
 ├── cpanel-setup.sh              #   ★ Installazione cPanel automatica (idempotente)
 ├── cpanel-check.sh              #   Verifica installazione cPanel (sola lettura)
+├── cpanel-restore-dump.sh       #   Ripristino di un dump in ambiente di collaudo
 ├── cpanel-preprod-lock.sh       #   Password Apache davanti a un ambiente di collaudo
 ├── cpanel-basicauth.conf.example#   Include Apache per l'autenticazione base
 ├── CINECA_PROXY.md              # Setup proxy Italia per CSA-WS (Caddy)

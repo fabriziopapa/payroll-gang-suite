@@ -489,6 +489,46 @@ Esce con codice `1` se trova qualcosa da correggere, `0` altrimenti.
 
 ---
 
+## 10.2 Popolare l'ambiente da un dump di produzione
+
+Sull'ambiente di origine (il dump è una sola lettura, non serve fermare nulla):
+
+```bash
+pg_dump -h 127.0.0.1 -U payroll_user -d payroll_gang \
+  -Fc --no-owner --no-privileges -f /root/pgs_$(date +%F).dump
+```
+
+> Usare i binari della **stessa major** del server di origine. Se nel `PATH` c'è un
+> `pg_dump` più vecchio del server, l'operazione fallisce con *server version mismatch*:
+> indicare il percorso completo dei binari corretti.
+
+Trasferire il file (**mai** dentro una docroot: è scaricabile dal web) e ripristinare:
+
+```bash
+scp /root/pgs_*.dump root@host-destinazione:/root/
+
+bash cpanel-restore-dump.sh /root/pgs_2026-08-15.dump
+```
+
+Lo script fa in sequenza: backup del database attuale, arresto del servizio, ripristino,
+**riesecuzione di `setup.sql`**, ripristino dei privilegi, riavvio e verifiche. I due
+passaggi centrali sono quelli che si dimenticano e che si pagano dopo:
+
+- `pg_restore` ricrea le tabelle secondo lo schema **del dump**, che può essere più vecchio
+  di quello atteso dal codice. Il caso concreto: `anagrafiche.cod_fis` torna a `VARCHAR(16)`
+  e il primo import che prova a scriverci un codice fiscale cifrato (oltre 100 caratteri)
+  fallisce. `setup.sql` è idempotente e riallinea la colonna.
+- `pg_restore` azzera i privilegi, quindi anche il `REVOKE` che rende `audit_log`
+  append-only: senza riapplicarlo, il registro degli accessi torna modificabile
+  dall'utente applicativo.
+
+**I segreti TOTP viaggiano col dump.** Sono cifrati con `ENCRYPTION_KEY`: se la chiave del
+sistema di destinazione coincide con quella di origine, ogni utente accede con la voce che
+ha già nella propria app di autenticazione, senza reinstallare nulla. Se non coincide,
+nessuno entra — e la soluzione non è rigenerare alcunché, ma correggere la chiave.
+
+---
+
 ## 10.3 Ambienti di collaudo che contengono dati reali
 
 Se in un ambiente non di produzione viene caricata una copia dei dati veri, i segreti TOTP
