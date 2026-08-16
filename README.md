@@ -87,6 +87,7 @@ payroll-gang-suite/
 ├── cpanel-setup.sh              #   ★ Installazione cPanel automatica (idempotente)
 ├── cpanel-check.sh              #   Verifica installazione cPanel (sola lettura)
 ├── pgs-update.sh                #   ★ Aggiornamento cPanel: pull, build, pubblicazione, riavvio
+├── pgs-update-check.sh          #   Controllo aggiornamenti (sola lettura) → avviso in Impostazioni
 ├── pgs-hardening.conf.example   #   Drop-in systemd: confinamento del servizio
 ├── cpanel-restore-dump.sh       #   Ripristino di un dump in ambiente di collaudo
 ├── cpanel-preprod-lock.sh       #   Password Apache davanti a un ambiente di collaudo
@@ -280,6 +281,15 @@ backend e frontend come utente applicativo, backup e pubblicazione della docroot
 verifica su `/health`. Si ferma se `server/sql/setup.sql` è cambiato — lo schema non va mai
 applicato in automatico su dati reali — e se una build fallisce non tocca la docroot: il sito
 resta sulla versione precedente. Dettagli in [`INSTALL_CPANEL.md` §12](INSTALL_CPANEL.md).
+
+**Per accorgersene senza controllare a mano**, `pgs-update-check.sh --install` registra un
+timer che ogni sei ore fa `git fetch` e scrive un file di stato; se nel `.env` è valorizzato
+`UPDATE_STATUS_FILE`, gli amministratori vedono in *Impostazioni* la versione installata, quella
+disponibile, i commit mancanti e i comandi da eseguire. È solo un avviso: **non esiste un
+pulsante che aggiorna**. Un endpoint che esegue `git pull` e ricompila sarebbe esecuzione di
+codice arbitrario per chiunque ottenga un token amministratore, e il servizio gira comunque
+confinato con filesystem in sola lettura. L'avviso sta nell'applicazione, l'esecuzione resta a
+chi ha accesso root.
 
 **Due cose specifiche di cPanel** che non emergono sulle altre piattaforme e costano un'ora a
 capirle. Le direttive Apache sono **per dominio**, non per utente: un secondo dominio verso la

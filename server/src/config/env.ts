@@ -82,6 +82,12 @@ const envSchema = z.object({
   CINECA_PROXY_SECRET: z.string().min(32).optional(), // condiviso con il Caddy del proxy
   // Codice rapportoParentela per figlio/figlia (da screen CSA: "FG")
   PARENTELA_FIGLIO: z.string().default('FG'),
+
+  // Controllo aggiornamenti (opzionale). File JSON di sola lettura scritto da
+  // pgs-update-check.sh: il server lo legge per mostrare agli amministratori
+  // se il repository ha commit piu' recenti di quelli installati.
+  // Assente = pannello aggiornamenti disattivato. Vedi INSTALL_CPANEL.md.
+  UPDATE_STATUS_FILE: z.string().min(1).optional(),
 })
 
 const parsed = envSchema.safeParse(process.env)

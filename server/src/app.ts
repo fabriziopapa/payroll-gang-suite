@@ -43,6 +43,7 @@ import { cinecaRoutes }       from './routes/cineca.js'
 import { verificaLiquidatoRoutes } from './routes/verificaLiquidato.js'
 import { vociConfigRoutes }   from './routes/vociConfig.js'
 import { auditRoutes } from './routes/audit.js'
+import { systemRoutes }      from './routes/system.js'
 
 // ============================================================
 
@@ -207,6 +208,7 @@ await app.register(cinecaRoutes,      { prefix: '/api/v1/cineca' })
 await app.register(verificaLiquidatoRoutes, { prefix: '/api/v1/verifica-liquidato' })
 await app.register(vociConfigRoutes,  { prefix: '/api/v1/voci-config' })
 await app.register(auditRoutes,       { prefix: '/api/v1/audit' })
+await app.register(systemRoutes,      { prefix: '/api/v1/system' })
 
 // Health check (no auth) — SEC-M07: solo status minimale, nessuna info di versione/sistema
 app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))

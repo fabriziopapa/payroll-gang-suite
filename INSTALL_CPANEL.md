@@ -22,6 +22,7 @@ L'intera installazione è automatizzata da script versionati nel repository:
 | [`cpanel-setup.sh`](cpanel-setup.sh) | **installa**: pacchetti, database, `.env`, build, servizio, proxy |
 | [`cpanel-check.sh`](cpanel-check.sh) | **verifica**: sola lettura, non modifica nulla |
 | [`pgs-update.sh`](pgs-update.sh) | **aggiorna**: pull, build, pubblicazione, riavvio ([§12](#12-aggiornamenti)) |
+| [`pgs-update-check.sh`](pgs-update-check.sh) | **avvisa**: controlla se ci sono aggiornamenti, sola lettura ([§12.1](#121-avviso-in-app-quando-cè-un-aggiornamento)) |
 
 Sono due file distinti di proposito: un installatore che si autocertifica non è una
 verifica: se sbaglia una scrittura, sbaglia allo stesso modo nel controllarla.
@@ -824,6 +825,59 @@ su `/health` fallisce sempre, va fatta con attesa.
 **Rollback manuale**: `git reset --hard <commit>`, build, ripristino dell'archivio della
 docroot da `/home/pgs/.pgs-docroot-backup/`, `systemctl restart pgs`.
 
+### 12.1 Avviso in-app quando c'è un aggiornamento
+
+Perché ci si accorga che un aggiornamento esiste senza dover ricordarsi di controllare, PGS
+può mostrare agli amministratori una card in *Impostazioni* con la versione installata, quella
+disponibile, l'elenco dei commit mancanti e i comandi da eseguire.
+
+È di **sola lettura**: l'applicazione non esegue git, non compila e non si riavvia. Si limita
+a leggere un file JSON prodotto fuori banda da [`pgs-update-check.sh`](pgs-update-check.sh),
+che a sua volta fa soltanto `git fetch` — cioè scarica i riferimenti remoti senza toccare
+l'albero di lavoro.
+
+```bash
+# Installa il timer systemd (controllo ogni 6 ore) ed esegue subito un controllo
+bash /home/pgs/apps/payroll-gang-suite/pgs-update-check.sh --install
+
+# Abilita il pannello lato applicazione
+ENV=/home/pgs/apps/payroll-gang-suite/.env
+printf 'UPDATE_STATUS_FILE=/var/lib/pgs/update-status.json\n' >> "$ENV"
+chown pgs:pgs "$ENV"; chmod 600 "$ENV"
+systemctl restart pgs
+```
+
+Verifica:
+
+```bash
+systemctl list-timers pgs-update-check.timer --no-pager
+cat /var/lib/pgs/update-status.json
+```
+
+Il file è `640` e appartiene a `root:pgs`: l'applicazione può leggerlo, non scriverlo. Il
+percorso sta **fuori** dal repository di proposito — dentro comparirebbe come file non
+tracciato e `pgs-update` si rifiuterebbe di partire, segnalando modifiche locali.
+
+Stati mostrati dalla card, tutti espliciti:
+
+| Stato | Significato |
+|---|---|
+| *Applicazione aggiornata* | nessun commit più recente sul ramo configurato |
+| *Aggiornamento disponibile* | elenco dei commit e comandi per applicarli |
+| *Controllo aggiornamenti fermo* | l'ultimo controllo riuscito ha più di 24 ore: probabilmente il timer non gira |
+| *Controllo non riuscito* | il timer gira ma non raggiunge il remoto (rete o credenziali git) |
+| *Controllo non attivo* | `UPDATE_STATUS_FILE` non configurato, oppure script mai eseguito |
+
+Per disattivare tutto: `bash pgs-update-check.sh --uninstall` e commenta `UPDATE_STATUS_FILE`
+nel `.env`.
+
+> **Perché non c'è un pulsante "Aggiorna ora".** Un endpoint che esegue `git pull` e ricompila
+> è esecuzione di codice arbitrario per chiunque ottenga un token amministratore o sfrutti una
+> vulnerabilità in una dipendenza. In più, con l'hardening di [§7.1](#71-hardening-del-servizio-consigliato)
+> il servizio ha il filesystem in sola lettura e nessun privilegio: non potrebbe comunque
+> scrivere nella docroot né riavviarsi. L'avviso sta nell'applicazione, l'esecuzione resta in
+> mano a chi ha accesso root.
+
 ---
 
 ## 13. Problemi frequenti
@@ -850,6 +904,8 @@ docroot da `/home/pgs/.pgs-docroot-backup/`, `systemctl restart pgs`.
 | `curl` su `/health` fallisce subito dopo `systemctl restart` | Node impiega ~1,5 s a mettersi in ascolto, ma systemd dichiara `active` subito | attendi e riprova, oppure usa `pgs-update.sh` che fa polling |
 | Nel log Apache: `collections_remove_stale: Failed to access DBM file … Permission denied` | `/var/cpanel/secdatadir` non è scrivibile dall'utente con cui mod_ruid2 serve il dominio | `chmod 1777 /var/cpanel/secdatadir` (lo sticky bit c'è già) e riavvia httpd. Non blocca nulla: degrada le regole WAF con stato e riempie il log |
 | Nel log Apache: `AH02217 ssl_stapling_init_cert` sull'hostname del server | certificato autofirmato di cPanel, senza emittente da cui ottenere l'OCSP | innocuo, non riguarda i domini dell'applicazione |
+| La card aggiornamenti dice *Controllo non attivo* | `UPDATE_STATUS_FILE` assente dal `.env`, o script mai eseguito, o file non leggibile da `pgs` | vedi [§12.1](#121-avviso-in-app-quando-cè-un-aggiornamento); controlla `ls -l /var/lib/pgs/update-status.json` (atteso `640 root:pgs`) |
+| La card aggiornamenti dice *Controllo fermo* | il timer non gira | `systemctl status pgs-update-check.timer`, `journalctl -u pgs-update-check -n 20` |
 
 ### 13.1 Ha risposto Apache o l'applicazione?
 

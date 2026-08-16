@@ -837,3 +837,42 @@ export const verificaLiquidatoApi = {
     return apiFetch<LiquidatoDettaglioApi>(`/verifica-liquidato/dettaglio?${q.toString()}`)
   },
 }
+
+// ── Sistema: stato aggiornamenti (solo admin, sola lettura) ───
+
+export type StatoAggiornamento =
+  | 'non-configurato'
+  | 'aggiornato'
+  | 'disponibile'
+  | 'controllo-fallito'
+  | 'obsoleto'
+
+export interface CommitApi {
+  hash:      string
+  messaggio: string
+  data:      string
+}
+
+export interface UpdateStatusApi {
+  stato:                StatoAggiornamento
+  /** Comandi di aggiornamento, generati dal server (contengono percorsi di
+   *  sistema: non vanno messi nel bundle, che è pubblico). */
+  comandi?:             string[]
+  ramo?:                string
+  ultimoControllo?:     string
+  commitInstallato?:    string
+  commitDisponibile?:   string
+  versioneInstallata?:  string | null
+  versioneDisponibile?: string | null
+  commitMancanti?:      number
+  commits?:             CommitApi[]
+  messaggio?:           string
+}
+
+export const systemApi = {
+  /**
+   * Stato degli aggiornamenti disponibili. Il server si limita a leggere un
+   * file scritto da pgs-update-check.sh: non esegue git e non aggiorna nulla.
+   */
+  updateStatus: () => apiFetch<UpdateStatusApi>('/system/update-status'),
+}

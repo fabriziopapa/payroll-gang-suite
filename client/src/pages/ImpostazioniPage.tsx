@@ -7,6 +7,7 @@ import { useState, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { settingsApi } from '../api/endpoints'
 import { showToast } from '../components/ToastManager'
+import AggiornamentiCard from '../components/AggiornamentiCard'
 import type { Contatto, ModelloComunicazione, ScorporoMap } from '../types'
 import { DEFAULT_BOLLO_OPZIONI } from '../types'
 
@@ -493,6 +494,9 @@ export default function ImpostazioniPage() {
               </div>
             </section>
           )}
+
+          {/* Stato aggiornamenti — sola lettura, solo admin */}
+          {user?.isAdmin && <AggiornamentiCard />}
 
           {/* Sezione Moduli — kill-switch funzionalità in rollout, solo admin */}
           {user?.isAdmin && (
