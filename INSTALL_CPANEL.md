@@ -746,10 +746,29 @@ PostgreSQL e diverse garanzie di concorrenza dipendono da costrutti specifici.
 
 ## 12. Aggiornamenti
 
-Usa [`pgs-update.sh`](pgs-update.sh), da root via SSH o *WHM → Terminal*:
+Usa [`pgs-update.sh`](pgs-update.sh), da root via SSH o *WHM → Terminal*.
+
+**Installalo una volta sola come comando**, così non c'è alcun percorso da ricordare:
+
+```bash
+install -o root -g root -m 700 \
+  /home/pgs/apps/payroll-gang-suite/pgs-update.sh /usr/local/sbin/pgs-update
+```
+
+Da quel momento l'aggiornamento è:
 
 ```bash
 sudo -H -u pgs git -C /home/pgs/apps/payroll-gang-suite pull
+pgs-update
+```
+
+La copia in `/usr/local/sbin` appartiene a root ed è `700`: root non esegue un file che
+l'utente applicativo potrebbe modificare. È deliberatamente **non** aggiornata dal `git pull`;
+quando lo script cambia, `pgs-update` se ne accorge e stampa il comando `install` da rieseguire.
+
+Senza installarlo il comando esteso funziona comunque:
+
+```bash
 bash /home/pgs/apps/payroll-gang-suite/pgs-update.sh
 ```
 
@@ -775,9 +794,22 @@ esatti per tornare al commit precedente e ripristinare l'archivio della docroot.
 
 Variabili utili:
 
+Se non ci sono commit nuovi lo script **lo chiede**, invece di pretendere che tu ti ricordi
+una variabile d'ambiente:
+
+```
+✓ Già aggiornato (86b281ce): nessun commit nuovo da compilare.
+
+  Ricompilo comunque? Serve se hai modificato una variabile VITE_*
+  nel .env: quelle entrano nel bundle solo al build.
+  Ricompilare e ripubblicare? [s/N]
+```
+
+In esecuzione non interattiva (cron, script) la domanda non compare e serve `PGS_FORCE=1`.
+
 | Variabile | Effetto |
 |---|---|
-| `PGS_FORCE=1` | ricompila anche senza commit nuovi — **necessario dopo aver cambiato una `VITE_*` nel `.env`**, che entra nel bundle solo al build |
+| `PGS_FORCE=1` | ricompila anche senza commit nuovi, senza chiedere — utile in esecuzione non interattiva |
 | `PGS_SKIP_PULL=1` | compila l'albero di lavoro attuale senza aggiornarlo |
 | `PGS_ALLOW_SCHEMA=1` | procede anche se `setup.sql` è cambiato |
 | `PGS_KEEP_BACKUPS` | quanti archivi della docroot conservare (default 3) |

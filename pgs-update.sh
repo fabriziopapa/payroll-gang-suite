@@ -8,6 +8,14 @@
 # USO (da root, via SSH o WHM → Terminal):
 #     bash /home/pgs/apps/payroll-gang-suite/pgs-update.sh
 #
+# INSTALLAZIONE COME COMANDO (consigliata, una volta sola):
+#     install -o root -g root -m 700 \
+#         /home/pgs/apps/payroll-gang-suite/pgs-update.sh /usr/local/sbin/pgs-update
+#   Da quel momento basta digitare:  pgs-update
+#   La copia è di root e non scrivibile dall'utente applicativo: root non esegue
+#   un file che quell'utente potrebbe modificare. Va rinfrescata a mano quando
+#   cambia lo script — lo script stesso avvisa se le due copie differiscono.
+#
 # ⚠ NON incollare il contenuto di questo file nel terminale: la shell
 #   eseguirebbe le righe una per una. Trasferirlo con `git pull` ed
 #   eseguirlo con `bash`.
@@ -97,6 +105,17 @@ COMMIT_PRIMA=$(come_pgs git -C "$PGS_APP_DIR" rev-parse HEAD)
 ok "Applicazione: $PGS_APP_DIR (v$VERSIONE_PRIMA, ${COMMIT_PRIMA:0:8})"
 ok "Docroot: $PGS_DOCROOT · servizio: $PGS_SERVICE · porta: $PGS_PORT"
 
+# Se lo script gira dalla copia installata in /usr/local/sbin (di proprietà di
+# root, non scrivibile dall'utente applicativo), avvisa quando il repository ne
+# contiene una versione diversa: la copia va rinfrescata a mano, di proposito.
+COPIA_INSTALLATA=/usr/local/sbin/pgs-update
+if [[ -f "$COPIA_INSTALLATA" && -f "$PGS_APP_DIR/pgs-update.sh" ]] \
+   && ! cmp -s "$COPIA_INSTALLATA" "$PGS_APP_DIR/pgs-update.sh"; then
+  warn "La copia in $COPIA_INSTALLATA differisce da quella nel repository."
+  info "Se il repository è aggiornato, reinstallala con:"
+  info "  install -o root -g root -m 700 $PGS_APP_DIR/pgs-update.sh $COPIA_INSTALLATA"
+fi
+
 # ------------------------------------------------------------
 fase "Aggiornamento del codice"
 # ------------------------------------------------------------
@@ -123,18 +142,36 @@ else
   COMMIT_DOPO=$(come_pgs git -C "$PGS_APP_DIR" rev-parse HEAD)
 fi
 
-if [[ "$COMMIT_PRIMA" == "$COMMIT_DOPO" && "${PGS_FORCE:-0}" != "1" ]]; then
-  printf '\n%s✓ Già aggiornato (%s), nessuna ricompilazione necessaria.%s\n' \
+FORZATO="${PGS_FORCE:-0}"
+
+if [[ "$COMMIT_PRIMA" == "$COMMIT_DOPO" && "$FORZATO" != "1" ]]; then
+  printf '\n%s✓ Già aggiornato (%s): nessun commit nuovo da compilare.%s\n' \
     "$G" "${COMMIT_PRIMA:0:8}" "$N"
-  info "Per ricompilare comunque: PGS_FORCE=1 bash $0"
-  exit 0
+
+  # Ricompilare senza commit nuovi serve in un caso preciso e non ovvio: le
+  # variabili VITE_* del .env finiscono nel bundle al momento del build, quindi
+  # cambiarle non ha effetto finché il client non viene ricompilato.
+  # Se siamo su un terminale lo chiediamo, invece di pretendere che l'operatore
+  # si ricordi PGS_FORCE=1.
+  if [[ -t 0 && -t 1 ]]; then
+    printf '\n  Ricompilo comunque? Serve se hai modificato una variabile VITE_*\n'
+    printf '  nel .env: quelle entrano nel bundle solo al build.\n'
+    read -r -p "  Ricompilare e ripubblicare? [s/N] " RISPOSTA
+    case "${RISPOSTA,,}" in
+      s|si|sì|y|yes) FORZATO=1 ;;
+      *) printf '\n  Nessuna azione.\n\n'; exit 0 ;;
+    esac
+  else
+    info "Esecuzione non interattiva: per ricompilare comunque usa PGS_FORCE=1."
+    exit 0
+  fi
 fi
 
 if [[ "$COMMIT_PRIMA" != "$COMMIT_DOPO" ]]; then
   ok "Aggiornato a ${COMMIT_DOPO:0:8}:"
   come_pgs git -C "$PGS_APP_DIR" log --oneline "$COMMIT_PRIMA..$COMMIT_DOPO" | sed 's/^/      /'
 else
-  ok "Nessun nuovo commit, ricompilazione forzata (PGS_FORCE=1)."
+  ok "Nessun nuovo commit: ricompilazione richiesta esplicitamente."
 fi
 
 CAMBIATI=$(come_pgs git -C "$PGS_APP_DIR" diff --name-only "$COMMIT_PRIMA" "$COMMIT_DOPO" || true)
