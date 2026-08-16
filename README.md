@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.08.08.S-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.08.16-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -391,6 +391,15 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 ## Changelog
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.08.16
+**Indipendenza dal database, operativita' su cPanel, avviso aggiornamenti**
+- **Blocco A — accessi diretti al database chiusi (`e78a348`)**: le query che vivevano in `routes/`, `services/`, `middleware/` e `auth/` sono state spostate nel persistence layer dietro interfacce (`IRefreshTokensRepository`, `IJwtBlocklistRepository`, `IImportLogRepository`). Il vincolo e' ora verificato da un test di architettura che fallisce se un modulo sopra il persistence layer importa l'ORM o esegue SQL grezzo. Nessuna migrazione, comportamento invariato.
+- **Terzo ambiente su cPanel/WHM**: guida completa e installazione automatizzata (`cpanel-setup.sh`, `cpanel-check.sh`, `cpanel-restore-dump.sh`), reverse proxy Apache, PostgreSQL nativo, servizio systemd.
+- **Aggiornamento in un comando (`pgs-update.sh`)**: pull fast-forward, `npm ci` condizionale, build, pubblicazione della docroot con backup rotativo, riavvio e verifica su `/health`. Si arresta se lo schema e' cambiato: le migrazioni non vengono mai applicate in automatico.
+- **Avviso aggiornamenti in Impostazioni (solo admin)**: `pgs-update-check.sh` registra un timer che confronta il commit installato con il remoto; l'applicazione **legge** lo stato e mostra cosa manca e come applicarlo. Nessun pulsante che aggiorna: sarebbe esecuzione di codice arbitrario per chi ottiene un token amministratore.
+- **Confinamento del servizio (`pgs-hardening.conf.example`)**: drop-in systemd con filesystem in sola lettura, nessuna capability, `/proc` e kernel schermati.
+- **Correzione**: `seed.ts` scartava il token di attivazione restituito da `registerUser`, rendendo impossibile attivare il primo amministratore su un'installazione pulita. Ora stampa il link.
 
 ### 26.08.08.S
 **Sicurezza — hardening a seguito dell'audit del 2026-08-07**
