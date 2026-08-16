@@ -1,0 +1,71 @@
+# ============================================================
+# PGS — Confinamento systemd del servizio applicativo
+#
+# Destinazione:
+#   /etc/systemd/system/pgs.service.d/10-hardening.conf
+#
+# Poi:
+#   systemctl daemon-reload && systemctl restart pgs
+#   systemd-analyze security pgs | tail -3    # esposizione attesa < 3 (era ~9)
+#   curl -s http://127.0.0.1:3001/health      # deve rispondere
+#
+# Rollback: cancella questo file, `systemctl daemon-reload`, riavvia.
+# E' un drop-in proprio per questo: la unit principale resta intatta.
+#
+# Vedi INSTALL_CPANEL.md §7.1.
+# ============================================================
+
+[Service]
+
+# --- Filesystem in sola lettura --------------------------------------------
+# Il server in esecuzione non scrive MAI su disco: gli unici writeFileSync del
+# progetto sono in db/seed.ts e db/regen-qr.ts, che sono CLI lanciate a mano e
+# non passano da questa unit. Se in futuro l'applicazione dovesse scrivere
+# (upload su filesystem, cache su file, log su file), aggiungere il percorso
+# con ReadWritePaths= invece di allentare ProtectSystem.
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+UMask=0077
+
+# --- Privilegi --------------------------------------------------------------
+# Nessuna capability: la porta e' > 1024, quindi CAP_NET_BIND_SERVICE non serve.
+# NoNewPrivileges impedisce qualsiasi escalation anche in caso di binario setuid.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictSUIDSGID=yes
+
+# --- Kernel e host schermati ------------------------------------------------
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+PrivateDevices=yes
+DevicePolicy=closed
+
+# --- Superficie ridotta -----------------------------------------------------
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @obsolete
+
+# --- NON aggiungere ---------------------------------------------------------
+# MemoryDenyWriteExecute=yes
+#   E' la direttiva che quasi tutte le guide di hardening consigliano, ma il
+#   JIT di V8 ha bisogno di pagine scrivibili ED eseguibili: con questa attiva
+#   Node non parte affatto, e l'errore non e' esplicativo.
+#
+# PrivateUsers=yes
+#   Rompe l'accesso al socket/porta di PostgreSQL in diverse configurazioni.
+#
+# ProtectHome=yes
+#   Il codice, il .env e la docroot stanno sotto /home/<utente>: servirebbe
+#   comunque la lettura. `read-only` e' il livello corretto qui.

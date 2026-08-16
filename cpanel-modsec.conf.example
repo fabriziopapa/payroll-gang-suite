@@ -1,0 +1,55 @@
+# ============================================================
+# PGS — Eccezioni ModSecurity per server cPanel/WHM
+#
+# Destinazione (una copia in std E una in ssl):
+#   /etc/apache2/conf.d/userdata/std/2_4/<UTENTE>/<DOMINIO>/pgs-modsec.conf
+#   /etc/apache2/conf.d/userdata/ssl/2_4/<UTENTE>/<DOMINIO>/pgs-modsec.conf
+#
+# Poi:
+#   /scripts/ensure_vhost_includes --user=<UTENTE>
+#   /scripts/rebuildhttpdconf
+#   apachectl configtest && /scripts/restartsrv_httpd
+#
+# Vedi INSTALL_CPANEL.md §8.1.
+# ============================================================
+
+<IfModule mod_security2.c>
+
+    # --- CRS 911100: metodi HTTP ammessi ---------------------------------
+    # REQUEST-911-METHOD-ENFORCEMENT limita `tx.allowed_methods` a
+    # GET HEAD POST OPTIONS. PGS espone un'API REST che usa anche PUT,
+    # PATCH e DELETE: senza questa eccezione ogni scrittura non-POST prende
+    # 5 punti di anomalia, supera la soglia della regola 949110 e viene
+    # respinta con 403 PRIMA di raggiungere l'applicazione.
+    #
+    # Sintomo tipico: GET /api/v1/settings -> 200, PUT sullo stesso path -> 403,
+    # con corpo HTML (index.html servito come ErrorDocument) invece di JSON.
+    # Nel log: id "911100" msg "Method is not allowed by policy" data "PUT".
+    #
+    # L'eccezione e' ristretta a /api: sui file statici, dove un PUT sarebbe
+    # davvero anomalo, la regola resta attiva. Tutte le altre regole del CRS
+    # (SQLi, XSS, LFI, rilevamento scanner) continuano a valere anche qui, e
+    # ogni richiesta deve comunque superare JWT, controllo Origin e requireAdmin.
+    <Location "/api">
+        SecRuleRemoveById 911100
+    </Location>
+
+    # --- CRS 920450: header Accept-Charset (disattivata di default) -------
+    # La 920450 considera `Accept-Charset` un header proibito e da sola vale
+    # 5 punti, cioe' la soglia di blocco: un client che lo invia riceve 403
+    # sull'intero sito. In pratica lo mandano solo scanner e qualche proxy
+    # aziendale d'epoca. Togli il commento SOLO se utenti reali vengono
+    # bloccati, dopo aver confermato l'id nel log:
+    #
+    #   grep 920450 /etc/apache2/logs/error_log | tail -3
+    #
+    # <Location "/">
+    #     SecRuleRemoveById 920450
+    # </Location>
+
+</IfModule>
+
+# Prima di disattivare qualsiasi altra regola: identificala dal log per `id`,
+# verifica che il blocco riguardi traffico legittimo, e restringi l'eccezione
+# al percorso minimo. `SecRuleEngine Off` sul dominio e' quasi sempre la
+# risposta sbagliata: spegne anche le protezioni che stanno funzionando.

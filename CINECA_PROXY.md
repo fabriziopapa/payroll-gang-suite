@@ -85,6 +85,63 @@ curl -s -o /dev/null -w "%{http_code}" https://cineca-proxy.tuodominio.it/x
 TLS automatico via Let's Encrypt (Caddy lo gestisce da solo).
 Firewall VPS: aprire solo 80/443 (80 serve per la challenge ACME) + SSH.
 
+## ⚠️ Il firewall del cloud provider: la trappola ricorrente
+
+`iptables` sulla VM **non basta**. I provider cloud filtrano il traffico a monte, prima che
+arrivi alla macchina: su Oracle Cloud sono le *Security List* del VCN (o il *Network Security
+Group* associato alla VNIC), su AWS i Security Group, su Hetzner le Firewall Rules. Una regola
+chiusa lì produce un **drop silenzioso**: nessun `connection refused`, solo un timeout.
+
+Ci siamo cascati due volte, con lo stesso sintomo e cause diverse:
+
+- **2026-07-27** — la 443 era aperta in `iptables` ma **chiusa nella Security List**. La 80 era
+  aperta (per questo Caddy aveva ottenuto il certificato ACME e sembrava a posto), la 443 no.
+  Dall'app: timeout. Dalla VM stessa: pure timeout, ma per un motivo diverso e fuorviante —
+  vedi la nota sull'hairpin qui sotto.
+- **2026-08-16** — un secondo server applicativo, con IP diverso, non riusciva a raggiungere il
+  proxy: `504 CINECA_UNREACHABLE`. La regola di ingress esisteva ma autorizzava **solo l'IP del
+  primo server**.
+
+**Regola pratica: ogni server applicativo che deve usare il proxy ha bisogno della propria
+regola di ingress TCP 443**, con il suo `/32`. Su Oracle: *Networking → Virtual Cloud Networks →
+&lt;VCN&gt; → Subnets → &lt;subnet della VM&gt; → Security Lists → Add Ingress Rules*, con
+Stateful, Source Type `CIDR`, Source CIDR `<IP-DEL-SERVER>/32`, IP Protocol `TCP`, Destination
+Port Range `443`. Se la VM usa un NSG sulla VNIC, la regola va messa lì.
+
+Diagnosi in un comando, **dal server applicativo**:
+
+```bash
+curl -s -o /dev/null -w '%{http_code} in %{time_total}s\n' --max-time 15 \
+  https://cineca-proxy.tuodominio.it/
+```
+
+| Risultato | Significato |
+|---|---|
+| `403` in meno di un secondo | il proxy è raggiungibile e funziona (403 è corretto: manca `X-Proxy-Auth`) |
+| `000` dopo il timeout pieno | il pacchetto viene scartato a monte: firewall del cloud provider |
+| `connection refused` immediato | Caddy è fermo, oppure non è in ascolto sulla 443 |
+
+> **Non fidarsi dei test eseguiti dalla VM del proxy verso sé stessa.** Il nome
+> `cineca-proxy.tuodominio.it` risolve all'IP pubblico della VM, e Oracle non fa NAT reflection
+> (hairpin): la VM non riesce a contattare il proprio IP pubblico e va in timeout anche quando
+> tutto funziona. A luglio questo ha prodotto una diagnosi sbagliata durata un giorno. Per
+> testare Caddy dall'interno si usa `--resolve`:
+>
+> ```bash
+> curl -sv --resolve cineca-proxy.tuodominio.it:443:127.0.0.1 \
+>   https://cineca-proxy.tuodominio.it/ -o /dev/null
+> ```
+
+## Serve davvero il proxy?
+
+Solo se l'IP del server applicativo è geo-bloccato da CINECA. Da un IP italiano la chiamata
+diretta funziona ed è **più veloce**: misurato il 2026-07-27, liquidato diretto `200` in 0,28 s
+contro 0,41 s via proxy. Il proxy è un ripiego contro il geo-blocco, non un miglioramento.
+
+Prima di aprire regole di firewall per un nuovo server, prova quindi la strada più semplice:
+mettere `cinecaUseProxy` a `false` in *Impostazioni → Moduli*. Se le chiamate dirette
+funzionano, il proxy non serve a quel server e non c'è alcuna configurazione da aggiungere.
+
 ## Configurazione app
 
 `.env` del server (VPS HK):

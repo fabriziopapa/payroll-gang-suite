@@ -82,9 +82,12 @@ payroll-gang-suite/
 ├── INSTALL_VPS_NATIVE.md        #   Guida completa Ubuntu nativa (nginx/PM2/PG da apt)
 ├── INSTALL_CPANEL.md            #   Guida completa cPanel/WHM (Apache+systemd+PG nativo)
 ├── cpanel-proxy.conf.example    #   Include vhost Apache per cPanel (ProxyPass /api)
+├── cpanel-modsec.conf.example   #   Include Apache: sblocca PUT/PATCH/DELETE su /api (CRS 911100)
 ├── cpanel-htaccess.example      #   .htaccess docroot: routing SPA + header sicurezza
 ├── cpanel-setup.sh              #   ★ Installazione cPanel automatica (idempotente)
 ├── cpanel-check.sh              #   Verifica installazione cPanel (sola lettura)
+├── pgs-update.sh                #   ★ Aggiornamento cPanel: pull, build, pubblicazione, riavvio
+├── pgs-hardening.conf.example   #   Drop-in systemd: confinamento del servizio
 ├── cpanel-restore-dump.sh       #   Ripristino di un dump in ambiente di collaudo
 ├── cpanel-preprod-lock.sh       #   Password Apache davanti a un ambiente di collaudo
 ├── cpanel-basicauth.conf.example#   Include Apache per l'autenticazione base
@@ -264,6 +267,28 @@ ascolto solo su loopback, `.env` a permessi 600 e fuori dalla docroot, esclusion
 > Entrambi gli script vanno **eseguiti con `bash`** e trasferiti come file (`git pull` o
 > `scp`): incollarne il contenuto nel terminale li fa interpretare riga per riga dalla
 > shell, che sull'`exit` finale chiude la sessione SSH.
+
+**Aggiornare l'installazione** è a sua volta un comando solo, da root:
+
+```bash
+sudo -H -u pgs git -C /home/pgs/apps/payroll-gang-suite pull
+bash /home/pgs/apps/payroll-gang-suite/pgs-update.sh
+```
+
+`pgs-update.sh` fa pull fast-forward, `npm ci` solo se il lockfile è cambiato, build di
+backend e frontend come utente applicativo, backup e pubblicazione della docroot, riavvio e
+verifica su `/health`. Si ferma se `server/sql/setup.sql` è cambiato — lo schema non va mai
+applicato in automatico su dati reali — e se una build fallisce non tocca la docroot: il sito
+resta sulla versione precedente. Dettagli in [`INSTALL_CPANEL.md` §12](INSTALL_CPANEL.md).
+
+**Due cose specifiche di cPanel** che non emergono sulle altre piattaforme e costano un'ora a
+capirle. Le direttive Apache sono **per dominio**, non per utente: un secondo dominio verso la
+stessa applicazione ha bisogno delle proprie copie degli include, altrimenti serve i file
+statici ma risponde `404` su `/api/`. E il set di regole OWASP CRS blocca `PUT`, `PATCH` e
+`DELETE` con un `403` che arriva **prima** dell'applicazione: serve
+[`cpanel-modsec.conf.example`](cpanel-modsec.conf.example), che disattiva quella singola regola
+limitatamente a `/api`. In entrambi i casi l'errore sembra applicativo ma non lo è — la risposta
+è HTML servito da Apache, non JSON dell'app.
 
 **Ambienti di collaudo con dati reali.** Clonando i dati di produzione si clonano anche i
 segreti TOTP: gli stessi utenti accedono con la stessa app di autenticazione, senza

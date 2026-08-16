@@ -15,12 +15,13 @@ Documenti correlati: [`INSTALL_VPS_NATIVE.md`](INSTALL_VPS_NATIVE.md) (VPS senza
 
 ## 0. Procedura automatica (consigliata)
 
-L'intera installazione è automatizzata da due script versionati nel repository:
+L'intera installazione è automatizzata da script versionati nel repository:
 
 | Script | Ruolo |
 |---|---|
 | [`cpanel-setup.sh`](cpanel-setup.sh) | **installa**: pacchetti, database, `.env`, build, servizio, proxy |
 | [`cpanel-check.sh`](cpanel-check.sh) | **verifica**: sola lettura, non modifica nulla |
+| [`pgs-update.sh`](pgs-update.sh) | **aggiorna**: pull, build, pubblicazione, riavvio ([§12](#12-aggiornamenti)) |
 
 Sono due file distinti di proposito: un installatore che si autocertifica non è una
 verifica: se sbaglia una scrittura, sbaglia allo stesso modo nel controllarla.
@@ -393,6 +394,78 @@ journalctl -u pgs -n 50 --no-pager            # log applicativi
 > altri ambienti. In quel caso ricorda che il file versionato contiene un `cwd` segnaposto
 > (`/path/to/payroll-gang-suite`) da sostituire con il percorso reale dopo ogni `git pull`.
 
+### 7.1 Hardening del servizio (consigliato)
+
+La unit qui sopra è volutamente minimale. Su un ambiente con dati reali conviene confinare il
+processo: il server **non scrive mai su disco** — gli unici `writeFileSync` del progetto stanno
+in `seed.ts` e `regen-qr.ts`, che sono CLI lanciate a mano — quindi può girare con l'intero
+filesystem in sola lettura senza alcuna perdita di funzionalità.
+
+Le direttive stanno in un *drop-in* separato, così la unit principale resta quella di sopra e
+il rollback è la cancellazione di un file:
+
+```bash
+mkdir -p /etc/systemd/system/pgs.service.d
+cp /home/pgs/apps/payroll-gang-suite/pgs-hardening.conf.example \
+   /etc/systemd/system/pgs.service.d/10-hardening.conf
+systemctl daemon-reload && systemctl restart pgs
+
+systemd-analyze security pgs | tail -3     # esposizione attesa < 3 (era ~9)
+curl -s http://127.0.0.1:3001/health       # deve rispondere
+```
+
+Vedi [`pgs-hardening.conf.example`](pgs-hardening.conf.example) per il contenuto commentato.
+In sintesi: filesystem in sola lettura (`ProtectSystem=strict`, `ProtectHome=read-only`),
+nessuna capability (la porta 3001 è > 1024, quindi `CAP_NET_BIND_SERVICE` non serve),
+`NoNewPrivileges`, kernel e `/proc` schermati, famiglie di socket e chiamate di sistema
+ristrette.
+
+> **Non impostare `MemoryDenyWriteExecute`.** È la direttiva che quasi tutte le guide di
+> hardening consigliano, ma il JIT di V8 richiede pagine scrivibili ed eseguibili: Node non
+> parte affatto, con un errore poco comprensibile.
+
+Rollback:
+
+```bash
+rm /etc/systemd/system/pgs.service.d/10-hardening.conf
+systemctl daemon-reload && systemctl restart pgs
+```
+
+**Confinamento di rete (opzionale).** Se l'ambiente non usa CINECA né l'invio di email, si può
+impedire al processo qualsiasi connessione uscente: anche in caso di dipendenza npm compromessa
+non potrebbe esfiltrare dati né scaricare un payload.
+
+```bash
+cat > /etc/systemd/system/pgs.service.d/20-network.conf <<'EOF'
+[Service]
+IPAddressDeny=any
+IPAddressAllow=localhost
+EOF
+systemctl daemon-reload && systemctl restart pgs
+```
+
+Va in un file separato perché è l'unico pezzo da rimuovere il giorno in cui si attivano CINECA
+o SMTP: con questo attivo quelle chiamate falliscono con errori di rete che sembrano guasti
+esterni.
+
+### 7.2 Chi può riavviare il servizio
+
+`pgs.service` è una unit di sistema: **solo root** la controlla. In pratica si riavvia da
+*WHM → Terminal* oppure via SSH con `systemctl restart pgs`.
+
+Non funziona delegare il riavvio all'utente del pannello con una regola in `/etc/sudoers.d/`:
+cPanel assegna a quell'utente la `jailshell` e monta il jail con l'opzione **`nosuid`**, quindi
+il bit setuid di `/usr/bin/sudo` non ha effetto e si ottiene
+`sudo: effective uid is not 0, is /usr/bin/sudo on a file system with the 'nosuid' option set`.
+Cambiare la shell in `/bin/bash` lo farebbe funzionare, ma toglierebbe il confinamento proprio
+all'account che serve i file web: sconsigliato su un ambiente con dati reali.
+
+> **Non esporre un comando di aggiornamento o riavvio dentro l'applicazione.** Un endpoint che
+> esegue `git pull` e ricompila è, in pratica, esecuzione di codice arbitrario da remoto per
+> chiunque ottenga un token amministratore o sfrutti una vulnerabilità in una dipendenza — e
+> contraddirebbe §7.1, dove il servizio è reso deliberatamente incapace di modificare il
+> proprio codice.
+
 ---
 
 ## 8. Reverse proxy Apache
@@ -408,6 +481,8 @@ for TIPO in std ssl; do
   mkdir -p /etc/apache2/conf.d/userdata/$TIPO/2_4/$UTENTE/$DOMINIO
   cp /home/pgs/apps/payroll-gang-suite/cpanel-proxy.conf.example \
      /etc/apache2/conf.d/userdata/$TIPO/2_4/$UTENTE/$DOMINIO/pgs-proxy.conf
+  cp /home/pgs/apps/payroll-gang-suite/cpanel-modsec.conf.example \
+     /etc/apache2/conf.d/userdata/$TIPO/2_4/$UTENTE/$DOMINIO/pgs-modsec.conf
 done
 
 /scripts/ensure_vhost_includes --user=$UTENTE
@@ -423,6 +498,86 @@ systemctl restart httpd
 Contenuto (vedi [`cpanel-proxy.conf.example`](cpanel-proxy.conf.example)): l'esclusione di
 `/.well-known` **deve precedere** le altre regole, altrimenti il rinnovo automatico dei
 certificati AutoSSL viene inoltrato all'applicazione Node e fallisce.
+
+### 8.1 ModSecurity: i metodi REST vanno abilitati
+
+Con il set di regole OWASP CRS attivo — l'impostazione predefinita su cPanel — la regola
+**911100** (`REQUEST-911-METHOD-ENFORCEMENT`) ammette solo `GET HEAD POST OPTIONS`. `PUT`,
+`PATCH` e `DELETE` prendono 5 punti di anomalia, superano la soglia di blocco della 949110 e
+vengono respinti con **403 prima di raggiungere l'applicazione**.
+
+Il sintomo è caratteristico: `GET /api/v1/settings` risponde `200`, `PUT` sullo **stesso**
+percorso risponde `403`. Nel log:
+
+```
+grep 911100 /etc/apache2/logs/error_log | tail -3
+… id "911100" … msg "Method is not allowed by policy" … data "PUT" …
+```
+
+Il file [`cpanel-modsec.conf.example`](cpanel-modsec.conf.example), copiato come
+`pgs-modsec.conf` accanto a `pgs-proxy.conf` (vedi il ciclo qui sopra), disattiva quella
+singola regola **solo sotto `/api`**, dove i metodi sono legittimi e dove ogni richiesta deve
+comunque superare JWT, controllo `Origin` e `requireAdmin`. Sui file statici — dove un `PUT` è
+davvero anomalo — la regola resta attiva, e tutte le altre regole del CRS (SQLi, XSS, LFI,
+rilevamento scanner) continuano a valere anche su `/api`.
+
+> Regola generale prima di disattivare una regola del WAF: identificarla dal log per `id`, e
+> restringere l'eccezione al percorso minimo. Un `SecRuleEngine Off` sul dominio è quasi
+> sempre la risposta sbagliata.
+
+### 8.2 Aggiungere un altro dominio alla stessa applicazione
+
+Gli include sono **per dominio, non per utente**: un dominio nuovo che punta alla stessa
+docroot servirà i file statici — il client si carica — ma `/api/` resterà ad Apache. Servono
+tre cose, e saltarne una produce errori che sembrano dell'applicazione senza esserlo.
+
+```bash
+SRC=vecchio-dominio.tld            # dominio già configurato
+DST=nuovo-dominio.tld
+
+for TIPO in std ssl; do
+  mkdir -p /etc/apache2/conf.d/userdata/$TIPO/2_4/pgs/$DST
+  for F in pgs-proxy.conf pgs-modsec.conf; do
+    cp /etc/apache2/conf.d/userdata/$TIPO/2_4/pgs/$SRC/$F \
+       /etc/apache2/conf.d/userdata/$TIPO/2_4/pgs/$DST/$F
+  done
+done
+
+/scripts/ensure_vhost_includes --user=pgs
+/scripts/rebuildhttpdconf
+apachectl configtest && /scripts/restartsrv_httpd
+```
+
+Poi il dominio va aggiunto a **`CLIENT_ORIGIN`** nel `.env` (lista separata da virgole, senza
+spazi e senza slash finale) e il servizio riavviato. Senza, il proxy funziona ma CORS respinge
+il login. Il **primo** elemento della lista è quello usato per costruire i link di attivazione
+degli account: se il nuovo dominio diventa quello ufficiale, va messo per primo.
+
+```bash
+ENV=/home/pgs/apps/payroll-gang-suite/.env
+cp -p "$ENV" "$ENV.bak"
+sed -i 's|^CLIENT_ORIGIN=.*|CLIENT_ORIGIN=https://nuovo-dominio.tld,https://vecchio-dominio.tld|' "$ENV"
+chown pgs:pgs "$ENV"; chmod 600 "$ENV"     # sed -i ricrea il file: senza, resta di root
+systemctl restart pgs
+journalctl -u pgs -n 10 --no-pager         # una sintassi errata blocca l'avvio: si vede qui
+shred -u "$ENV.bak"                        # contiene i segreti
+```
+
+Verifiche finali — nessun dato viene toccato e non c'è rischio di lockout, perché un corpo
+vuoto viene respinto dalla validazione prima della logica di autenticazione e una richiesta
+senza token si ferma al middleware:
+
+```bash
+# atteso 400: il proxy inoltra a Node
+curl -si -X POST https://nuovo-dominio.tld/api/v1/auth/login \
+  -H 'Content-Type: application/json' -d '{}' | head -3
+# attesi 401 in JSON: i metodi REST superano il WAF
+curl -si -X DELETE https://nuovo-dominio.tld/api/v1/bozze/00000000-0000-0000-0000-000000000000 | head -3
+curl -si -X PUT https://nuovo-dominio.tld/api/v1/settings \
+  -H 'Content-Type: application/json' -d '{}' | head -3
+```
+
+Infine emetti il certificato per il nuovo dominio (*cPanel → SSL/TLS Status → Run AutoSSL*).
 
 ---
 
@@ -591,25 +746,51 @@ PostgreSQL e diverse garanzie di concorrenza dipendono da costrutti specifici.
 
 ## 12. Aggiornamenti
 
-```bash
-# Il repository appartiene all'utente applicativo: il pull va fatto come lui.
-# Un `git pull` da root su una directory di un altro utente viene rifiutato
-# ("detected dubious ownership") ed è una protezione sensata: il progetto
-# imposta core.hooksPath, quindi root eseguirebbe hook scrivibili da quell'utente.
-sudo -H -u pgs git -C /home/pgs/apps/payroll-gang-suite pull origin main
+Usa [`pgs-update.sh`](pgs-update.sh), da root via SSH o *WHM → Terminal*:
 
-cd /home/pgs/apps/payroll-gang-suite
-sudo -H -u pgs npm ci --no-audit --no-fund   # solo se package-lock.json è cambiato
-sudo -H -u pgs npm run build
-rsync -a --delete --exclude '.htaccess' client/dist/ /home/pgs/public_html/
-chown -R pgs:pgs /home/pgs/public_html /home/pgs/apps/payroll-gang-suite
-systemctl restart pgs
+```bash
+sudo -H -u pgs git -C /home/pgs/apps/payroll-gang-suite pull
+bash /home/pgs/apps/payroll-gang-suite/pgs-update.sh
 ```
 
-Controlla sempre le note di rilascio: alcune versioni richiedono di rieseguire `setup.sql`
-(idempotente) o uno script di migrazione dati.
+La prima riga porta lo script stesso all'ultima versione; la seconda fa tutto il resto in otto
+fasi, fermandosi con un messaggio esplicito al primo problema:
 
-**Rollback**: `git reset --hard <commit>` seguito da build, rsync e `systemctl restart pgs`.
+1. controlli preliminari (root, repository, `.env`, unit systemd, comandi disponibili);
+2. `git pull --ff-only` — si rifiuta di procedere se ci sono modifiche locali non committate,
+   che il pull sovrascriverebbe, e non crea mai un commit di merge sul server;
+3. **si arresta se `server/sql/setup.sql` è cambiato**: lo schema non viene mai applicato in
+   automatico su dati reali. Fai il backup, applicalo a mano, poi rilancia con
+   `PGS_ALLOW_SCHEMA=1`;
+4. `npm ci` solo se `package-lock.json` è cambiato o se `node_modules` manca;
+5. build di backend e frontend **come utente applicativo**, mai come root;
+6. verifica che `client/dist/index.html` e gli asset esistano davvero, **prima** di toccare la
+   docroot;
+7. backup della docroot in un archivio (ne conserva 3), poi `rsync --delete`;
+8. riavvio e attesa attiva su `/health` fino a 20 secondi.
+
+Se una build fallisce, la docroot non viene toccata: il sito continua a servire la versione
+precedente. Se l'applicazione non risponde dopo il riavvio, lo script stampa il log e i comandi
+esatti per tornare al commit precedente e ripristinare l'archivio della docroot.
+
+Variabili utili:
+
+| Variabile | Effetto |
+|---|---|
+| `PGS_FORCE=1` | ricompila anche senza commit nuovi — **necessario dopo aver cambiato una `VITE_*` nel `.env`**, che entra nel bundle solo al build |
+| `PGS_SKIP_PULL=1` | compila l'albero di lavoro attuale senza aggiornarlo |
+| `PGS_ALLOW_SCHEMA=1` | procede anche se `setup.sql` è cambiato |
+| `PGS_KEEP_BACKUPS` | quanti archivi della docroot conservare (default 3) |
+
+Due dettagli che lo script gestisce e che è bene conoscere se si procede a mano. Il `rsync`
+verso la docroot **deve** escludere `.htaccess`, `.well-known` e `.user.ini`: con `--delete` e
+senza esclusioni si cancellano la CSP con il fallback SPA e la directory di validazione
+AutoSSL, e i certificati smettono di rinnovarsi. E `systemctl is-active` risponde `active`
+circa un secondo e mezzo prima che Node sia effettivamente in ascolto: una verifica immediata
+su `/health` fallisce sempre, va fatta con attesa.
+
+**Rollback manuale**: `git reset --hard <commit>`, build, ripristino dell'archivio della
+docroot da `/home/pgs/.pgs-docroot-backup/`, `systemctl restart pgs`.
 
 ---
 
@@ -630,6 +811,29 @@ Controlla sempre le note di rilascio: alcune versioni richiedono di rieseguire `
 | `git pull` come utente app: *index file open failed: Permission denied* | qualcosa è stato eseguito come root nella directory (tipicamente `npm ci` o `npm run build`) lasciando file suoi in `.git/` | `chown -R pgs:pgs <dir>` e ripetere. Per non ripresentarsi, npm e build vanno eseguiti come l'utente applicativo: `cpanel-setup.sh` lo fa |
 | `git pull` da root: *detected dubious ownership* | dopo il `chown` dell'installazione la directory è dell'utente applicativo | eseguire il pull come quell'utente: `sudo -H -u pgs git -C <dir> pull origin main`. L'eccezione `safe.directory` per root è l'ultima risorsa: con `core.hooksPath` impostato, root eseguirebbe hook scrivibili dall'utente |
 | `tsc: command not found` durante il build | `npm ci` interrotto a metà | ripeti `npm ci`; **non** riavviare il servizio in questo stato |
+| `PUT`/`DELETE` su `/api/` rispondono `403` mentre `GET` risponde `200` | ModSecurity, regola CRS **911100** sui metodi | vedi [§8.1](#81-modsecurity-i-metodi-rest-vanno-abilitati) |
+| Su un dominio nuovo il client si carica ma ogni chiamata `/api/` dà `404` HTML | mancano gli include Apache per **quel** dominio | vedi [§8.2](#82-aggiungere-un-altro-dominio-alla-stessa-applicazione) |
+| `sudo: effective uid is not 0 … 'nosuid' option set` | l'utente del pannello è in `jailshell`, montata `nosuid` | il riavvio va fatto da root: vedi [§7.2](#72-chi-può-riavviare-il-servizio) |
+| `bash: …: /bin/bash^M: bad interpreter` | script `.sh` committato da Windows con fine riga CRLF | il repository contiene un `.gitattributes` con `*.sh text eol=lf`; se manca, `dos2unix` sul file |
+| `curl` su `/health` fallisce subito dopo `systemctl restart` | Node impiega ~1,5 s a mettersi in ascolto, ma systemd dichiara `active` subito | attendi e riprova, oppure usa `pgs-update.sh` che fa polling |
+| Nel log Apache: `collections_remove_stale: Failed to access DBM file … Permission denied` | `/var/cpanel/secdatadir` non è scrivibile dall'utente con cui mod_ruid2 serve il dominio | `chmod 1777 /var/cpanel/secdatadir` (lo sticky bit c'è già) e riavvia httpd. Non blocca nulla: degrada le regole WAF con stato e riempie il log |
+| Nel log Apache: `AH02217 ssl_stapling_init_cert` sull'hostname del server | certificato autofirmato di cPanel, senza emittente da cui ottenere l'OCSP | innocuo, non riguarda i domini dell'applicazione |
+
+### 13.1 Ha risposto Apache o l'applicazione?
+
+Metà degli errori di questa guida si diagnostica in dieci secondi guardando **come è fatta** la
+risposta, non solo il codice di stato. Vale per `401`, `403` e `404`:
+
+| Indizio nella risposta | Chi ha risposto |
+|---|---|
+| corpo HTML, `Content-Type: text/html`, dimensione identica a `index.html`, `Last-Modified` pari alla data del build | **Apache / ModSecurity**: sta servendo `index.html` come `ErrorDocument`. L'applicazione non ha mai visto la richiesta |
+| corpo JSON, header `x-ratelimit-*`, `Strict-Transport-Security`, `X-DNS-Prefetch-Control`, e una CSP scritta senza spazi dopo i `;` | **Node**: es. `{"error":"ORIGIN_NOT_ALLOWED"}`, `{"error":"FORBIDDEN"}`, `{"error":"UNAUTHORIZED"}` |
+
+Un modo rapido di verificarlo:
+
+```bash
+curl -si https://dominio.tld/api/v1/settings | head -12
+```
 
 ---
 
@@ -645,3 +849,15 @@ Controlla sempre le note di rilascio: alcune versioni richiedono di rieseguire `
   perdere quella chiave significa perdere l'accesso a quei dati; custodirla come i backup.
 - Se l'ambiente non è destinato a uso operativo, dichiararlo esplicitamente e mantenerlo
   `noindex`.
+- Confinare il servizio con il drop-in systemd di [§7.1](#71-hardening-del-servizio-consigliato):
+  il processo non ha bisogno di scrivere su disco né di alcuna capability.
+- Non delegare il riavvio o l'aggiornamento all'applicazione né all'utente del pannello: vedi
+  [§7.2](#72-chi-può-riavviare-il-servizio).
+- **Gli export HAR del browser contengono i cookie e l'header `Authorization` in chiaro.** Un
+  HAR di una sessione autenticata *è* quella sessione: non condividerlo senza averlo ripulito.
+  Se succede, revoca i token con
+  `UPDATE refresh_tokens SET revoked_at = now() WHERE revoked_at IS NULL AND user_id = …`
+  oppure con un logout dall'applicazione.
+- Attenzione a cosa si copia in un ambiente di collaudo: credenziali di servizi esterni di
+  produzione (CINECA, SMTP) rendono quell'ambiente capace di agire sui sistemi veri. Vedi
+  [§10.3](#103-ambienti-di-collaudo-che-contengono-dati-reali).
