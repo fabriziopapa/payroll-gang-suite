@@ -1,15 +1,15 @@
 // ============================================================
-// PAYROLL GANG SUITE — PM2 Ecosystem (aapanel)
-// Usa .cjs perché il server è ESM (type: "module")
-// In aapanel: Node.js Project Manager → startup file = ecosystem.config.cjs
+// PAYROLL GANG SUITE â€” PM2 Ecosystem (aapanel)
+// Usa .cjs perchÃ© il server Ã¨ ESM (type: "module")
+// In aapanel: Node.js Project Manager â†’ startup file = ecosystem.config.cjs
 // ============================================================
 
 module.exports = {
   apps: [
     {
-      name:             'payroll-gang-suite',
+      name:             'payroll_gang_suite',
       script:           './server/dist/app.js',
-      cwd:              '/path/to/payroll-gang-suite',       // ← path root su VPS (adattare)
+      cwd:              __dirname,          // radice del repo: nessun percorso da adattare
       instances:        1,
       exec_mode:        'fork',           // fork (non cluster) per ESM
       node_args:        '--env-file=.env',
@@ -27,7 +27,7 @@ module.exports = {
       max_restarts:     10,
       min_uptime:       '10s',
       restart_delay:    4000,
-      // FIX L-1: riavvia il processo se supera 512 MB — prevenzione memory leak
+      // FIX L-1: riavvia il processo se supera 512 MB â€” prevenzione memory leak
       max_memory_restart: '512M',
       // Graceful shutdown (aspetta che Fastify chiuda le connessioni)
       kill_timeout:     5000,
