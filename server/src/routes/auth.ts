@@ -2,12 +2,13 @@
 // PAYROLL GANG SUITE — Routes Auth (/api/v1/auth)
 // ============================================================
 
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import type { AuthService } from '../auth/AuthService.js'
 import { requireAdmin } from '../middleware/authenticate.js'
 import { env, REFRESH_TOKEN_MS } from '../config/env.js'
 import { PgSettingsRepository } from '../db/repositories/PgSettingsRepository.js'
+import { clientIp } from '../lib/clientIp.js'
 
 // SEC-A3 — Fail-closed: se Turnstile è ATTIVO (secret configurata + toggle
 // runtime `turnstileEnabled` non disattivato), il token è obbligatorio e la
@@ -67,8 +68,10 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   // Rate limit stretto sugli endpoint di autenticazione critica
   await app.register(import('@fastify/rate-limit'), {
-    max:        env.AUTH_RATE_LIMIT_MAX,
-    timeWindow: env.AUTH_RATE_LIMIT_WINDOW_MS,
+    max:          env.AUTH_RATE_LIMIT_MAX,
+    timeWindow:   env.AUTH_RATE_LIMIT_WINDOW_MS,
+    // SEC-A5: chiave per IP reale (CF-Connecting-IP), non la catena XFF falsificabile
+    keyGenerator: (req: FastifyRequest) => clientIp(req),
   })
 
   // ----------------------------------------------------------
@@ -87,7 +90,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const result = await app.authService.registerUser(
       body.username,
       body.isAdmin,
-      request.ip,
+      clientIp(request),
     )
 
     // FIX L-3: invia la risposta prima dell'email — sendQrCode è fire-and-forget.
@@ -124,7 +127,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     })
     const { activationToken, token, cfTurnstileToken } = schema.parse(request.body)
 
-    if (!(await verifyTurnstile(await turnstileEnabled(), cfTurnstileToken, request.ip))) {
+    if (!(await verifyTurnstile(await turnstileEnabled(), cfTurnstileToken, clientIp(request)))) {
       return reply.code(400).send({ error: 'CAPTCHA_FAILED' })
     }
 
@@ -151,7 +154,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     })
     const { username, token, cfTurnstileToken } = schema.parse(request.body)
 
-    if (!(await verifyTurnstile(await turnstileEnabled(), cfTurnstileToken, request.ip))) {
+    if (!(await verifyTurnstile(await turnstileEnabled(), cfTurnstileToken, clientIp(request)))) {
       return reply.code(400).send({ error: 'CAPTCHA_FAILED' })
     }
 
@@ -160,7 +163,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       result = await app.authService.login(
         username, token,
         request.headers['user-agent'] ?? '',
-        request.ip,
+        clientIp(request),
       )
     } catch (err: any) {
       // SEC-M01: account bloccato — informazione differenziata
@@ -202,7 +205,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       tokens = await app.authService.refresh(
         rawToken,
         request.headers['user-agent'] ?? '',
-        request.ip,
+        clientIp(request),
       )
     } catch (err: any) {
       reply.clearCookie(REFRESH_COOKIE, { path: '/api/v1/auth' })

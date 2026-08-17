@@ -10,6 +10,7 @@ import rateLimit from '@fastify/rate-limit'
 import { ZodError } from 'zod'
 
 import { env } from './config/env.js'
+import { clientIp } from './lib/clientIp.js'
 import { db, closeDb } from './db/connection.js'
 import { TOTPAuthModule } from './auth/modules/TOTPAuthModule.js'
 import { AuthService } from './auth/AuthService.js'
@@ -118,6 +119,8 @@ await app.register(cookie, {
 await app.register(rateLimit, {
   max:        env.RATE_LIMIT_MAX,
   timeWindow: env.RATE_LIMIT_WINDOW_MS,
+  // SEC-A5: chiave per IP reale (CF-Connecting-IP), non la catena XFF falsificabile
+  keyGenerator: (req: FastifyRequest) => clientIp(req),
   errorResponseBuilder: () => ({
     error: 'RATE_LIMIT_EXCEEDED',
     message: 'Troppe richieste. Riprova tra poco.',

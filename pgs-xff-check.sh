@@ -32,6 +32,28 @@ if [ -z "$PSQL" ]; then
 fi
 [ -n "$PSQL" ] || { echo "ERRORE: psql non trovato." >&2; exit 2; }
 
+# --- connessione DB: peer 'postgres' (cPanel/native) -> fallback credenziali .env (aaPanel) ---
+ENV_FILE="${PGS_ENV:-$(cd "$(dirname "$0")" && pwd)/.env}"
+_envval(){ grep -E "^$1=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"'\r'; }
+if sudo -u postgres "$PSQL" -d "$DB_NAME" -tAc "select 1" >/dev/null 2>&1; then
+  PSQL_Q(){ sudo -u postgres "$PSQL" -d "$DB_NAME" -P pager=off -tAF'|' -c "$1"; }
+  DB_VIA="postgres (peer)"
+else
+  DB_HOST="$(_envval DB_HOST)"; DB_HOST="${DB_HOST:-127.0.0.1}"
+  DB_PORT="$(_envval DB_PORT)"; DB_PORT="${DB_PORT:-5432}"
+  DB_USER="$(_envval DB_USER)"; DB_PASSWORD="$(_envval DB_PASSWORD)"
+  if [ -n "$DB_USER" ] && [ -n "$DB_PASSWORD" ] \
+     && PGPASSWORD="$DB_PASSWORD" "$PSQL" -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -tAc "select 1" >/dev/null 2>&1; then
+    PSQL_Q(){ PGPASSWORD="$DB_PASSWORD" "$PSQL" -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -P pager=off -tAF'|' -c "$1"; }
+    DB_VIA="credenziali .env ($DB_USER@$DB_HOST:$DB_PORT)"
+  else
+    echo "ERRORE: impossibile connettersi al DB. Provato: utente di sistema 'postgres' (peer) e credenziali da $ENV_FILE." >&2
+    echo "        Imposta PGS_ENV=/percorso/.env oppure verifica DB_USER/DB_PASSWORD." >&2
+    exit 2
+  fi
+fi
+echo "DB via       : $DB_VIA"
+
 # --- sentinella univoca per questo run ---
 STAMP="$(date +%Y%m%d%H%M%S)"
 USERNAME="xff-check-${STAMP}@example.invalid"
@@ -57,7 +79,7 @@ echo
 sleep 2
 
 echo "== Righe in audit_log (ultimi 5 minuti) =="
-ROWS="$(sudo -u postgres "$PSQL" -d "$DB_NAME" -P pager=off -tAF'|' -c \
+ROWS="$(PSQL_Q \
   "SELECT ip, dettagli->>'reason'
      FROM audit_log
     WHERE azione='LOGIN_FAILED'
