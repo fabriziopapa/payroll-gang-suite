@@ -135,9 +135,17 @@ else
   # --ff-only: se la storia è divergente il pull fallisce invece di creare
   # un commit di merge silenzioso sul server.
   come_pgs git -C "$PGS_APP_DIR" fetch --quiet origin
-  come_pgs git -C "$PGS_APP_DIR" pull --ff-only --quiet origin \
-    || muori "git pull non fast-forward: la copia sul server è divergente dal remoto.
-       Ispeziona con: sudo -H -u $PGS_USER git -C $PGS_APP_DIR log --oneline --graph -10"
+  RAMO=$(come_pgs git -C "$PGS_APP_DIR" rev-parse --abbrev-ref HEAD)
+  if come_pgs git -C "$PGS_APP_DIR" pull --ff-only --quiet origin; then
+    :
+  else
+    # Storia remota riscritta (force-push, es. pulizia coautore): l'albero è
+    # gia' pulito (verificato sopra da SPORCO), quindi backup + reset --hard,
+    # cosi' il deploy prosegue da solo invece di fermarsi.
+    warn "Pull non fast-forward: storia remota riscritta. Backup in /tmp + reset --hard a origin/$RAMO."
+    come_pgs git -C "$PGS_APP_DIR" bundle create "/tmp/pgs-pre-reset-$(date +%Y%m%d-%H%M%S).bundle" --all || true
+    come_pgs git -C "$PGS_APP_DIR" reset --hard "origin/$RAMO"
+  fi
 
   COMMIT_DOPO=$(come_pgs git -C "$PGS_APP_DIR" rev-parse HEAD)
 fi
