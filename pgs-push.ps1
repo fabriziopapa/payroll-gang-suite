@@ -27,14 +27,11 @@ function Assert-Ok([string]$what) {
 
 if (-not $Message) {
   $Message = @"
-release: v26.08.17.S — sicurezza: X-Forwarded-For non piu' falsificabile
+sicurezza (SEC-A5): IP client da CF-Connecting-IP + origine chiusa a Cloudflare
 
-trustProxy ristretto al loopback (SEC-A4): rate limiting per IP e audit
-log non piu' aggirabili con un header X-Forwarded-For falso. Warning
-all'avvio se Turnstile non e' configurato in produzione. Normalizzazione
-fine riga a LF (.gitattributes). Script pgs-push.ps1 / pgs-xff-check.sh.
-
-Co-Authored-By: Claude <noreply@anthropic.com>
+L'app ricava audit e rate limiting da CF-Connecting-IP (non falsificabile
+dietro Cloudflare), con fallback a request.ip senza CDN. Nuovo script
+pgs-cf-origin-lock.sh: 80/443 solo dai range Cloudflare (CSF/ufw/firewalld).
 "@
 }
 
