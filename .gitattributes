@@ -1,1 +1,21 @@
-*.sh text eol=lf
+# ============================================================
+# PAYROLL GANG SUITE — normalizzazione fine riga
+# Entrambi gli ambienti di deploy (aaPanel e cPanel) sono Linux.
+# Regola: nel repository e nel working tree SEMPRE LF, anche su
+# Windows. Impedisce che un editor Windows reintroduca CRLF (che
+# in passato ha prodotto diff-rumore su interi file e "bad
+# interpreter: /bin/bash^M" sugli script di shell).
+# ============================================================
+
+# Default: git decide testo/binario e forza LF sui file di testo.
+* text=auto eol=lf
+
+# Script eseguiti su Linux: LF obbligatorio.
+*.sh   text eol=lf
+
+# Script PowerShell (eseguiti su Windows): LF va bene per PowerShell
+# 5.1 e 7+, e resta coerente col resto del repo.
+*.ps1  text eol=lf
+
+# Binari tracciati: mai convertire fine riga.
+*.jpg  binary

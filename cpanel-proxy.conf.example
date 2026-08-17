@@ -29,9 +29,12 @@ ProxyPassReverse /api/ http://127.0.0.1:3001/api/
 ProxyTimeout 120
 
 # --- 3. Intestazioni verso l'applicazione ---------------------------------
-# L'applicazione gira con trustProxy attivo e usa questi header per il rate
-# limiting per IP e per l'audit log: senza, tutte le richieste risulterebbero
-# provenire da 127.0.0.1.
+# L'applicazione si fida degli header X-Forwarded-* SOLO se la connessione
+# arriva dal loopback (trustProxy in server/src/app.ts). mod_proxy gira sulla
+# stessa macchina e APPENDE l'IP reale del client a X-Forwarded-For: è quello
+# che l'applicazione usa per il rate limiting per IP e per l'audit log.
+# NON aggiungere qui "RequestHeader set X-Forwarded-For": sovrascriverebbe la
+# catena costruita da mod_proxy e reintrodurrebbe un IP falsificabile.
 <IfModule mod_headers.c>
     RequestHeader set X-Forwarded-Proto "https" env=HTTPS
 </IfModule>

@@ -51,7 +51,22 @@ const app = Fastify({
   logger: env.NODE_ENV === 'development' ? {
     transport: { target: 'pino-pretty', options: { colorize: true } },
   } : true,
-  trustProxy: true,  // necessario dietro reverse proxy aapanel/nginx
+  // SEC-A4 (audit 2026-08-17): la fiducia sugli header X-Forwarded-* è
+  // limitata al loopback. `true` significava "fidati dell'INTERA catena XFF":
+  // poiché sia nginx (`$proxy_add_x_forwarded_for`, nginx.conf.example:71) sia
+  // Apache/mod_proxy APPENDONO l'IP reale a quello già inviato dal client, con
+  // `true` Fastify prendeva l'elemento più a SINISTRA — cioè un valore scelto
+  // dal client. Conseguenze: rate limit per-IP bypassabile e IP falsi in
+  // audit_log. Con una lista di proxy fidati viene invece preso l'indirizzo
+  // più a DESTRA non fidato: quello appeso dal proxy, non falsificabile.
+  //
+  // Perché il solo loopback è sufficiente E completo: il server ascolta solo
+  // su 127.0.0.1 (app.listen più sotto), quindi il peer TCP può essere
+  // soltanto un processo sulla stessa macchina. Le due impostazioni sono
+  // ACCOPPIATE: se il proxy dovesse spostarsi su un altro host va cambiato
+  // anche l'host di listen e va aggiunto qui l'IP di quel proxy, es.
+  // ['127.0.0.1', '::1', '10.0.0.5']. Cambiarne una sola rompe il sistema.
+  trustProxy: ['127.0.0.1', '::1'],
   // Limita dimensione payload a 10MB (sufficiente per file XML HR)
   bodyLimit: 10 * 1024 * 1024,
 })
@@ -231,6 +246,22 @@ app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOStrin
   } catch (err) {
     app.log.warn({ err }, 'Lettura cinecaUseProxy fallita — chiamate CSA-WS dirette')
   }
+}
+
+// ------------------------------------------------------------
+// SEC-A3 (audit 2026-08-17): avviso di configurazione, non un blocco.
+// verifyTurnstile() è già fail-closed QUANDO attivo, ma resta
+// silenziosamente disattivato se TURNSTILE_SECRET_KEY manca. In
+// produzione ciò lascia /login e /activate protetti dal solo rate limit
+// + lockout: deve essere una scelta esplicita, non una svista di deploy.
+// NON blocca l'avvio: un'installazione può legittimamente non usarlo.
+// ------------------------------------------------------------
+if (env.NODE_ENV === 'production' && !env.TURNSTILE_SECRET_KEY) {
+  app.log.warn(
+    'TURNSTILE_SECRET_KEY assente in produzione — verifica CAPTCHA DISATTIVATA '
+    + 'su /auth/login e /auth/activate. Difese residue: rate limit per-IP e '
+    + 'lockout per-account. Vedi .env.example §CLOUDFLARE TURNSTILE.',
+  )
 }
 
 // ------------------------------------------------------------

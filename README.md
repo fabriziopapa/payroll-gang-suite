@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.08.16-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.08.17.S-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -282,6 +282,15 @@ verifica su `/health`. Si ferma se `server/sql/setup.sql` è cambiato — lo sch
 applicato in automatico su dati reali — e se una build fallisce non tocca la docroot: il sito
 resta sulla versione precedente. Dettagli in [`INSTALL_CPANEL.md` §12](INSTALL_CPANEL.md).
 
+### Rilascio di sicurezza: push da Windows, verifica sul server
+
+Il ciclo completo usa tre script, ognuno sulla macchina giusta e nessun comando da incollare a mano:
+
+1. **Windows (PowerShell)** — dalla radice del repo, `.\pgs-push.ps1`: normalizza le fine riga a LF, committa e fa `push` su `origin/main`. Messaggio personalizzato con `.\pgs-push.ps1 -Message "..."`. Rimuove da sé eventuali `index.lock` residui.
+2. **Server pre-prod (SSH, root)** — `pgs-update` (o `bash pgs-update.sh`): `git pull`, build, pubblicazione, riavvio.
+3. **Server pre-prod (SSH, root)** — `bash pgs-xff-check.sh`: invia login di prova con `X-Forwarded-For` falso e legge da `audit_log` quale IP è stato registrato. Esce `0` se l'header del client viene ignorato (IP reale del proxy), `1` se il valore falso viene accettato (`trustProxy` da correggere). Non tocca alcun account reale: username inesistente su TLD `.invalid`.
+
+
 **Per accorgersene senza controllare a mano**, `pgs-update-check.sh --install` registra un
 timer che ogni sei ore fa `git fetch` e scrive un file di stato; se nel `.env` è valorizzato
 `UPDATE_STATUS_FILE`, gli amministratori vedono in *Impostazioni* la versione installata, quella
@@ -391,6 +400,15 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 ## Changelog
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.08.17.S
+**Sicurezza — X-Forwarded-For non piu' falsificabile (audit del 2026-08-17)**
+- **`trustProxy` ristretto al loopback (`app.ts`)**: era `true`, cioe' "fidati dell'intera catena `X-Forwarded-For`". Poiche' sia nginx (`$proxy_add_x_forwarded_for`) sia Apache/mod_proxy **appendono** l'IP reale a quello gia' inviato dal client, Fastify prendeva l'elemento piu' a sinistra — un valore scelto dal chiamante. Conseguenze: **rate limiting per IP aggirabile** (anche quello stretto 5/300s su `/login`) e **IP falsi in `audit_log`**. Con `['127.0.0.1', '::1']` viene preso l'indirizzo appeso dal proxy, non falsificabile. Il vincolo e' documentato in `.env.example` e `cpanel-proxy.conf.example`: il proxy deve stare sulla stessa macchina del server, che ascolta solo su `127.0.0.1`.
+- **Avviso all'avvio se Turnstile non e' configurato in produzione**: con `NODE_ENV=production` e `TURNSTILE_SECRET_KEY` assente il server registra un warning nei log. La verifica CAPTCHA era gia' fail-closed quando attiva; mancava il segnale quando risultava disattivata per una svista di deploy.
+- **Nessuna migrazione, nessun cambiamento di comportamento per gli utenti.** Gli IP registrati in `audit_log` **prima** di questa versione restano non attendibili: va tenuto presente per qualsiasi uso forense.
+- **Verifica end-to-end (`pgs-xff-check.sh`)**: invia login di prova con `X-Forwarded-For` falso e controlla in `audit_log` quale IP viene registrato. Esito verificato sulla pre-prod prima del fix: gli IP falsi `203.0.113.222` / `198.51.100.111` venivano accettati.
+- **Rilascio come script (`pgs-push.ps1`)**: push da Windows con normalizzazione fine riga; sul server `pgs-update` poi `pgs-xff-check.sh`. Vedi *Deploy → Rilascio di sicurezza*.
+- **Normalizzazione fine riga a LF (`.gitattributes`)**: `* text=auto eol=lf` per impedire che editor Windows reintroducano CRLF (diff-rumore su interi file, `bad interpreter: /bin/bash^M`).
 
 ### 26.08.16
 **Indipendenza dal database, operativita' su cPanel, avviso aggiornamenti**
