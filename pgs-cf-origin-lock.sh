@@ -154,15 +154,48 @@ case "$FW" in
     run "csf -r >/dev/null || true"
     echo "  Backup: /etc/csf/csf.conf.bak-$TS · /etc/csf/csf.allow.bak-$TS"
     ;;
-  *)
-    OUT="/root/pgs-cf-origin.nft"
-    { echo "#!/usr/sbin/nft -f"; echo "# PGS $TAG — 80/443 solo da Cloudflare. SSH ($SSH_PORTS) invariato."; echo "table inet ${TAG//-/_} {"
+  *)  # nftables grezzo (es. cPanel senza CSF, o ufw senza binario nel PATH):
+      # tabella ISOLATA a priorità -10. NON tocca le tabelle di cPanel/ufw
+      # (marcate "do not touch"): scarta 80/443 dai non-CF PRIMA che le altre
+      # catene li accettino. policy accept + nessuna regola sulle altre porte
+      # => SSH ($SSH_PORTS) e pannelli restano gestiti da cPanel/ufw.
+    have nft || die "nftables non disponibile e nessun gestore (csf/ufw/firewalld) attivo: configura il firewall a mano."
+    NFT_STORE="/etc/pgs/pgs-cf-origin.nft"; T="${TAG//-/_}"
+    build_nft(){
+      echo "#!/usr/sbin/nft -f"
+      echo "add table inet $T"; echo "delete table inet $T"     # idempotente: azzera e ricrea
+      echo "table inet $T {"
       echo "  set cf4 { type ipv4_addr; flags interval; elements = { $(printf '%s\n' "$CF4"|grep '/'|paste -sd, || true) } }"
       echo "  set cf6 { type ipv6_addr; flags interval; elements = { $(printf '%s\n' "$CF6"|grep '/'|paste -sd, || true) } }"
       echo "  chain input { type filter hook input priority -10; policy accept;"
-      for p in "${PORTS[@]}"; do echo "    tcp dport $p ip saddr @cf4 accept"; echo "    tcp dport $p ip6 saddr @cf6 accept"; echo "    tcp dport $p drop"; done
-      echo "  }"; echo "}"; } > "$OUT" 2>/dev/null || warn "impossibile scrivere $OUT"
-    echo "  Nessun gestore attivo: ruleset in $OUT — applica a mano:  nft -f $OUT"
+      echo "    iif \"lo\" accept"                                   # loopback: mai bloccare i processi locali
+      for p in "${PORTS[@]}"; do echo "    tcp dport $p ip  saddr @cf4 accept"; echo "    tcp dport $p ip6 saddr @cf6 accept"; echo "    tcp dport $p drop"; done
+      echo "  }"; echo "}"
+    }
+    if [ "$MODE" = "apply" ]; then
+      mkdir -p /etc/pgs; build_nft > "$NFT_STORE"
+      nft -c -f "$NFT_STORE" || die "ruleset nft non valido: NON applico."
+      nft -f "$NFT_STORE"    || die "applicazione nft fallita (nessuna tabella modificata resta consistente: controlla 'nft list table inet '$T')."
+      cat > /etc/systemd/system/${TAG}.service <<UNIT
+[Unit]
+Description=PGS origin lock — 80/443 solo da Cloudflare
+After=nftables.service network-pre.target
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nft -f ${NFT_STORE}
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
+UNIT
+      { systemctl daemon-reload 2>/dev/null && systemctl enable ${TAG}.service >/dev/null 2>&1 \
+        && echo "  persistenza: systemd ${TAG}.service abilitato (ricarica al boot)"; } \
+        || warn "systemd non disponibile: rendi persistente a mano il ruleset $NFT_STORE."
+      echo "  ruleset applicato e salvato in $NFT_STORE"
+    else
+      build_nft > /tmp/pgs-cf-origin.preview.nft 2>/dev/null || true
+      echo "  (dry-run) applicherei la tabella isolata 'inet $T' (priorità -10, drop non-CF su $PORTS_CSV) + unit systemd ${TAG}.service"
+      echo "  anteprima: /tmp/pgs-cf-origin.preview.nft   (validala con: nft -c -f /tmp/pgs-cf-origin.preview.nft)"
+    fi
     ;;
 esac
 
@@ -174,7 +207,7 @@ if [ "$MODE" = "apply" ]; then
     ufw)  n="$(ufw status 2>/dev/null | grep -c "$TAG" || true)"; echo "  regole ufw '$TAG': $n"; [ "$n" -ge 2 ] || ok=0;;
     firewalld) n="$(firewall-cmd --list-rich-rules 2>/dev/null | grep -c "$TAG" || true)"; s="$(firewall-cmd --list-services 2>/dev/null)"; echo "  rich-rule '$TAG': $n · servizi: $s"; { [ "$n" -ge 2 ] && ! echo "$s" | grep -qw http; } || ok=0;;
     csf)  n="$(grep -c "# $TAG" /etc/csf/csf.allow 2>/dev/null || true)"; t="$(grep -E '^TCP_IN' /etc/csf/csf.conf)"; echo "  allow CF in csf.allow: $n"; echo "  $t"; { [ "$n" -ge 2 ] && ! echo "$t" | grep -qE '\b80\b|\b443\b'; } || ok=0;;
-    *)    echo "  (nftables manuale: verifica dopo 'nft -f $OUT' con: nft list table inet ${TAG//-/_})"; ok=1;;
+    *)    n="$(nft list table inet ${TAG//-/_} 2>/dev/null | grep -c 'drop' || true)"; echo "  regole drop nft: ${n:-0}"; [ "${n:-0}" -ge 1 ] || ok=0;;
   esac
   [ "$ok" = "1" ] && echo "  ✓ regole in vigore" || warn "le regole attese NON risultano tutte presenti: controlla sopra."
 fi
@@ -189,5 +222,5 @@ cat <<TXT
     ufw:       ufw status numbered → ufw delete <n> (regole '$TAG'); riapri: ufw allow 80,443/tcp
     firewalld: firewall-cmd --permanent --add-service=http --add-service=https; togli rich-rule '$TAG'; firewall-cmd --reload
     csf:       cp -a /etc/csf/csf.conf.bak-* /etc/csf/csf.conf; cp -a /etc/csf/csf.allow.bak-* /etc/csf/csf.allow; csf -r
-    nftables:  nft delete table inet ${TAG//-/_}
+    nftables:  nft delete table inet ${TAG//-/_}; systemctl disable --now ${TAG}.service 2>/dev/null; rm -f /etc/systemd/system/${TAG}.service
 TXT
