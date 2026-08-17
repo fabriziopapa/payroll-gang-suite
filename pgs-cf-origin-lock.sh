@@ -28,8 +28,9 @@ MODE="dryrun"
 case "${1:-}" in
   --apply) MODE="apply" ;;
   --check) MODE="check" ;;
+  --install-timer) MODE="timer" ;;
   "" ) MODE="dryrun" ;;
-  *) echo "Uso: $0 [--check|--apply]" >&2; exit 2 ;;
+  *) echo "Uso: $0 [--check|--apply|--install-timer]" >&2; exit 2 ;;
 esac
 PORTS_CSV="${PGS_HTTP_PORTS:-80,443}"
 TAG="pgs-cf-origin"
@@ -40,6 +41,38 @@ warn(){ echo "AVVISO: $*" >&2; }
 [ "$(id -u)" = "0" ] || die "esegui come root."
 trap 'echo "" >&2; echo "INTERROTTO (riga $LINENO): stato del firewall potenzialmente PARZIALE. Rollback nell'\''output, oppure rilancia dopo aver corretto la causa." >&2' ERR
 IFS=',' read -r -a PORTS <<< "$PORTS_CSV"
+
+# ── Installazione timer di refresh (systemd): non tocca il firewall ora ─────
+if [ "$MODE" = "timer" ]; then
+  command -v systemctl >/dev/null 2>&1 || die "systemd assente: impossibile installare il timer."
+  SELF="$(readlink -f "$0")"
+  FWENV=""; [ -n "${PGS_FW:-}" ] && FWENV="Environment=PGS_FW=${PGS_FW}"
+  cat > /etc/systemd/system/${TAG}-refresh.service <<UNIT
+[Unit]
+Description=PGS origin lock — refresh range Cloudflare
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+${FWENV}
+ExecStart=/usr/bin/env bash ${SELF} --apply
+UNIT
+  cat > /etc/systemd/system/${TAG}-refresh.timer <<UNIT
+[Unit]
+Description=PGS origin lock — refresh settimanale dei range Cloudflare
+[Timer]
+OnCalendar=Mon *-*-* 04:30:00
+RandomizedDelaySec=1h
+Persistent=true
+[Install]
+WantedBy=timers.target
+UNIT
+  systemctl daemon-reload
+  systemctl enable --now ${TAG}-refresh.timer
+  echo "  ✓ timer installato: ${TAG}-refresh.timer (lun 04:30 ±1h, Persistent=true)"
+  systemctl list-timers "${TAG}-refresh.timer" --no-pager 2>/dev/null | head -3
+  exit 0
+fi
 
 # ── Helper di rilevamento (STATO ATTIVO, non solo presenza) ─────────────────
 have(){ command -v "$1" >/dev/null 2>&1; }
