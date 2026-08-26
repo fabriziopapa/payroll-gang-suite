@@ -90,6 +90,7 @@ payroll-gang-suite/
 ├── pgs-update-check.sh          #   Controllo aggiornamenti (sola lettura) → avviso in Impostazioni
 ├── pgs-update-aapanel.sh        #   ★ Aggiornamento aaPanel (produzione): pull, build, riavvio PM2 come www
 ├── pgs-aapanel-diag.sh          #   Diagnosi aaPanel (sola lettura): perché il pannello vede il progetto "Fermato"
+├── pgs-aapanel-restore-www.sh   #   Ripristino aaPanel: riporta l'app dal PM2 di root a quello di www
 ├── pgs-hardening.conf.example   #   Drop-in systemd: confinamento del servizio
 ├── cpanel-restore-dump.sh       #   Ripristino di un dump in ambiente di collaudo
 ├── cpanel-preprod-lock.sh       #   Password Apache davanti a un ambiente di collaudo
@@ -312,6 +313,26 @@ restrizioni PAM (`runuser` passa da PAM), sysctl e l'elenco dei file di `/etc` m
 recente. È lì che si vede se un irrigidimento di sistema ha tolto al pannello la possibilità di
 avviare o interrogare il PM2 di `www`. È l'output da leggere prima di decidere se riadottare il
 processo esistente o allineare la configurazione del pannello.
+
+**Il ripristino** — quando la diagnosi mostra l'app viva in un PM2 di root e la lista di `www`
+vuota — è `pgs-aapanel-restore-www.sh`, da root: elimina il daemon di root (con il suo
+eventuale avvio automatico), attende che la porta si liberi, ripristina i permessi a `www`
+(l'esecuzione come root lascia file suoi) e riavvia l'app nel PM2 di `www`, quello che il
+pannello legge, salvando l'elenco con `pm2 save` perché sopravviva al reboot. Fermo previsto:
+pochi secondi. Prima verifica se `sudo -u www` — il comando che il pannello usa per avviare,
+in `/www/server/nodejs/vhost/scripts/` — funziona su questa macchina: se BT-Security lo
+uccide, il pulsante *Inizio* del pannello continuerà a fallire e il riavvio va fatto con
+`pgs-update-aapanel.sh` (che usa `runuser`).
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fabriziopapa/payroll-gang-suite/main/pgs-aapanel-restore-www.sh -o /root/pgs-aapanel-restore-www.sh
+PGS_DRYRUN=1 bash /root/pgs-aapanel-restore-www.sh   # mostra cosa farebbe
+bash /root/pgs-aapanel-restore-www.sh                # esegue
+```
+
+> Perché conta: un'app avviata dal PM2 di **root** gira **come root** invece che come `www`
+> (i file che scrive diventano di root) e, se `dump.pm2` di root è vuoto, **al reboot non
+> riparte**. Non è solo un'etichetta sbagliata nel pannello.
 
 ### Rilascio di sicurezza: push da Windows, verifica sul server
 
