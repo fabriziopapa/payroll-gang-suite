@@ -88,6 +88,8 @@ payroll-gang-suite/
 ├── cpanel-check.sh              #   Verifica installazione cPanel (sola lettura)
 ├── pgs-update.sh                #   ★ Aggiornamento cPanel: pull, build, pubblicazione, riavvio
 ├── pgs-update-check.sh          #   Controllo aggiornamenti (sola lettura) → avviso in Impostazioni
+├── pgs-update-aapanel.sh        #   ★ Aggiornamento aaPanel (produzione): pull, build, riavvio PM2 come www
+├── pgs-aapanel-diag.sh          #   Diagnosi aaPanel (sola lettura): perché il pannello vede il progetto "Fermato"
 ├── pgs-hardening.conf.example   #   Drop-in systemd: confinamento del servizio
 ├── cpanel-restore-dump.sh       #   Ripristino di un dump in ambiente di collaudo
 ├── cpanel-preprod-lock.sh       #   Password Apache davanti a un ambiente di collaudo
@@ -281,6 +283,35 @@ backend e frontend come utente applicativo, backup e pubblicazione della docroot
 verifica su `/health`. Si ferma se `server/sql/setup.sql` è cambiato — lo schema non va mai
 applicato in automatico su dati reali — e se una build fallisce non tocca la docroot: il sito
 resta sulla versione precedente. Dettagli in [`INSTALL_CPANEL.md` §12](INSTALL_CPANEL.md).
+
+### Produzione aaPanel: progetto Node "Fermato" ma applicazione viva
+
+Dopo un aggiornamento del pannello (visto con **aaPanel 8.0.6**) il *Progetto Node.js* può
+comparire **Fermato** e il *Monitoraggio PM2* vuoto mentre il sito risponde regolarmente: il
+processo è ancora quello avviato prima, gestito dal daemon PM2 dell'utente `www`, ma il
+pannello lo cerca altrove (PM2_HOME, versione di Node o nome del processo diversi da quelli
+che il pannello si aspetta).
+
+> ⚠ **Non premere *Inizio/Riavvia* finché non si sa chi tiene la porta 3001.** Se il processo
+> è vivo, un secondo avvio produce `EADDRINUSE` e manda il sito in 502 (incidente noto).
+
+Prima cosa, da root, la diagnosi in sola lettura — non avvia, non ferma, non riavvia nulla:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fabriziopapa/payroll-gang-suite/main/pgs-aapanel-diag.sh -o /root/pgs-aapanel-diag.sh
+bash /root/pgs-aapanel-diag.sh
+```
+
+Riporta: versione del pannello, chi ascolta sulla 3001 e con quale `PM2_HOME`, tutti i daemon
+PM2 attivi e le rispettive liste, le versioni di Node e di `pm2` installate, lo script e i log
+generati dal *Node project manager*, il record del progetto nel database del pannello, le
+ultime righe dei log applicativi e — sezione 11 — le **tracce della "Riparazione con un clic"**
+della scansione *Rischi di sicurezza*: stato dell'utente `www` (lock, scadenza, shell), permessi
+di `/home/www` e `.pm2`, opzioni di mount (`noexec` su `/tmp` rompe npm e i socket PM2), umask,
+restrizioni PAM (`runuser` passa da PAM), sysctl e l'elenco dei file di `/etc` modificati di
+recente. È lì che si vede se un irrigidimento di sistema ha tolto al pannello la possibilità di
+avviare o interrogare il PM2 di `www`. È l'output da leggere prima di decidere se riadottare il
+processo esistente o allineare la configurazione del pannello.
 
 ### Rilascio di sicurezza: push da Windows, verifica sul server
 
