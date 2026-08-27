@@ -55,7 +55,8 @@ echo "== [2/6] Aggiornamento del codice =="
 if [ "${PGS_SKIP_PULL:-0}" = 1 ]; then
   info "PGS_SKIP_PULL=1 — compilo l'albero attuale."
 else
-  SPORCO="$(GIT status --porcelain -- . ':!*.env' 2>/dev/null || true)"
+  # solo file TRACCIATI modificati: i non tracciati (.user.ini, backups/, zip) non ostacolano il pull
+  SPORCO="$(GIT status --porcelain --untracked-files=no -- . ':!*.env' 2>/dev/null || true)"
   [ -z "$SPORCO" ] || { printf '%s\n' "$SPORCO" | sed 's/^/    /'; die "modifiche locali non committate: annullale (git checkout -- .) o usa PGS_SKIP_PULL=1."; }
   GIT fetch --quiet origin
   RAMO="$(GIT rev-parse --abbrev-ref HEAD)"
