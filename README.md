@@ -334,6 +334,26 @@ bash /root/pgs-aapanel-restore-www.sh                # esegue
 > (i file che scrive diventano di root) e, se `dump.pm2` di root è vuoto, **al reboot non
 > riparte**. Non è solo un'etichetta sbagliata nel pannello.
 
+**Ripartenza al riavvio della macchina.** Lo script rimuove l'eventuale `pm2-root.service`
+(che è ciò che faceva rinascere il daemon sbagliato dopo un reboot). L'avvio automatico del
+pannello passa da `sudo -u www`: se quello è bloccato, dopo un riavvio non resta nulla ad
+avviare l'app. La rete di sicurezza è un servizio systemd sul PM2 di `www`, da installare una
+volta sola:
+
+```bash
+chown -R www:www /home/www/.pm2
+env PM2_HOME=/home/www/.pm2 /www/server/nodejs/v24.14.1/bin/pm2 startup systemd -u www --hp /home/www
+runuser -u www -- env PM2_HOME=/home/www/.pm2 /www/server/nodejs/v24.14.1/bin/pm2 save
+```
+
+Usa lo stesso `PM2_HOME` del pannello, quindi non crea un secondo daemon: se l'app è già
+online, PM2 non ne avvia una seconda.
+
+**Chi uccide `sudo -u www`**: il plugin *Hardening del sistema* di aaPanel (`bt_syssafe`), che
+preinstalla `/usr/local/usranalyse/lib/libusranalyse.so` via `/etc/ld.so.preload`. Finché è
+attivo senza eccezioni, il pulsante *Inizio* del pannello non riesce ad avviare il progetto
+(`/etc/init.d/bt_syssafe stop` lo ferma, per una prova diagnostica).
+
 ### Rilascio di sicurezza: push da Windows, verifica sul server
 
 Il ciclo completo usa tre script, ognuno sulla macchina giusta e nessun comando da incollare a mano:
