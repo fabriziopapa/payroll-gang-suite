@@ -1,0 +1,304 @@
+// ============================================================
+// PAYROLL GANG SUITE — CINECA CSA-WS client
+// Proxy server-side: auth JWT (cache) + lookup familiari/figli (WE)
+// e codice fiscale dipendente (WD, fallback al dato locale).
+// Doc: https://docs.csa-ws.cineca.it/  — tenant: env.CINECA_TENANT
+// Mai chiamato dal client: credenziali in .env, CF = dati personali.
+// ============================================================
+
+import { env, cinecaConfigured, cinecaProxyConfigured } from '../config/env.js'
+import type { LiquidatoVoce } from './verificaLiquidato/types.js'
+
+export class CinecaNotConfiguredError extends Error {
+  constructor() {
+    super('CINECA_NOT_CONFIGURED')
+    this.name = 'CinecaNotConfiguredError'
+  }
+}
+
+export class CinecaApiError extends Error {
+  constructor(message: string, readonly status?: number) {
+    super(message)
+    this.name = 'CinecaApiError'
+  }
+}
+
+/** idAb locale assente: l'endpoint familiari v1 richiede idAb, non interrogabile. */
+export class CinecaNoIdAbError extends Error {
+  constructor(readonly matricola: string) {
+    super(`idAb assente per matricola ${matricola}`)
+    this.name = 'CinecaNoIdAbError'
+  }
+}
+
+/** Familiare normalizzato (campi comuni alle due varianti d'API). */
+export interface FamiliareNorm {
+  codFisc:           string
+  rapportoParentela: string
+  cognome:           string | null
+  nome:              string | null
+  sesso:             string | null
+  /** YYYY-MM-DD */
+  dataNasc:          string | null
+}
+
+// ── Cache token (module-level) ────────────────────────────────
+let cachedToken: string | null = null
+let tokenExpiresAt = 0   // epoch ms
+
+// Timeout per ogni chiamata verso CSA-WS — evita hang illimitati (DoS/UX).
+// NB: via reverse proxy (geo-block extra-UE) le chiamate CSA-WS sono lente
+// (~8s); il liquidato/dettaglio, con payload grande, sforava gli 8s e veniva
+// abortito → 502. Alzato a 30s (override con CINECA_TIMEOUT_MS se serve).
+const FETCH_TIMEOUT_MS = Number(process.env.CINECA_TIMEOUT_MS) || 30000
+
+// ── Modalità proxy (runtime, toggle 'cinecaUseProxy' in Impostazioni) ─
+// CSA-WS geo-blocca gli IP extra-UE: con proxy attivo le chiamate passano
+// dal reverse proxy in Italia (CINECA_PROXY_URL + header X-Proxy-Auth).
+let useProxy = false
+
+/** Attiva/disattiva il proxy. No-op (con warn del chiamante) se il proxy non è in .env. */
+export function setCinecaProxyMode(on: boolean): void {
+  useProxy = on && cinecaProxyConfigured
+  resetTokenCache()   // il token va richiesto dal nuovo percorso di rete
+}
+
+/** true se le chiamate CSA-WS stanno passando dal proxy. */
+export function cinecaProxyActive(): boolean {
+  return useProxy
+}
+
+function baseUrl(): string {
+  // base + tenant, senza slash doppi
+  const base = useProxy ? env.CINECA_PROXY_URL! : env.CINECA_BASE_URL!
+  return `${base.replace(/\/+$/, '')}/${env.CINECA_TENANT}`
+}
+
+/** Header aggiuntivi quando si passa dal proxy (auth verso il Caddy italiano). */
+function proxyHeaders(): Record<string, string> {
+  return useProxy ? { 'X-Proxy-Auth': env.CINECA_PROXY_SECRET! } : {}
+}
+
+/** Estrae l'exp (ms) da un JWT; null se non decodificabile. */
+function jwtExpiryMs(token: string): number | null {
+  const part = token.split('.')[1]
+  if (!part) return null
+  try {
+    const json = Buffer.from(part.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8')
+    const exp = JSON.parse(json)?.exp
+    return typeof exp === 'number' ? exp * 1000 : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Autentica e restituisce un Bearer JWT, con cache fino a (exp - 30s).
+ * POST {base}/{tenant}/authentication  body { username, password, group }.
+ */
+export async function authenticate(): Promise<string> {
+  if (!cinecaConfigured) throw new CinecaNotConfiguredError()
+
+  const now = Date.now()
+  if (cachedToken && now < tokenExpiresAt) return cachedToken
+
+  let res: Response
+  try {
+    res = await fetch(`${baseUrl()}/authentication`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...proxyHeaders() },
+      body: JSON.stringify({
+        username: env.CINECA_USER,
+        password: env.CINECA_PASSWORD,
+        group:    env.CINECA_GROUPS,
+      }),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    })
+  } catch {
+    throw new CinecaApiError('Autenticazione CINECA non raggiungibile (timeout)')
+  }
+
+  const text = await res.text()
+  if (!res.ok) {
+    throw new CinecaApiError(`Autenticazione CINECA fallita (${res.status})`, res.status)
+  }
+
+  // La risposta può essere il JWT grezzo o un JSON { token | jwt | access_token }
+  let token = text.trim()
+  try {
+    const obj = JSON.parse(text)
+    token = (obj?.token ?? obj?.jwt ?? obj?.access_token ?? '').toString().trim() || token
+  } catch {
+    // non-JSON → token grezzo, già in `token`
+  }
+  if (!token || token.split('.').length !== 3) {
+    throw new CinecaApiError('Token CINECA non valido nella risposta di authentication')
+  }
+
+  cachedToken    = token
+  tokenExpiresAt = (jwtExpiryMs(token) ?? now + 10 * 60_000) - 30_000
+  return token
+}
+
+/** Invalida la cache token (forza re-auth alla prossima chiamata). */
+export function resetTokenCache(): void {
+  cachedToken = null
+  tokenExpiresAt = 0
+}
+
+/** GET autenticato con un retry su 401 (token scaduto/revocato). */
+async function authedGet(path: string): Promise<Response> {
+  const doFetch = (token: string) =>
+    fetch(`${baseUrl()}${path}`, {
+      headers: { Authorization: `bearer ${token}`, Accept: 'application/json', ...proxyHeaders() },
+      signal:  AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    })
+  let token = await authenticate()
+  let res: Response
+  try {
+    res = await doFetch(token)
+  } catch {
+    throw new CinecaApiError(`CSA-WS non raggiungibile (timeout) su ${path}`)
+  }
+  if (res.status === 401) {
+    resetTokenCache()
+    token = await authenticate()
+    try {
+      res = await doFetch(token)
+    } catch {
+      throw new CinecaApiError(`CSA-WS non raggiungibile (timeout) su ${path}`)
+    }
+  }
+  return res
+}
+
+function normDate(s: unknown): string | null {
+  if (!s || typeof s !== 'string') return null
+  return s.slice(0, 10)   // "1968-08-29T..." → "1968-08-29"
+}
+
+/**
+ * Elenco familiari di una risorsa umana — SOLO endpoint v1 per idAb:
+ *   GET /v1/risorse-umane/familiari/{idAb}/nucleo
+ * L'endpoint deprecato per matricola NON è interrogabile (non risponde) →
+ * senza idAb si lancia CinecaNoIdAbError (CF inseribile a mano lato UI).
+ */
+export async function getFamiliari(opts: { idAb?: number | null; matricola?: string | null }): Promise<FamiliareNorm[]> {
+  if (!cinecaConfigured) throw new CinecaNotConfiguredError()
+  if (opts.idAb == null) throw new CinecaNoIdAbError(opts.matricola ?? '')
+
+  const res = await authedGet(`/v1/risorse-umane/familiari/${opts.idAb}/nucleo`)
+  if (!res.ok) {
+    throw new CinecaApiError(`Lettura familiari (idAb ${opts.idAb}) fallita (${res.status})`, res.status)
+  }
+  const body = await res.json() as { nucleo?: Array<Record<string, unknown>> }
+  return (body.nucleo ?? []).map(f => ({
+    codFisc:           String(f.codiceFiscale ?? ''),
+    rapportoParentela: String(f.rapportoParentela ?? ''),
+    cognome:           (f.cognome as string) ?? null,
+    nome:              (f.nome as string) ?? null,
+    sesso:             (f.sesso as string) ?? null,
+    dataNasc:          normDate(f.dataNascita),
+  })).filter(f => f.codFisc)
+}
+
+/**
+ * Dettaglio del liquidato di un cedolino:
+ *   GET /v1/liquidazioni/liquidato/dettaglio/?anno=&mese=&matricola=
+ * Ritorna l'array grezzo delle voci (esploso: input + derivate). La
+ * riconciliazione con gli invii PGS è nel service verificaLiquidato.
+ */
+export async function getLiquidatoDettaglio(
+  opts: { anno: string; mese: string; matricola: string },
+): Promise<LiquidatoVoce[]> {
+  if (!cinecaConfigured) throw new CinecaNotConfiguredError()
+  // Matricola canonica CSA-WS/PGS = 6 cifre con zero-padding (come importService):
+  // '1950' → '090005'. Senza padding CINECA risponde in errore (502 a valle).
+  const matricola = /^\d+$/.test(opts.matricola.trim())
+    ? opts.matricola.trim().padStart(6, '0')
+    : opts.matricola.trim()
+  const qs = new URLSearchParams({ anno: opts.anno, mese: opts.mese, matricola }).toString()
+  const res = await authedGet(`/v1/liquidazioni/liquidato/dettaglio/?${qs}`)
+  if (!res.ok) {
+    throw new CinecaApiError(
+      `Lettura liquidato dettaglio (${matricola} ${opts.anno}/${opts.mese}) fallita (${res.status})`,
+      res.status,
+    )
+  }
+  const body = await res.json()
+  return Array.isArray(body) ? (body as LiquidatoVoce[]) : []
+}
+
+// ── Voci variabili (area Emolumenti) ──────────────────────────
+// Usato dal pannello CSA dell'area Emolumenti per sapere che cosa e' GIA'
+// presente in CSA prima di produrre il CSV: e' il controllo che impedisce di
+// ricaricare un mese gia' inserito (cfr. PIANO_AREA_EMOLUMENTI, 5.4 e 6.1).
+
+/** Voce variabile CSA normalizzata (sottoinsieme utile dei campi restituiti). */
+export interface VoceVariabileNorm {
+  /** Chiave composta CSA: comparto+ruolo+matricola+mese+anno+voce+progressivo.
+   *  Valorizzata solo su alcune righe — cfr. 5.2.3 punto C: ipotesi non
+   *  dimostrata che indichi "inserita e non ancora liquidata". */
+  idVoce:              string | null
+  codiceVoce:          string
+  descrizioneVoce:     string | null
+  comparto:            string | null
+  ruolo:               string | null
+  /** YYYY-MM-DD (data di competenza della voce, non del provvedimento). */
+  dataCompetenzaVoce:  string | null
+  /** Anno/mese derivati da dataCompetenzaVoce: i campi omonimi di CSA
+   *  arrivano vuoti (e con il refuso "Liquidzione" nel nome). */
+  anno:                number | null
+  mese:                number | null
+  codiceStatoVoce:     string | null
+  parti:               number | null
+  importo:             number | null
+  codiceCapitolo:      string | null
+  codiceCentroDiCosto: string | null
+  riferimento:         string | null
+  nota:                string | null
+}
+
+function num(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+function str(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() !== '' ? v.trim() : null
+}
+
+/**
+ * Voci variabili di una risorsa umana:
+ *   GET /v1/risorse-umane/voci/{idAb}/variabili
+ * Risposta: { idAb, matricola, voci: [...] }. Nessun filtro lato servizio:
+ * anno e codice voce si filtrano a valle.
+ */
+export async function getVociVariabili(idAb: number): Promise<VoceVariabileNorm[]> {
+  if (!cinecaConfigured) throw new CinecaNotConfiguredError()
+
+  const res = await authedGet(`/v1/risorse-umane/voci/${idAb}/variabili`)
+  if (!res.ok) {
+    throw new CinecaApiError(`Lettura voci variabili (idAb ${idAb}) fallita (${res.status})`, res.status)
+  }
+  const body = await res.json() as { voci?: Array<Record<string, unknown>> }
+  return (body.voci ?? []).map(v => {
+    const data = normDate(v.dataCompetenzaVoce)
+    return {
+      idVoce:              str(v.idVoce),
+      codiceVoce:          String(v.codiceVoce ?? ''),
+      descrizioneVoce:     str(v.descrizioneVoce),
+      comparto:            str(v.comparto),
+      ruolo:               str(v.ruolo),
+      dataCompetenzaVoce:  data,
+      anno:                data ? Number(data.slice(0, 4)) : null,
+      mese:                data ? Number(data.slice(5, 7)) : null,
+      codiceStatoVoce:     str(v.codiceStatoVoce),
+      parti:               num(v.parti),
+      importo:             num(v.importo),
+      codiceCapitolo:      str(v.codiceCapitolo),
+      codiceCentroDiCosto: str(v.codiceCentroDiCosto),
+      riferimento:         str(v.riferimento),
+      nota:                str(v.nota),
+    }
+  }).filter(v => v.codiceVoce)
+}

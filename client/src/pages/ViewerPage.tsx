@@ -1,0 +1,626 @@
+// ============================================================
+// PAYROLL GANG SUITE — ViewerPage
+// Visualizzazione sola lettura di una liquidazione archiviata.
+// Interattività "solo vista" (come le bozze): ordinamento colonne,
+// chiusura/apertura gruppi (+ comprimi/espandi tutti), ricerca Ctrl+F.
+// L'ordine canonico (export CSV/TXT, totali) resta invariato.
+// ============================================================
+
+import { useMemo, useEffect, useState, useRef, useCallback } from 'react'
+import { useStore, type BozzaDati } from '../store/useStore'
+import { bozzeApi } from '../api/endpoints'
+import ArchiviaLiquidazioneModal from '../components/ArchiviaLiquidazioneModal'
+import { showToast } from '../components/ToastManager'
+import {
+  calcolaImportoCSV, calcolaTotali, buildCsvRows,
+  serializeCsv, downloadCsv, formatEur,
+} from '../utils/biz'
+import { SortableTh, compareNomBy, normalizeSearch, type SortCol, type SortState } from '../utils/sorting'
+import type { DettaglioLiquidazione, Nominativo, CoefficienteScorporo } from '../types'
+
+export default function ViewerPage() {
+  const { viewerBozza, navigate, settings, loadBozzaInViewer, upsertBozza } = useStore()
+  // Modal modifica dati liquidazione (data + ID CSA) su archiviata
+  const [editInfo, setEditInfo] = useState(false)
+
+  // ── Vista: collasso per-gruppo + ricerca globale (Ctrl+F) ──
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set())
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [query, setQuery]           = useState('')
+  const [matchPos, setMatchPos]     = useState(0)
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  const dati       = (viewerBozza?.dati ?? {}) as Partial<BozzaDati>
+  const dettagli   = dati.dettagli    ?? []
+  const nominativi = dati.nominativi  ?? []
+
+  // Match ricerca globale: cognome+matricola+ruolo, accent/case-insensitive,
+  // token in AND. Ordine documento (indipendente dal sort dei singoli gruppi).
+  const matches = useMemo(() => {
+    const q = normalizeSearch(query.trim())
+    if (!q) return [] as { detId: string; nomId: string }[]
+    const tokens = q.split(/\s+/)
+    const out: { detId: string; nomId: string }[] = []
+    for (const det of dettagli) {
+      for (const nom of nominativi.filter(n => n.dettaglioId === det.id)) {
+        const hay = normalizeSearch(`${nom.cognomeNome} ${nom.matricola} ${nom.ruolo}`)
+        if (tokens.every(t => hay.includes(t))) out.push({ detId: det.id, nomId: nom.id })
+      }
+    }
+    return out
+  }, [dettagli, nominativi, query])
+
+  const matchSet     = useMemo(() => new Set(matches.map(m => m.nomId)), [matches])
+  const safePos      = matches.length === 0 ? 0 : Math.min(matchPos, matches.length - 1)
+  const currentMatch = matches[safePos] ?? null
+  const currentNomId = currentMatch?.nomId ?? null
+
+  // Espandi il gruppo del match corrente e scrolla alla riga
+  useEffect(() => {
+    if (!currentMatch) return
+    setCollapsedIds(prev => {
+      if (!prev.has(currentMatch.detId)) return prev
+      const next = new Set(prev); next.delete(currentMatch.detId); return next
+    })
+    const id = currentMatch.nomId
+    const t  = setTimeout(() => {
+      rootRef.current?.querySelector(`[data-nom-id="${id}"]`)?.scrollIntoView({ block: 'center' })
+    }, 0)
+    return () => clearTimeout(t)
+  }, [currentMatch])
+
+  // Guard: nessuna bozza in viewer → torna alla dashboard
+  useEffect(() => {
+    if (!viewerBozza) navigate('dashboard')
+  }, [viewerBozza, navigate])
+
+  if (!viewerBozza) return null
+
+  const protocollo = dati.protocolloDisplay ?? viewerBozza.protocolloDisplay ?? ''
+
+  const updatedAt = new Date(viewerBozza.updatedAt).toLocaleDateString('it-IT', {
+    day: '2-digit', month: 'short', year: 'numeric',
+  })
+
+  const dataLiquidazione = viewerBozza.dataLiquidazione
+    ? new Date(viewerBozza.dataLiquidazione).toLocaleDateString('it-IT', {
+        day: '2-digit', month: 'short', year: 'numeric',
+      })
+    : null
+
+  // ── Ricerca: helper ──────────────────────────────────────────
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false); setQuery(''); setMatchPos(0)
+  }, [])
+  function stepMatch(delta: 1 | -1) {
+    if (matches.length === 0) return
+    setMatchPos(p => (p + delta + matches.length) % matches.length)
+  }
+
+  // ── Collasso: singolo / tutti ────────────────────────────────
+  const allCollapsed = dettagli.length > 0 && dettagli.every(d => collapsedIds.has(d.id))
+  function toggleOne(id: string) {
+    setCollapsedIds(prev => {
+      const n = new Set(prev)
+      if (n.has(id)) n.delete(id); else n.add(id)
+      return n
+    })
+  }
+  function toggleAll() {
+    setCollapsedIds(allCollapsed ? new Set() : new Set(dettagli.map(d => d.id)))
+  }
+
+  // ── Export CSV HR ────────────────────────────────────────────
+  function handleExportCsv() {
+    const rows    = buildCsvRows(dettagli, nominativi, settings.coefficienti, settings.coefficientiContoTerzi)
+    const csv     = serializeCsv(rows)
+    const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    const nomePart = viewerBozza!.nome.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30)
+    downloadCsv(csv, `liquidazione_${nomePart}_${datePart}.csv`)
+  }
+
+  // ── Export TXT matricole per ruolo ───────────────────────────
+  function handleDownloadMatricoleTxt() {
+    const byRuolo: Record<string, Set<string>> = {}
+    for (const nom of nominativi) {
+      if (!byRuolo[nom.ruolo]) byRuolo[nom.ruolo] = new Set()
+      byRuolo[nom.ruolo]!.add(nom.matricola)
+    }
+    const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    const nomePart = viewerBozza!.nome.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30)
+    Object.entries(byRuolo).forEach(([ruolo, matricole], i) => {
+      setTimeout(() => {
+        const blob = new Blob([[...matricole].join('\n') + '\n'], { type: 'text/plain;charset=utf-8' })
+        const url  = URL.createObjectURL(blob)
+        const a    = Object.assign(document.createElement('a'), {
+          href: url, download: `matricole_${nomePart}_${ruolo}_${datePart}.txt`,
+        })
+        a.click()
+        URL.revokeObjectURL(url)
+      }, i * 150)
+    })
+  }
+
+  const canExport = dettagli.length > 0 && nominativi.length > 0
+
+  return (
+    <div className="flex gap-0 min-h-full">
+
+      {editInfo && (
+        <ArchiviaLiquidazioneModal
+          mode="modifica"
+          nome={viewerBozza.nome}
+          initialData={viewerBozza}
+          onConfirm={async info => {
+            try {
+              const updated = await bozzeApi.updateLiquidazioneInfo(viewerBozza.id, info)
+              upsertBozza(updated)
+              loadBozzaInViewer(updated)
+              setEditInfo(false)
+              showToast('Dati liquidazione aggiornati', 'success')
+            } catch { showToast("Errore durante l'aggiornamento", 'error') }
+          }}
+          onClose={() => setEditInfo(false)}
+        />
+      )}
+
+      {/* ── Area principale ─────────────────────────────────── */}
+      <div ref={rootRef} className="flex-1 min-w-0 p-4 lg:p-6">
+
+        {/* Banner sola lettura */}
+        <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg
+                        bg-slate-800/60 border border-slate-700 text-slate-400 text-sm">
+          <svg className="w-4 h-4 shrink-0 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+          Liquidazione archiviata — sola lettura
+        </div>
+
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4 mb-5">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-xl font-bold text-white truncate">{viewerBozza.nome}</h2>
+            <div className="flex items-center gap-2 mt-1 text-sm text-slate-500 flex-wrap">
+              <span>{dettagli.length} gruppo/i</span>
+              <span>·</span>
+              <span>{nominativi.length} nominativo/i</span>
+              {protocollo && (
+                <>
+                  <span>·</span>
+                  <span className="font-mono text-xs">{protocollo}</span>
+                </>
+              )}
+              <span>·</span>
+              <span>Archiviata {updatedAt}</span>
+              {dataLiquidazione && (
+                <>
+                  <span>·</span>
+                  <span className="text-amber-500/90">Liquidata {dataLiquidazione}</span>
+                </>
+              )}
+              {viewerBozza.idLiquidazioneCsa && (
+                <>
+                  <span>·</span>
+                  <span className="font-mono text-xs" title="ID liquidazione CSA">
+                    {viewerBozza.idLiquidazioneCsa}
+                  </span>
+                </>
+              )}
+              {/* Modifica data liquidazione / ID CSA */}
+              <button
+                onClick={() => setEditInfo(true)}
+                className="p-1 rounded text-slate-500 hover:text-amber-400 hover:bg-amber-950/30 transition"
+                title="Modifica dati liquidazione (data / ID CSA)"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {/* Azioni */}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Ricerca (evidenzia e scrolla) */}
+            {canExport && (
+              <button
+                onClick={() => searchOpen ? closeSearch() : setSearchOpen(true)}
+                title="Cerca nominativo / matricola / ruolo (evidenzia, non nasconde)"
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border transition
+                  ${searchOpen
+                    ? 'bg-indigo-700/30 text-indigo-300 border-indigo-800/50'
+                    : 'bg-slate-800/60 text-slate-400 border-slate-700 hover:text-indigo-300'}`}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
+                </svg>
+                <span className="hidden sm:inline">Cerca</span>
+              </button>
+            )}
+
+            {/* Comprimi / Espandi tutti */}
+            {dettagli.length > 0 && (
+              <button
+                onClick={toggleAll}
+                title={allCollapsed ? 'Espandi tutti i gruppi' : 'Comprimi tutti i gruppi'}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm
+                           bg-slate-800/60 text-slate-400 border border-slate-700
+                           hover:text-slate-200 transition"
+              >
+                <svg className={`w-4 h-4 transition-transform ${allCollapsed ? 'rotate-180' : ''}`}
+                     fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
+                </svg>
+                <span className="hidden sm:inline">{allCollapsed ? 'Espandi tutti' : 'Comprimi tutti'}</span>
+              </button>
+            )}
+
+            <button
+              onClick={handleExportCsv}
+              disabled={!canExport}
+              title={!canExport ? 'Nessun dato da esportare' : 'Esporta CSV HR'}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm
+                         bg-emerald-700/30 text-emerald-400 border border-emerald-800/50
+                         hover:bg-emerald-700/50 transition
+                         disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+              </svg>
+              <span className="hidden sm:inline">CSV HR</span>
+            </button>
+
+            <button
+              onClick={handleDownloadMatricoleTxt}
+              disabled={!canExport}
+              title={!canExport ? 'Nessun dato da esportare' : 'Scarica matricole TXT per ruolo — tutti i gruppi'}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm
+                         bg-emerald-700/30 text-emerald-400 border border-emerald-800/50
+                         hover:bg-emerald-700/50 transition
+                         disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586
+                     a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+              <span className="hidden sm:inline">TXT Ruoli</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Barra ricerca globale (evidenzia-e-scrolla) */}
+        {searchOpen && canExport && (
+          <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg
+                          border border-slate-700 bg-slate-800/40">
+            <svg className="w-3.5 h-3.5 text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
+            </svg>
+            <input
+              autoFocus
+              type="search"
+              value={query}
+              onChange={e => { setQuery(e.target.value); setMatchPos(0) }}
+              onKeyDown={e => {
+                if (e.key === 'Enter')  { e.preventDefault(); stepMatch(e.shiftKey ? -1 : 1) }
+                if (e.key === 'Escape') { e.preventDefault(); closeSearch() }
+              }}
+              placeholder="Cerca nominativo, matricola o ruolo…"
+              aria-label="Cerca nella liquidazione archiviata"
+              className="flex-1 min-w-0 px-2 py-1 rounded bg-slate-800 border border-slate-700
+                         text-white text-sm placeholder-slate-500
+                         focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+            <span aria-live="polite" className="text-xs text-slate-500 shrink-0 font-mono">
+              {query.trim() ? `${matches.length === 0 ? 0 : safePos + 1} di ${matches.length}` : ''}
+            </span>
+            <button type="button" onClick={() => stepMatch(-1)} disabled={matches.length === 0}
+              title="Match precedente (Shift+Invio)"
+              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 transition">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7"/>
+              </svg>
+            </button>
+            <button type="button" onClick={() => stepMatch(1)} disabled={matches.length === 0}
+              title="Match successivo (Invio)"
+              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 transition">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
+              </svg>
+            </button>
+            <button type="button" onClick={closeSearch} title="Chiudi ricerca (Esc)"
+              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700 transition">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+        )}
+
+        {/* Gruppi */}
+        {dettagli.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <p className="text-slate-500 text-sm">Nessun gruppo in questa liquidazione</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {dettagli.map((det, idx) => (
+              <ViewerDettaglioCard
+                key={det.id}
+                det={det}
+                idx={idx}
+                nominativi={nominativi.filter(n => n.dettaglioId === det.id)}
+                coefficienti={settings.coefficienti}
+                coefficientiContoTerzi={settings.coefficientiContoTerzi}
+                collapsed={collapsedIds.has(det.id)}
+                onToggleCollapsed={() => toggleOne(det.id)}
+                matchSet={matchSet}
+                currentNomId={currentNomId}
+                searchActive={query.trim().length > 0}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Sidebar totali ───────────────────────────────────── */}
+      <ViewerSidebar
+        dettagli={dettagli}
+        nominativi={nominativi}
+        coefficienti={settings.coefficienti}
+        coefficientiContoTerzi={settings.coefficientiContoTerzi}
+      />
+    </div>
+  )
+}
+
+// ── ViewerDettaglioCard ───────────────────────────────────────
+
+function ViewerDettaglioCard({
+  det, idx, nominativi, coefficienti, coefficientiContoTerzi,
+  collapsed, onToggleCollapsed, matchSet, currentNomId, searchActive,
+}: {
+  det:                     DettaglioLiquidazione
+  idx:                     number
+  nominativi:              Nominativo[]
+  coefficienti:            Record<string, number>
+  coefficientiContoTerzi?: Record<string, number>
+  collapsed:               boolean
+  onToggleCollapsed:       () => void
+  matchSet:                Set<string>
+  currentNomId:            string | null
+  searchActive:            boolean
+}) {
+  // Ordinamento snapshot (solo vista) — identico alle bozze
+  const [sort, setSort] = useState<SortState | null>(null)
+
+  const displayNoms = useMemo(() => {
+    if (!sort) return nominativi
+    const byId    = new Map(nominativi.map(n => [n.id, n]))
+    const ordered = sort.ids.map(id => byId.get(id)).filter((n): n is Nominativo => !!n)
+    if (ordered.length !== nominativi.length) {
+      const seen = new Set(sort.ids)
+      ordered.push(...nominativi.filter(n => !seen.has(n.id)))
+    }
+    return ordered
+  }, [nominativi, sort])
+
+  function handleSortClick(col: SortCol) {
+    setSort(prev => {
+      if (!prev || prev.col !== col) {
+        return { col, dir: 'asc', ids: [...nominativi].sort((a, b) => compareNomBy(col, a, b)).map(n => n.id) }
+      }
+      if (prev.dir === 'asc') {
+        return { col, dir: 'desc', ids: [...nominativi].sort((a, b) => compareNomBy(col, b, a)).map(n => n.id) }
+      }
+      return null
+    })
+  }
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+      {/* Header gruppo — click per collasso */}
+      <div
+        className="flex items-center gap-3 px-4 py-3 border-b border-slate-800 cursor-pointer select-none"
+        onClick={onToggleCollapsed}
+      >
+        <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: det.colore }} />
+        <div className="flex-1 min-w-0">
+          <p className="text-white font-medium text-sm truncate">
+            {det.nomeDescrittivo || `Gruppo ${idx + 1}`}
+          </p>
+          <div className="flex items-center gap-3 mt-0.5 text-xs text-slate-500 flex-wrap">
+            {det.voce && <span>Voce <span className="font-mono text-slate-400">{det.voce}</span></span>}
+            {det.capitolo && <span>Cap. <span className="font-mono text-slate-400">{det.capitolo}</span></span>}
+            {det.competenzaLiquidazione && <span>Competenza <span className="text-slate-400">{det.competenzaLiquidazione}</span></span>}
+            {det.dataCompetenzaVoce && <span>Data voce <span className="text-slate-400">{det.dataCompetenzaVoce}</span></span>}
+          </div>
+        </div>
+        <span className="shrink-0 text-xs text-slate-500">{nominativi.length} nom.</span>
+        <button
+          onClick={e => { e.stopPropagation(); onToggleCollapsed() }}
+          aria-expanded={!collapsed}
+          className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 transition shrink-0"
+          title={collapsed ? 'Espandi' : 'Comprimi'}
+          aria-label={collapsed ? 'Espandi gruppo' : 'Comprimi gruppo'}
+        >
+          <svg className={`w-4 h-4 transition-transform ${collapsed ? 'rotate-180' : ''}`}
+               fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
+          </svg>
+        </button>
+      </div>
+
+      {/* Tabella nominativi */}
+      {!collapsed && (
+        nominativi.length === 0 ? (
+          <p className="px-4 py-3 text-xs text-slate-600 italic">Nessun nominativo</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-slate-800 text-slate-500">
+                  <SortableTh label="Matricola"     col="matricola"  sort={sort} onSort={handleSortClick} />
+                  <SortableTh label="Cognome Nome"  col="nominativo" sort={sort} onSort={handleSortClick} />
+                  <SortableTh label="Ruolo"         col="ruolo"      sort={sort} onSort={handleSortClick} />
+                  <SortableTh label="Importo lordo" col="lordo"      sort={sort} onSort={handleSortClick} align="right" />
+                  {det.flagScorporo && (
+                    <th className="px-4 py-2 text-right font-medium text-indigo-400">Lordo benef.</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {displayNoms.map(nom => {
+                  const csv = calcolaImportoCSV(nom, det, coefficienti as Parameters<typeof calcolaImportoCSV>[2], coefficientiContoTerzi as Parameters<typeof calcolaImportoCSV>[3])
+                  const isCurrent = searchActive && nom.id === currentNomId
+                  const isMatch   = searchActive && matchSet.has(nom.id)
+                  const rowCls    = isCurrent
+                    ? 'bg-indigo-500/20'
+                    : isMatch
+                      ? 'bg-amber-500/10'
+                      : 'hover:bg-slate-800/20'
+                  return (
+                    <tr key={nom.id} data-nom-id={nom.id} className={`border-b border-slate-800/50 transition ${rowCls}`}>
+                      <td className="px-4 py-2 font-mono text-slate-300">{nom.matricola}</td>
+                      <td className="px-4 py-2 text-slate-300">{nom.cognomeNome}</td>
+                      <td className="px-4 py-2">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
+                          {nom.ruolo}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-right font-mono text-slate-300">
+                        {formatEur(nom.importoLordo)}
+                      </td>
+                      {det.flagScorporo && (
+                        <td className="px-4 py-2 text-right font-mono text-indigo-400">
+                          {formatEur(csv)}
+                        </td>
+                      )}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+    </div>
+  )
+}
+
+// ── ViewerSidebar ─────────────────────────────────────────────
+
+function ViewerSidebar({ dettagli, nominativi, coefficienti, coefficientiContoTerzi }: {
+  dettagli:                DettaglioLiquidazione[]
+  nominativi:              Nominativo[]
+  coefficienti:            CoefficienteScorporo
+  coefficientiContoTerzi?: CoefficienteScorporo
+}) {
+  const totali     = useMemo(
+    () => calcolaTotali(dettagli, nominativi, coefficienti, coefficientiContoTerzi),
+    [dettagli, nominativi, coefficienti, coefficientiContoTerzi],
+  )
+  const hasScorporo = dettagli.some(d => d.flagScorporo)
+
+  return (
+    <aside className="w-72 shrink-0 hidden xl:flex flex-col gap-3 sticky top-14 self-start
+                      max-h-[calc(100vh-3.5rem)] overflow-y-auto pb-6 pt-6 pr-4">
+
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-3">Riepilogo</p>
+        <div className="space-y-2">
+          <SRow label="Nominativi" value={String(totali.totaleNominativi)} />
+          <SRow label="Gruppi"     value={String(dettagli.length)} />
+          <div className="border-t border-slate-800 my-2" />
+          <SRow label="Totale lordo"  value={formatEur(totali.totaleImportoLordo)} className="text-white font-medium" />
+          {hasScorporo && (
+            <SRow label="Totale lordo benef." value={formatEur(totali.totaleImportoCSV)} className="text-indigo-400 font-medium" />
+          )}
+        </div>
+      </div>
+
+      {totali.perDettaglio.length > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+          <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-3">Per gruppo</p>
+          <div className="space-y-4">
+            {totali.perDettaglio.map((d, idx) => {
+              const det  = dettagli.find(x => x.id === d.id)
+              const noms = nominativi.filter(n => n.dettaglioId === d.id)
+              const perRuolo = new Map<string, { lordo: number; csv: number; count: number }>()
+              for (const nom of noms) {
+                const key  = nom.ruolo || '—'
+                const prev = perRuolo.get(key) ?? { lordo: 0, csv: 0, count: 0 }
+                const csv  = det ? calcolaImportoCSV(nom, det, coefficienti, coefficientiContoTerzi) : nom.importoLordo
+                perRuolo.set(key, { lordo: prev.lordo + nom.importoLordo, csv: prev.csv + csv, count: prev.count + 1 })
+              }
+              const ruoliEntries = Array.from(perRuolo.entries()).sort((a, b) => b[1].lordo - a[1].lordo)
+
+              return (
+                <div key={d.id}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: det?.colore ?? '#6366f1' }} />
+                    <span className="text-slate-300 text-xs truncate flex-1">{d.nome || `Gruppo ${idx + 1}`}</span>
+                    <span className="text-slate-500 text-xs shrink-0">{d.count} nom.</span>
+                  </div>
+                  <div className="pl-4 space-y-0.5 mb-2">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-500">Lordo</span>
+                      <span className="text-slate-300 font-mono">{formatEur(d.totaleLordo)}</span>
+                    </div>
+                    {det?.flagScorporo && d.totaleCSV !== d.totaleLordo && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-slate-500">Lordo benef.</span>
+                        <span className="text-indigo-400 font-mono">{formatEur(d.totaleCSV)}</span>
+                      </div>
+                    )}
+                  </div>
+                  {ruoliEntries.length >= 2 && (
+                    <div className="pl-4 mt-1.5">
+                      <p className="text-xs text-slate-600 uppercase tracking-wide mb-1">per ruolo</p>
+                      <div className="space-y-1">
+                        {ruoliEntries.map(([ruolo, val]) => (
+                          <div key={ruolo} className="flex items-center justify-between gap-2 bg-slate-800/40 rounded px-2 py-1">
+                            <span className="font-mono text-xs text-slate-400 shrink-0 w-8">{ruolo}</span>
+                            <span className="text-slate-600 text-xs shrink-0">{val.count}</span>
+                            <span className="text-slate-300 text-xs font-mono ml-auto">{formatEur(Math.round(val.lordo * 100) / 100)}</span>
+                            {det?.flagScorporo && val.csv !== val.lordo && (
+                              <span className="text-indigo-400 text-xs font-mono">{formatEur(Math.round(val.csv * 100) / 100)}</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {idx < totali.perDettaglio.length - 1 && <div className="border-t border-slate-800/50 mt-3" />}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {hasScorporo && (
+        <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
+          <p className="text-xs text-slate-500">
+            <span className="text-indigo-400 font-medium">Lordo beneficiario</span> = importo dopo scorporo
+            <br /><span className="font-mono text-xs">lordo ÷ (1 + coeff/100)</span>
+          </p>
+        </div>
+      )}
+    </aside>
+  )
+}
+
+function SRow({ label, value, className = '' }: { label: string; value: string; className?: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-slate-400 text-sm">{label}</span>
+      <span className={`text-sm ${className || 'text-slate-300'}`}>{value}</span>
+    </div>
+  )
+}

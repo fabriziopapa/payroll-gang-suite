@@ -1,0 +1,125 @@
+# ── Ambiente ─────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+# .npmrc può contenere token di registry → mai committarlo.
+# Il registry si configura a livello macchina (npm config set registry ...).
+.npmrc
+
+# ── Dipendenze ───────────────────────────────────────────────
+node_modules/
+**/node_modules/
+
+# ── Build ────────────────────────────────────────────────────
+dist/
+build/
+client/dist/
+server/dist/
+*.tsbuildinfo
+
+# ── Log ──────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── OS ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE / Editor / AI tooling ────────────────────────────────
+.vscode/
+.idea/
+.cursor/
+.claude/
+CLAUDE.local.md
+
+# ── Audit ────────────────────────────────────────────────────
+audit-log.json
+
+# ── Dati HR (anagrafiche/voci — contengono dati personali) ───
+*.xml
+*.csv
+*.xlsx
+*.xls
+
+# ── Documenti generati / campioni con PII (cedolini, certificati) ─
+*.pdf
+*.docx
+*.eml
+output-esempio/
+cedolino_expected.json
+
+# ── Dump e backup database ───────────────────────────────────
+*.dump
+*.bak
+*.sql.gz
+dump.sql
+
+# ── File temporanei / junk ───────────────────────────────────
+*.txt
+*.png
+*.py
+admin-qr.html
+
+# ── Documenti interni non distribuibili ──────────────────────
+PROMPT_MULTI_AGENTE.md
+STATO_PROGETTO.md
+
+# ── Runbook di installazione e gestione — superficie d'attacco ─
+# Percorsi reali, utenti di sistema, porte, configurazione del pannello,
+# script di deploy e la cronaca dettagliata degli interventi di sicurezza.
+# Non servono a chi studia o esegue il codice; servono a chi volesse
+# prendere di mira QUESTA installazione. Vivono nella documentazione
+# operativa interna (README_OPERATIVO.md), fuori da git.
+README_OPERATIVO.md
+INSTALL_VPS.md
+INSTALL_VPS_AAPANEL.md
+INSTALL_VPS_NATIVE.md
+INSTALL_CPANEL.md
+DEPLOY_AAPANEL.md
+CINECA_PROXY.md
+pgs-update.sh
+pgs-update-aapanel.sh
+pgs-update-check.sh
+pgs-aapanel-diag.sh
+pgs-aapanel-restore-www.sh
+pgs-cf-origin-lock.sh
+pgs-xff-check.sh
+pgs-push.ps1
+cpanel-setup.sh
+cpanel-check.sh
+cpanel-restore-dump.sh
+cpanel-preprod-lock.sh
+nginx.conf.example
+pgs-hardening.conf.example
+cpanel-proxy.conf.example
+cpanel-modsec.conf.example
+cpanel-htaccess.example
+cpanel-basicauth.conf.example
+
+# ── Interni dell'ateneo: NON sono nostri da pubblicare ───────
+# Descrivono l'architettura del database Oracle dell'ateneo (schemi
+# SIAAC/SIARU/GISS, viste di integrazione CINECA, struttura dei grant) e i
+# processi amministrativi dell'Ufficio Stipendi. Non contengono dati
+# personali dopo la bonifica del 2026-09-09, ma la decisione di renderli
+# pubblici spetta all'Universita' e al suo fornitore, non a questo repo.
+ANAGRAFICA_PGS_AREA_CONTO.sql
+INDAGINE_IBAN_PAESE.sql
+PIANO_AREA_EMOLUMENTI_*.md
+
+# ── Estrazioni e analisi con dati reali ──────────────────────
+# Rete di sicurezza: qualunque file di lavoro nato da un'estrazione vera.
+# I formati dati (*.csv, *.xlsx, *.pdf, *.txt) sono gia' esclusi sopra.
+estrazioni/
+analisi/
+*_REALE.*
+*-reale.*
+
+# ── Legacy root src (non usato, solo in radice) ──────────────
+/src/
+
+# ── SQL —
+client/public/assets/alessio-song.mp3
