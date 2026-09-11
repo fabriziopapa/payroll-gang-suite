@@ -45,6 +45,7 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
   const [voce, setVoce]                             = useState(existing?.voce ?? '')
   const [capitolo, setCapitolo]                     = useState(existing?.capitolo ?? '')
   const [competenza, setCompetenza]                 = useState(existing?.competenzaLiquidazione ?? '')
+  const competenzaRef = useRef<HTMLInputElement>(null)
   const [dataCompetenzaVoce, setDataCompetenzaVoce] = useState(existing?.dataCompetenzaVoce ?? '')
   const [dataRifFigli, setDataRifFigli]             = useState(existing?.dataRiferimentoFigli ?? '')
   // Radio scorporo: 'none' | 'standard' | 'contoterzi'
@@ -142,6 +143,48 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
       delete next[field]
       return next
     })
+  }
+
+  /**
+   * Maschera MM/YYYY per la competenza.
+   *
+   * Si ragiona sulle sole CIFRE: `07/2026`, `072026` e `07 2026` sono lo
+   * stesso numero, e la barra la mette il campo. Cosi' chi digita sei cifre
+   * di fila vede comparire `07/2026` da solo, e chi la barra la scrive
+   * ottiene lo stesso risultato senza doppioni.
+   *
+   * Oltre le sei cifre NON si accetta e non si tronca in silenzio: prima si
+   * poteva scrivere `07/22026`, il campo lo teneva, e l'errore arrivava solo
+   * al salvataggio. Qui il campo si svuota, compare il motivo e il cursore
+   * torna in testa: si riscrive e basta. Troncare avrebbe prodotto un anno
+   * plausibile ma inventato, che e' peggio di un errore.
+   *
+   * NON tocca `dataCompetenzaVoce`: quella resta governata dall'effetto che
+   * la ricalcola quando la competenza e' completa, e resta sovrascrivibile
+   * a mano.
+   */
+  function onCompetenzaChange(valore: string) {
+    const cifre = valore.replace(/\D/g, '')
+
+    if (cifre.length > 6) {
+      setErrors(prev => ({
+        ...prev,
+        competenza: 'Troppe cifre: la competenza e\u2019 MM/YYYY, sei cifre in tutto (es. 072026). Riscrivila.',
+      }))
+      setCompetenza('')
+      // Dopo il repaint, altrimenti React riscrive il campo e la posizione
+      // del cursore che abbiamo appena impostato viene persa.
+      requestAnimationFrame(() => {
+        const el = competenzaRef.current
+        if (!el) return
+        el.focus()
+        el.setSelectionRange(0, 0)
+      })
+      return
+    }
+
+    setCompetenza(cifre.length <= 2 ? cifre : `${cifre.slice(0, 2)}/${cifre.slice(2)}`)
+    clearError('competenza')
   }
 
   // ── Config voci (pre-compilazione alla selezione voce) ────
@@ -471,9 +514,9 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
                 {/* Competenza */}
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Competenza (MM/YYYY) *" error={errors.competenza}>
-                    <input value={competenza}
-                      onChange={e => { setCompetenza(e.target.value); clearError('competenza') }}
-                      placeholder="04/2026" inputMode="numeric"
+                    <input ref={competenzaRef} value={competenza}
+                      onChange={e => onCompetenzaChange(e.target.value)}
+                      placeholder="04/2026" inputMode="numeric" maxLength={7}
                       className={errors.competenza ? inputErrCls : inputCls} />
                   </Field>
                   <Field label="Data competenza voce *" error={errors.dataCompetenzaVoce}>

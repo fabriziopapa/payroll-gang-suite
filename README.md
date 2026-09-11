@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.09.11.3-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.09.11.4-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -319,6 +319,14 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 ## Changelog
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.09.11.4
+**Competenza (MM/YYYY): maschera in digitazione, e niente anni inventati**
+- **Il difetto.** Il campo accettava qualsiasi cosa: `07/22026` restava li' e l'errore arrivava solo al salvataggio, dopo aver compilato tutto il resto.
+- **Ora si ragiona sulle sole cifre.** `072026`, `07/2026` e `07 2026` sono lo stesso numero: la barra la mette il campo. Si digitano sei cifre di fila e compare `07/2026`; chi scrive gia' la barra ottiene lo stesso risultato senza doppioni. Funziona anche in cancellazione — `07/` che torna a `07` non lascia la barra appiccicata.
+- **Oltre le sei cifre il campo non tronca in silenzio**: si svuota, mostra il motivo (*«Troppe cifre: la competenza e' MM/YYYY, sei cifre in tutto»*) e riporta il cursore in testa, pronto per riscrivere. Troncare avrebbe prodotto un anno plausibile ma inventato — peggio di un errore visibile.
+- **`Data competenza voce` non e' stata toccata**: resta calcolata dall'effetto che la allinea all'ultimo giorno del mese quando la competenza e' completa, e resta sovrascrivibile a mano.
+- Vale sia in **modifica** sia in **nuovo gruppo**: `DettaglioFormModal` e' lo stesso componente, con `existing` valorizzato o no.
 
 ### 26.09.11.3
 **Il salvataggio della liquidazione cadeva dopo aver accettato il ruolo dal DB**
