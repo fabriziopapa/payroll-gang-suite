@@ -5,6 +5,8 @@
 import React, { useState, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { anagraficheApi } from '../api/endpoints'
+import type { ImportXlsxResult } from '../api/endpoints'
+import { downloadCsv } from '../utils/biz'
 import Pagination from '../components/Pagination'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { usePageLoad } from '../hooks/usePageLoad'
@@ -24,11 +26,26 @@ const AREA_CONTO_STYLE: Record<string, string> = {
   NON_NOTO: 'bg-slate-800/60 text-slate-500',
 }
 
+/**
+ * L'estrazione da cui nasce questo elenco. Sta scritta a schermo e non solo
+ * nella documentazione perche' e' l'unica cosa che, sbagliata, rende sbagliato
+ * tutto il resto: un file prodotto da una query diversa puo' sembrare valido,
+ * importarsi senza errori e far rispondere a PGS il ruolo sbagliato.
+ */
+const QUERY_SGE = {
+  codice:      'RU_TAB',
+  descrizione: 'Tabella ru verifica tipo iban @papa',
+  dove:        'Esse3 → Elaborazioni query',
+} as const
+
 export default function AnagrafichePage() {
   const { anagrafiche, setAnagrafiche } = useStore()
   const [lastImport, setLastImport] = useState<string | null>(null)
   const [importingXlsx, setImportingXlsx]         = useState(false)
   const [importResult, setImportResult]           = useState<string | null>(null)
+  // Il referto per intero: senza, gli errori si possono solo contare.
+  const [importErrori, setImportErrori]           = useState<ImportXlsxResult['errors']>([])
+  const [importNomeFile, setImportNomeFile]       = useState<string>('')
   const [confirmImportXlsx, setConfirmImportXlsx] = useState<File | null>(null)
   const [search, setSearch]     = useState('')
   const [page, setPage]         = useState(1)
@@ -65,9 +82,12 @@ export default function AnagrafichePage() {
     setConfirmImportXlsx(null)
     setImportingXlsx(true)
     setImportResult(null)
+    setImportErrori([])
+    setImportNomeFile(file.name)
     try {
       const base64  = await readFileAsBase64(file)
       const result  = await anagraficheApi.importXlsx(base64, file.name)
+      setImportErrori(result.errors)
       setImportResult(
         `✓ Import SGE: ${result.inserted} inseriti, ${result.updated} aggiornati, ${result.skipped} invariati` +
         (result.errors.length ? `, ${result.errors.length} errori` : '') + `.`,
@@ -80,6 +100,20 @@ export default function AnagrafichePage() {
     } finally {
       setImportingXlsx(false)
     }
+  }
+
+  /** Gli errori come CSV, per poterli guardare uno per uno invece che contarli.
+   *  `downloadCsv` scrive in Windows-1252 come il resto dell'applicazione: il
+   *  file si apre in Excel senza passare dalla procedura di importazione. */
+  function scaricaErrori() {
+    if (importErrori.length === 0) return
+    const righe = [
+      'riga;messaggio',
+      ...importErrori.map(e => `${e.row};"${(e.message ?? '').replace(/"/g, '""')}"`),
+    ]
+    const base  = importNomeFile.replace(/\.xlsx$/i, '') || 'import'
+    const oggi  = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    downloadCsv(righe.join('\r\n') + '\r\n', `errori_import_${base}_${oggi}.csv`)
   }
 
   // Filtra + raggruppa per matricola → 1 riga per persona, N ruoli come badge
@@ -119,6 +153,14 @@ export default function AnagrafichePage() {
             Personale importato da XLSX SGE
             {lastImport && ` · Ultimo import: ${new Date(lastImport).toLocaleDateString('it-IT')}`}
           </p>
+          <p className="text-slate-500 text-xs mt-2 leading-relaxed">
+            Il file va prodotto <span className="text-slate-400">sempre</span> con la query
+            {' '}<span className="font-mono text-slate-300">{QUERY_SGE.codice}</span>
+            {' '}— «{QUERY_SGE.descrizione}» — in {QUERY_SGE.dove}.
+            <br />
+            Un&rsquo;estrazione fatta con una query diversa puo&rsquo; importarsi senza errori
+            e far rispondere a PGS il ruolo sbagliato.
+          </p>
         </div>
         <div className="flex gap-2 shrink-0">
           {/* Import XLSX SGE */}
@@ -143,8 +185,50 @@ export default function AnagrafichePage() {
       </div>
 
       {importResult && (
-        <div className="mb-4 p-3 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-300">
-          {importResult}
+        <div className={`mb-4 p-3 rounded-lg border text-sm ${
+          importErrori.length > 0
+            ? 'bg-amber-950/30 border-amber-800/60 text-amber-200'
+            : 'bg-slate-800 border-slate-700 text-slate-300'
+        }`}>
+          <div className="flex items-start gap-3">
+            <span className="flex-1">{importResult}</span>
+            {importErrori.length > 0 && (
+              <button
+                onClick={scaricaErrori}
+                title="Scarica l'elenco completo degli errori in CSV"
+                className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium
+                           bg-amber-900/50 border border-amber-700/60 text-amber-100
+                           hover:bg-amber-900/80 transition"
+              >
+                Scarica gli errori ({importErrori.length})
+              </button>
+            )}
+          </div>
+
+          {importErrori.length > 0 && (
+            <>
+              {/* Le prime a schermo: spesso bastano a capire di che si tratta.
+                  Le altre stanno nel CSV, che e' il posto giusto per leggerle. */}
+              <ul className="mt-2 space-y-0.5 text-xs text-amber-300/90">
+                {importErrori.slice(0, 5).map((e, i) => (
+                  <li key={i}>
+                    <span className="font-mono text-amber-400/80">riga {e.row}</span>
+                    {' · '}{e.message}
+                  </li>
+                ))}
+              </ul>
+              {importErrori.length > 5 && (
+                <p className="mt-1 text-xs text-amber-500/70">
+                  e altri {importErrori.length - 5}: sono tutti nel file.
+                </p>
+              )}
+              <p className="mt-2 text-xs text-amber-500/70">
+                Le righe in errore <span className="text-amber-300">non sono state importate</span>.
+                Per quelle con chiave duplicata (stessa matricola e stessa decorrenza) in anagrafica
+                ne resta una sola: l&rsquo;altra va guardata a mano.
+              </p>
+            </>
+          )}
         </div>
       )}
 

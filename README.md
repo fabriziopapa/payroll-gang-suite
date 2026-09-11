@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.09.11.1-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.09.11.2-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -319,6 +319,12 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 ## Changelog
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.09.11.2
+**Anagrafiche: da quale query nasce il file, e gli errori d'import si possono leggere**
+- **La query e' scritta a schermo.** Sotto l'intestazione della pagina: il file va prodotto sempre con **`RU_TAB`** — *«Tabella ru verifica tipo iban @papa»* — in Esse3 → Elaborazioni query. Non e' un promemoria di cortesia: un'estrazione fatta con una query diversa si importa **senza errori** e fa rispondere a PGS il ruolo sbagliato, che e' esattamente il difetto da cui e' partito tutto il lavoro del 10-11 settembre.
+- **Gli errori si scaricano.** Il referto diceva *"15 errori"* e finiva li': quali righe, e perche', non si poteva sapere. Ora il riquadro diventa ambra, elenca i primi cinque e offre **Scarica gli errori (N)**, un CSV `riga;messaggio` in Windows-1252 come gli altri export — si apre in Excel senza procedura d'importazione.
+- Il riquadro dice anche cosa comporta un errore: la riga **non e' stata importata**, e in caso di chiave duplicata (stessa matricola, stessa decorrenza) in anagrafica ne resta **una sola**. Nessun cambiamento lato server: gli errori arrivavano gia' al client con numero di riga e messaggio, semplicemente venivano contati e buttati via.
 
 ### 26.09.11.1
 **L'area del conto si assegnava gia', ma non si trovava**
