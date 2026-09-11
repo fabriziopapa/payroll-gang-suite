@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.09.11.4-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.09.11.5-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -320,13 +320,21 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
 
+### 26.09.11.5
+**Il campo competenza non si lasciava scrivere — e le azioni ora stanno anche in fondo**
+
+*Correzione di un difetto introdotto dalla 26.09.11.4 e sfuggito alla prova: la maschera funzionava, il campo no.*
+
+- **`maxLength={7}` era la causa.** `03/2005` e' esattamente sette caratteri: quando la selezione non era attiva — cursore posizionato a mano, o selezione collassata — il browser **rifiutava ogni tasto senza far partire `onChange`**, e il campo sembrava morto. Peggio: impediva anche al controllo sulle sei cifre di segnalare l'errore, perche' l'ottavo carattere non arrivava mai al gestore. Il messaggio *«Troppe cifre»* esisteva ed era codice irraggiungibile. A limitare ci pensa gia' `onCompetenzaChange`: l'attributo e' stato tolto.
+- **Selezione spostata da `mouseup` a `mousedown`.** Il caret il browser lo piazza al mousedown, quindi intercettare il mouseup significa correggere una selezione gia' collassata, con esito dipendente dal timing. Annullando il comportamento predefinito e facendo focus + select a mano, il caret non viene piazzato affatto e non c'e' niente da correggere. Il secondo click, a campo gia' attivo, passa liscio e posiziona il cursore dove si vuole. Non era questa la causa del blocco — e' irrobustimento.
+- **`Comprimi tutti` e `Salva bozza` anche nella barra in fondo**, accanto a *Esporta CSV* e nello stesso ordine dell'intestazione. Con molti gruppi il fondo pagina e' lontano dalla cima, e risalire solo per salvare e' la parte fastidiosa. Sono le **stesse funzioni** dell'header passate come props: nessuna logica duplicata, quindi i due punti non possono divergere — compreso il *Salva* disabilitato quando non c'e' niente da salvare.
+
 ### 26.09.11.4
 **Competenza (MM/YYYY): maschera in digitazione, e niente anni inventati**
 - **Il difetto.** Il campo accettava qualsiasi cosa: `07/22026` restava li' e l'errore arrivava solo al salvataggio, dopo aver compilato tutto il resto.
 - **Ora si ragiona sulle sole cifre.** `072026`, `07/2026` e `07 2026` sono lo stesso numero: la barra la mette il campo. Si digitano sei cifre di fila e compare `07/2026`; chi scrive gia' la barra ottiene lo stesso risultato senza doppioni. Funziona anche in cancellazione — `07/` che torna a `07` non lascia la barra appiccicata.
 - **Oltre le sei cifre il campo non tronca in silenzio**: si svuota, mostra il motivo (*«Troppe cifre: la competenza e' MM/YYYY, sei cifre in tutto»*) e riporta il cursore in testa, pronto per riscrivere. Troncare avrebbe prodotto un anno plausibile ma inventato — peggio di un errore visibile.
-- **Entrando nel campo si seleziona tutto**, con il mouse come con Tab: la prima cifra digitata sostituisce quello che c'era. Serviva un doppio click, e portare semplicemente il cursore a zero non basterebbe — con `03/2005` gia' scritto, digitare `072026` da li' darebbe `07202603/2005`, dodici cifre, dritto nel ramo d'errore. La selezione si fa su **`mousedown`**, non su `mouseup`: il caret il browser lo piazza al mousedown, quindi rincorrerlo dopo significa correggere una selezione gia' collassata, con esito dipendente dal timing; annullando il comportamento predefinito e facendo focus + select a mano, il caret non viene piazzato affatto. Il secondo click, a campo gia' attivo, passa liscio e posiziona il cursore dove si vuole.
-- **Tolto `maxLength={7}`**, che era la causa del campo che non si lasciava scrivere: `03/2005` e' esattamente 7 caratteri, quindi senza selezione attiva il browser rifiutava ogni tasto **senza far partire `onChange`** — campo apparentemente morto. E impediva anche al controllo sulle sei cifre di segnalare l'errore, perche' l'ottavo carattere non arrivava mai. A limitare ci pensa gia' `onCompetenzaChange`.
+- **Entrando nel campo si seleziona tutto**, con il mouse come con Tab: la prima cifra digitata sostituisce quello che c'era, invece di infilarsi dentro il valore esistente.
 - **`Data competenza voce` non e' stata toccata**: resta calcolata dall'effetto che la allinea all'ultimo giorno del mese quando la competenza e' completa, e resta sovrascrivibile a mano.
 - Vale sia in **modifica** sia in **nuovo gruppo**: `DettaglioFormModal` e' lo stesso componente, con `existing` valorizzato o no.
 

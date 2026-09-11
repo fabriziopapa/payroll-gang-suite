@@ -342,6 +342,14 @@ export default function EditorPage() {
           <CsvInfoBanner
             rows={csvRows.length}
             onExport={handleExportCsv}
+            // Le stesse azioni dell'intestazione, con lo stesso stato: qui non
+            // si duplica la logica, si duplica solo il punto in cui si clicca.
+            mostraToggle={dettagli.length > 0}
+            allCollapsed={allCollapsed}
+            onToggleAll={toggleAll}
+            onSave={handleSave}
+            saving={saving}
+            saveDisabled={saving || (!isDirty && !!currentBozzaId)}
           />
         )}
       </div>
@@ -401,10 +409,31 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 
 // ── CSV Info Banner ────────────────────────────────────────────
 
-function CsvInfoBanner({ rows, onExport }: { rows: number; onExport: () => void }) {
+/**
+ * La barra in fondo all'elenco. Ripete *Comprimi tutti* e *Salva bozza*
+ * dell'intestazione: con molti gruppi il fondo pagina e' distante dalla cima,
+ * e risalire per salvare e' la parte fastidiosa.
+ *
+ * Le azioni sono le STESSE funzioni dell'header, passate come props — nessuna
+ * logica duplicata, quindi i due punti non possono divergere. Stesso ordine
+ * di sopra (comprimi · esporta · salva) perche' la memoria muscolare non
+ * debba imparare due disposizioni.
+ */
+function CsvInfoBanner({
+  rows, onExport, mostraToggle, allCollapsed, onToggleAll, onSave, saving, saveDisabled,
+}: {
+  rows:         number
+  onExport:     () => void
+  mostraToggle: boolean
+  allCollapsed: boolean
+  onToggleAll:  () => void
+  onSave:       () => void
+  saving:       boolean
+  saveDisabled: boolean
+}) {
   return (
     <div className="mt-6 p-4 rounded-xl bg-slate-900 border border-slate-800
-                    flex items-center justify-between gap-4">
+                    flex flex-wrap items-center justify-between gap-4">
       <div>
         <p className="text-white text-sm font-medium">Pronto per l&apos;esportazione</p>
         <p className="text-slate-400 text-xs mt-0.5">
@@ -412,17 +441,61 @@ function CsvInfoBanner({ rows, onExport }: { rows: number; onExport: () => void 
           <code className="text-indigo-400">;</code> · ANSI Windows-1252 senza BOM
         </p>
       </div>
-      <button
-        onClick={onExport}
-        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium
-                   bg-emerald-700/40 text-emerald-300 hover:bg-emerald-700/60 transition shrink-0"
-      >
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-        </svg>
-        Esporta CSV
-      </button>
+
+      <div className="flex items-center gap-2 shrink-0">
+        {mostraToggle && (
+          <button
+            onClick={onToggleAll}
+            title={allCollapsed ? 'Espandi tutti i gruppi' : 'Comprimi tutti i gruppi'}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm
+                       bg-slate-800/60 text-slate-400 border border-slate-700
+                       hover:text-slate-200 transition"
+          >
+            <svg className={`w-4 h-4 transition-transform ${allCollapsed ? 'rotate-180' : ''}`}
+                 fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
+            </svg>
+            <span className="hidden sm:inline">{allCollapsed ? 'Espandi tutti' : 'Comprimi tutti'}</span>
+          </button>
+        )}
+
+        <button
+          onClick={onExport}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium
+                     bg-emerald-700/40 text-emerald-300 hover:bg-emerald-700/60 transition"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+          </svg>
+          Esporta CSV
+        </button>
+
+        <button
+          onClick={onSave}
+          disabled={saveDisabled}
+          title={saveDisabled && !saving ? 'Nessuna modifica da salvare' : 'Salva la bozza'}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium
+                     bg-indigo-600 hover:bg-indigo-500 text-white transition
+                     disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {saving ? (
+            <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10"
+                      stroke="currentColor" strokeWidth="4"/>
+              <path className="opacity-75" fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+          ) : (
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3
+                   m-4 0V3m0 4a2 2 0 11-4 0 2 2 0 014 0z"/>
+            </svg>
+          )}
+          <span className="hidden sm:inline">{saving ? 'Salvataggio…' : 'Salva bozza'}</span>
+        </button>
+      </div>
     </div>
   )
 }

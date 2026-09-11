@@ -46,9 +46,6 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
   const [capitolo, setCapitolo]                     = useState(existing?.capitolo ?? '')
   const [competenza, setCompetenza]                 = useState(existing?.competenzaLiquidazione ?? '')
   const competenzaRef = useRef<HTMLInputElement>(null)
-  /** Vero fra il focus e il rilascio del mouse che l'ha causato: serve a non
-   *  far collassare dal click la selezione appena fatta in `onFocus`. */
-  const competenzaAppenaFocus = useRef(false)
   const [dataCompetenzaVoce, setDataCompetenzaVoce] = useState(existing?.dataCompetenzaVoce ?? '')
   const [dataRifFigli, setDataRifFigli]             = useState(existing?.dataRiferimentoFigli ?? '')
   // Radio scorporo: 'none' | 'standard' | 'contoterzi'
@@ -149,6 +146,34 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
   }
 
   /**
+   * Entrando nel campo — con il mouse o con Tab — si seleziona tutto, cosi'
+   * la prima cifra digitata sostituisce quello che c'era invece di
+   * infilarcisi dentro.
+   *
+   * Non basta portare il cursore a zero: con `03/2005` gia' scritto, digitare
+   * `072026` da li' produrrebbe `07202603/2005`, dodici cifre, e finirebbe
+   * dritto nel ramo d'errore. Selezionando, la prima cifra pulisce il campo.
+   *
+   * PERCHE' `mousedown` E NON `mouseup`. Il caret il browser lo piazza al
+   * mousedown: intercettare il mouseup significa rincorrere una selezione gia'
+   * collassata, e funziona o no a seconda del timing. Qui invece il caret non
+   * viene piazzato affatto — si annulla il comportamento predefinito e si fa
+   * focus + select a mano — quindi non c'e' niente da collassare e il primo
+   * click basta.
+   *
+   * Il secondo click, a campo gia' attivo, passa liscio: `activeElement` e'
+   * gia' l'input, non intercettiamo nulla, e il cursore si posiziona dove si
+   * clicca.
+   */
+  function onCompetenzaMouseDown(e: React.MouseEvent<HTMLInputElement>) {
+    const el = e.currentTarget
+    if (document.activeElement === el) return
+    e.preventDefault()
+    el.focus()
+    el.select()
+  }
+
+  /**
    * Maschera MM/YYYY per la competenza.
    *
    * Si ragiona sulle sole CIFRE: `07/2026`, `072026` e `07 2026` sono lo
@@ -166,32 +191,6 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
    * la ricalcola quando la competenza e' completa, e resta sovrascrivibile
    * a mano.
    */
-  /**
-   * Entrando nel campo — con il mouse o con Tab — si seleziona tutto, cosi'
-   * la prima cifra digitata sostituisce quello che c'era invece di
-   * infilarcisi dentro.
-   *
-   * Non basta portare il cursore a zero: con `03/2005` gia' scritto,
-   * digitare `072026` da li' produrrebbe `07202603/2005`, cioe' dodici cifre,
-   * e finirebbe dritto nel ramo d'errore. Selezionando, la prima cifra pulisce
-   * il campo da sola.
-   *
-   * `onMouseUp` va intercettato **una volta sola**, quella che segue il
-   * focus: il browser al rilascio del mouse collasserebbe la selezione sul
-   * punto cliccato. Un secondo click, a campo gia' attivo, resta libero di
-   * posizionare il cursore dove si vuole.
-   */
-  function onCompetenzaFocus(el: HTMLInputElement) {
-    competenzaAppenaFocus.current = true
-    el.select()
-  }
-
-  function onCompetenzaMouseUp(e: React.MouseEvent<HTMLInputElement>) {
-    if (!competenzaAppenaFocus.current) return
-    competenzaAppenaFocus.current = false
-    e.preventDefault()
-  }
-
   function onCompetenzaChange(valore: string) {
     const cifre = valore.replace(/\D/g, '')
 
@@ -543,12 +542,17 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
                 {/* Competenza */}
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Competenza (MM/YYYY) *" error={errors.competenza}>
+                    {/* NIENTE maxLength: `03/2005` e' gia' 7 caratteri, e il
+                        limite bloccherebbe ogni tasto quando la selezione non
+                        e' attiva — il campo sembrerebbe morto. Peggio: senza
+                        che l'ottavo carattere arrivi a onChange, il controllo
+                        sulle sei cifre non potrebbe mai segnalare l'errore.
+                        A limitare ci pensa onCompetenzaChange. */}
                     <input ref={competenzaRef} value={competenza}
                       onChange={e => onCompetenzaChange(e.target.value)}
-                      onFocus={e => onCompetenzaFocus(e.currentTarget)}
-                      onMouseUp={onCompetenzaMouseUp}
-                      onBlur={() => { competenzaAppenaFocus.current = false }}
-                      placeholder="04/2026" inputMode="numeric" maxLength={7}
+                      onMouseDown={onCompetenzaMouseDown}
+                      onFocus={e => e.currentTarget.select()}
+                      placeholder="04/2026" inputMode="numeric"
                       className={errors.competenza ? inputErrCls : inputCls} />
                   </Field>
                   <Field label="Data competenza voce *" error={errors.dataCompetenzaVoce}>
