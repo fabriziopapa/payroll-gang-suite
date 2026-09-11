@@ -109,6 +109,14 @@ cpanel-basicauth.conf.example
 ANAGRAFICA_PGS_AREA_CONTO.sql
 INDAGINE_IBAN_PAESE.sql
 PIANO_AREA_EMOLUMENTI_*.md
+# Diagnostica e bonifica dell'anagrafica (2026-09-10): stessa natura dei file
+# qui sopra — descrivono gli schemi Oracle dell'ateneo e i processi interni.
+# I glob coprono anche quelli che verranno: un file di lavoro nato da
+# un'estrazione non deve poter finire nel repo per dimenticanza.
+DIAGNOSI_*.sql
+VERIFICHE_*.sql
+VERIFICA_*.sql
+RICONCILIA_*.sql
 
 # ── Estrazioni e analisi con dati reali ──────────────────────
 # Rete di sicurezza: qualunque file di lavoro nato da un'estrazione vera.

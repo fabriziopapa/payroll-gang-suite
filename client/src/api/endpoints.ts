@@ -946,6 +946,21 @@ export interface RigaRisoltaApi {
 }
 
 
+/**
+ * Un rapporto nella storia anagrafica di una matricola.
+ * Non e' "il ruolo": e' uno dei ruoli, con le date in cui e' valso. Per i
+ * dottorandi e i borsisti ce ne sono parecchi, ed e' normale.
+ */
+export interface StoricoRuoloApi {
+  ruolo:     string
+  druolo:    string | null
+  decorInq:  string        // YYYY-MM-DD
+  finRap:    string | null // null = ancora aperto
+  idAb:      number | null
+  /** Area del conto registrata su QUELLA riga d'anagrafica. */
+  areaConto: string | null
+}
+
 /** Lavorazione dell'area Emolumenti — riga di elenco, senza il payload. */
 export interface LavorazioneApi {
   id:               string
@@ -971,6 +986,22 @@ export const emolumentiApi = {
     apiFetch<{ risultati: RigaRisoltaApi[] }>('/emolumenti/risolvi-nominativi', {
       method: 'POST',
       body:   JSON.stringify({ righe }),
+    }),
+
+  /** Storia completa dei ruoli di una matricola: un rapporto per riga, con le
+   *  date. Si chiama a richiesta, quando l'operatore apre i dettagli di una
+   *  persona — non in blocco per tutto l'elenco. */
+  storicoRuoli: (matricola: string) =>
+    apiFetch<{ matricola: string; storico: StoricoRuoloApi[] }>(
+      `/emolumenti/storico-ruoli/${encodeURIComponent(matricola)}`,
+    ),
+
+  /** Storia dei ruoli per N matricole in una chiamata sola. Serve a segnalare
+   *  l'ambiguità sulle righe prima che l'operatore apra i dettagli. */
+  storicoRuoliBulk: (matricole: string[]) =>
+    apiFetch<{ storici: Record<string, StoricoRuoloApi[]> }>('/emolumenti/storico-ruoli', {
+      method: 'POST',
+      body:   JSON.stringify({ matricole }),
     }),
 
   /** Voci già presenti in CSA per le matricole indicate (admin). */

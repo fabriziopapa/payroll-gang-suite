@@ -18,11 +18,12 @@
 // resta uno solo, ma qui non si modifica nulla di quel codice.
 // ============================================================
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   emolumentiApi, vociApi, anagraficheApi,
   type RigaRisoltaApi, type CandidatoApi, type VoceCsaApi, type VoceApi,
   type LavorazioneApi, type AnagraficaApi, type LiquidazioneInfo,
+  type StoricoRuoloApi,
 } from '../api/endpoints'
 import { ApiError } from '../api/client'
 import { showToast } from '../components/ToastManager'
@@ -178,6 +179,79 @@ interface RigaLavoro {
    *  'EXTRA_UE' | 'NON_NOTO' | null. Serve solo a dividere i TXT delle
    *  matricole: non e' un IBAN, non entra nel CSV per HR. */
   areaConto:           string | null
+  /**
+   * Ruolo scelto a mano dall'operatore, quando quello dell'anagrafica non e'
+   * quello giusto per il mese liquidato. Tenuto SEPARATO da `ruolo` apposta:
+   * cosi' si vede sempre che cosa diceva l'anagrafica e che cosa ha deciso
+   * una persona. null = nessuna scelta, vale l'anagrafica.
+   *
+   * Resta nella lavorazione e non torna in anagrafica: quella si corregge
+   * solo re-importando da SGE, che e' la sua unica sorgente.
+   */
+  ruoloScelto:         string | null
+  /**
+   * Area del conto assegnata a mano, per chi in anagrafica non ce l'ha e
+   * finirebbe fuori da tutti i TXT. Stessa logica di `ruoloScelto`: e' un
+   * dato inserito da una persona, e si vede che lo e'.
+   */
+  areaContoScelta:     string | null
+}
+
+/**
+ * Ultimo giorno del mese "AAAA-MM", in ISO.
+ * E' la data che finisce nel CSV come `dataCompetenzaVoce`, quindi e' quella
+ * su cui va letto il ruolo: chiedersi "che ruolo aveva a agosto" significa
+ * chiedersi che ruolo aveva il 31 agosto.
+ */
+function ultimoGiornoIso(k: string): string {
+  const [y, m] = k.split('-').map(Number)
+  if (!y || !m) return ''
+  const d = new Date(y, m, 0)
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const gg = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${mm}-${gg}`
+}
+
+/** Questo rapporto copre la competenza di quel mese? */
+function copreMese(s: StoricoRuoloApi, k: string): boolean {
+  const g = ultimoGiornoIso(k)
+  if (!g) return false
+  return s.decorInq <= g && (s.finRap == null || s.finRap >= g)
+}
+
+/**
+ * I mesi selezionati su cui la persona risulta avere PIU' DI UN ruolo.
+ *
+ * Non e' un caso limite: su dottorandi e borsisti i ruoli si sovrappongono per
+ * davvero — la stessa persona puo' avere una borsa e un dottorato attivi nello
+ * stesso mese, e in CSA sono due rapporti distinti. Il programma non sceglie
+ * al posto dell'operatore: lo dice e basta.
+ */
+function mesiAmbigui(
+  storico: StoricoRuoloApi[], mesi: Set<string>,
+): Array<{ mese: string; ruoli: string[] }> {
+  const out: Array<{ mese: string; ruoli: string[] }> = []
+  for (const k of [...mesi].sort()) {
+    const ruoli = [...new Set(storico.filter(s => copreMese(s, k)).map(s => s.ruolo))]
+    if (ruoli.length > 1) out.push({ mese: k, ruoli })
+  }
+  return out
+}
+
+/** Mesi selezionati che NESSUN rapporto copre: la persona a quella data non
+ *  risulta in servizio, e il CSV porterebbe un ruolo che l'anagrafica smentisce. */
+function mesiScoperti(storico: StoricoRuoloApi[], mesi: Set<string>): string[] {
+  return [...mesi].sort().filter(k => !storico.some(s => copreMese(s, k)))
+}
+
+/** Il ruolo che vale davvero: la scelta manuale batte l'anagrafica. */
+function ruoloDi(r: RigaLavoro): string | null {
+  return r.ruoloScelto ?? r.ruolo
+}
+
+/** L'area del conto che vale davvero. Stessa precedenza. */
+function areaDi(r: RigaLavoro): string | null {
+  return r.areaContoScelta ?? r.areaConto
 }
 
 /**
@@ -220,6 +294,10 @@ function deserializzaRighe(v: unknown): RigaLavoro[] {
       dataProvvedimento:   String(o['dataProvvedimento'] ?? ''),
       importi:             (o['importi'] as Record<string, string>) ?? {},
       areaConto:           (o['areaConto'] as string | null) ?? null,
+      // Salvataggi anteriori alle scelte manuali: assenti = nessuna scelta,
+      // e la riga si comporta esattamente come prima.
+      ruoloScelto:         (o['ruoloScelto']     as string | null) ?? null,
+      areaContoScelta:     (o['areaContoScelta'] as string | null) ?? null,
     }
   })
 }
@@ -289,6 +367,12 @@ export default function EmolumentiPage() {
   const [righe, setRighe]       = useState<RigaLavoro[] | null>(null)
   const [risolvendo, setRisolvendo] = useState(false)
 
+  /** Storia dei ruoli per matricola, caricata in blocco. Non entra nel payload
+   *  salvato: e' un dato d'anagrafica, si rilegge quando serve. */
+  const [storici, setStorici] = useState<Record<string, StoricoRuoloApi[]>>({})
+  /** Matricole gia' richieste, per non ripetere la chiamata a ogni render. */
+  const storiciChiesti = useRef<Set<string>>(new Set())
+
   // ── Caricamento nominativi ─────────────────────────────────────────────
   const [tipoEmol, setTipoEmol]   = useState<TipoEmolumento | ''>('')
   const [modoCarico, setModoCarico] = useState<'incolla' | 'cerca'>('incolla')
@@ -345,6 +429,28 @@ export default function EmolumentiPage() {
   /** Parti o importo: dalla voce scelta, oppure dall'interruttore in manuale. */
   const modo: ModoValore =
     VOCI_EMOLUMENTI.find(v => v.codice === voce.trim())?.modo ?? modoManuale
+
+  /** Le matricole risolte, come chiave stabile per l'effetto qui sotto. */
+  const matricoleRisolte = useMemo(
+    () => [...new Set((righe ?? []).map(r => r.matricola).filter(Boolean) as string[])]
+            .sort().join(','),
+    [righe],
+  )
+
+  // Storia dei ruoli in blocco: una chiamata per le matricole nuove, mai due
+  // volte per la stessa. Se fallisce non si blocca niente — il pannello dei
+  // dettagli sa comunque leggersi la sua matricola da solo.
+  useEffect(() => {
+    const lista    = matricoleRisolte ? matricoleRisolte.split(',') : []
+    const mancanti = lista.filter(m => !storiciChiesti.current.has(m))
+    if (mancanti.length === 0) return
+    mancanti.forEach(m => storiciChiesti.current.add(m))
+    let vivo = true
+    emolumentiApi.storicoRuoliBulk(mancanti)
+      .then(x => { if (vivo) setStorici(s => ({ ...s, ...x.storici })) })
+      .catch(() => { mancanti.forEach(m => storiciChiesti.current.delete(m)) })
+    return () => { vivo = false }
+  }, [matricoleRisolte])
 
   const incollate = useMemo(() => parseIncollato(raw), [raw])
   const troppe    = incollate.length > MAX_RIGHE
@@ -429,6 +535,8 @@ export default function EmolumentiPage() {
       dataProvvedimento:   dataProv,
       importi:             {},
       areaConto:           null,
+      ruoloScelto:         null,
+      areaContoScelta:     null,
       ...base,
     }
   }
@@ -796,7 +904,9 @@ export default function EmolumentiPage() {
     const fuori: RigaLavoro[] = []
     for (const r of righe ?? []) {
       if (r.mesiScelti.size === 0 || !r.matricola) continue
-      const area = r.areaConto ?? ''
+      // areaDi(): l'assegnazione fatta a mano vale quanto quella d'anagrafica.
+      // Chi non ha ne' l'una ne' l'altra resta fuori, come prima.
+      const area = areaDi(r) ?? ''
       if (AREE_TXT_CHIAVI.includes(area)) {
         (out[area] ??= []).push(r.matricola)
       } else {
@@ -922,7 +1032,9 @@ export default function EmolumentiPage() {
         out.push({
           matricola: r.matricola,
           comparto:  '1',
-          ruolo:     r.ruolo ?? '',
+          // Il ruolo del tracciato e' quello che vale: se l'operatore l'ha
+          // corretto a mano, nel CSV va la sua scelta, non l'anagrafica.
+          ruolo:     ruoloDi(r) ?? '',
           codiceVoce: voce.trim(),
           // §6.4: nell'area Emolumenti si usa SOLO la forma per estremi.
           identificativoProvvedimento: '',
@@ -1479,6 +1591,7 @@ export default function EmolumentiPage() {
               onToggleMese={k => toggleMese(r.id, k)}
               onElimina={() => eliminaRiga(r.id)}
               anagrafiche={anagrafiche}
+              storico={r.matricola ? storici[r.matricola] : undefined}
             />
           ))}
 
@@ -1577,7 +1690,8 @@ export default function EmolumentiPage() {
                     {perAreaTxt.fuori
                       .map(r => `${r.nomeCompleto ?? r.nominativo} (${r.matricola})`)
                       .join(', ')}
-                    . Vanno verificate a mano: non sappiamo in quale lista metterle.
+                    . Non sappiamo in quale lista metterle: apri i dettagli della riga
+                    (il pulsante con ruolo e conto) per assegnare l’area a mano.
                   </p>
                 )}
               </div>
@@ -1639,7 +1753,219 @@ function Campo({ label, larghezza, children }: {
   )
 }
 
-function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, anagrafiche }: {
+/** "2026-06-03" → "03/06/2026". Vuoto o malformato → trattino. */
+function gg(iso: string | null): string {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '—'
+  const [y, m, d] = iso.split('-') as [string, string, string]
+  return `${d}/${m}/${y}`
+}
+
+/**
+ * Dettagli anagrafici di una persona: tutti i rapporti che PGS conosce per
+ * quella matricola, piu' l'area del conto usata per dividere i TXT.
+ *
+ * Perche' serve. L'elenco mostra UN ruolo solo, quello con la decorrenza piu'
+ * alta. Per i docenti basta: un ruolo dura anni. Per dottorandi e borsisti no —
+ * sono contratti brevi in catena, e la stessa persona puo' essere stata DR fino
+ * all'anno scorso ed essere BS adesso. Se il mese che si sta liquidando cade
+ * nel periodo precedente, il ruolo giusto e' l'altro. Qui si vedono le date e
+ * si decide, invece di scoprirlo dal CSV rifiutato.
+ *
+ * Niente di quel che si sceglie qui torna in anagrafica: resta nella
+ * lavorazione, e si vede che e' stato deciso a mano. L'anagrafica si corregge
+ * solo re-importando da SGE, che ne e' l'unica sorgente.
+ */
+function DettagliAnagrafici({ r, storico, ambigui, scoperti, onPatch, onChiudi }: {
+  r:        RigaLavoro
+  /** Storia gia' caricata in blocco dalla pagina. */
+  storico?: StoricoRuoloApi[]
+  ambigui:  Array<{ mese: string; ruoli: string[] }>
+  scoperti: string[]
+  onPatch:  (patch: Partial<RigaLavoro>) => void
+  onChiudi: () => void
+}) {
+  /** Se il caricamento in blocco non e' arrivato — o e' fallito — il pannello
+   *  se la legge da solo: aprirlo deve funzionare comunque. */
+  const [caricato, setCaricato] = useState<StoricoRuoloApi[] | null>(null)
+  const [errore,   setErrore]   = useState<string | null>(null)
+  const matricola = r.matricola
+  const righe     = storico ?? caricato
+
+  useEffect(() => {
+    if (!matricola || storico) return
+    let vivo = true
+    emolumentiApi.storicoRuoli(matricola)
+      .then(x => { if (vivo) setCaricato(x.storico) })
+      .catch(err => { if (vivo) setErrore(messaggioErrore(err)) })
+    return () => { vivo = false }
+  }, [matricola, storico])
+
+  /** Ruoli distinti trovati: se sono piu' d'uno la scelta non e' scontata. */
+  const ruoliDistinti = new Set((righe ?? []).map(s => s.ruolo))
+
+  return (
+    <div className="px-5 py-4 bg-slate-950/60 border-b border-slate-800 space-y-4">
+
+      {/* ── L'ambiguità, per prima: è la cosa da decidere ──── */}
+      {ambigui.length > 0 && (
+        <div className="rounded-lg border border-amber-800/70 bg-amber-950/30 px-3 py-2">
+          <p className="text-xs text-amber-200 font-medium mb-1">
+            Su {ambigui.length === 1 ? 'un mese' : `${ambigui.length} mesi`} questa
+            persona risulta avere più di un ruolo. Sceglilo tu.
+          </p>
+          <ul className="text-xs text-amber-300/90 space-y-0.5">
+            {ambigui.map(a => (
+              <li key={a.mese}>
+                <span className="font-mono">{etichettaMese(a.mese)}</span>
+                {' → '}
+                <span className="font-mono">{a.ruoli.join(' oppure ')}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-amber-500/70 mt-1">
+            Su borse e dottorati capita davvero: gli stessi mesi possono avere una
+            borsa e un dottorato attivi insieme, e in CSA sono due rapporti distinti.
+          </p>
+        </div>
+      )}
+
+      {scoperti.length > 0 && (
+        <div className="rounded-lg border border-red-900/60 bg-red-950/25 px-3 py-2">
+          <p className="text-xs text-red-300">
+            Nessun rapporto in anagrafica copre{' '}
+            <span className="font-mono">{scoperti.map(etichettaMese).join(', ')}</span>.
+            Il CSV porterebbe un ruolo che l’anagrafica non conferma: controlla in CSA
+            prima di esportare.
+          </p>
+        </div>
+      )}
+
+      {/* ── Ruoli ─────────────────────────────────────────── */}
+      <div>
+        <div className="flex items-baseline gap-3 mb-2">
+          <p className="text-xs font-medium text-slate-400">Rapporti in anagrafica</p>
+          {righe == null && !errore && (
+            <p className="text-xs text-slate-500">lettura…</p>
+          )}
+          {righe != null && (
+            <p className="text-xs text-slate-500">
+              {righe.length} rapporto/i · {ruoliDistinti.size} ruolo/i distinto/i
+            </p>
+          )}
+          <button onClick={onChiudi} className="ml-auto text-xs text-slate-500 hover:text-slate-300">
+            chiudi
+          </button>
+        </div>
+
+        {errore && <p className="text-xs text-red-400">{errore}</p>}
+
+        {righe != null && righe.length === 0 && (
+          <p className="text-xs text-amber-400">
+            Nessun rapporto in anagrafica per questa matricola: l’import SGE non la contiene.
+          </p>
+        )}
+
+        {righe != null && righe.length > 0 && (
+          <div className="rounded-lg border border-slate-800 divide-y divide-slate-800 overflow-hidden">
+            {righe.map((s, i) => {
+              const attivo = ruoloDi(r) === s.ruolo
+              // Quali dei mesi selezionati questo rapporto copre davvero.
+              // E' l'informazione che rende la scelta possibile invece che
+              // un confronto di date fatto a occhio.
+              const coperti = [...r.mesiScelti].sort().filter(k => copreMese(s, k))
+              return (
+                <button
+                  key={`${s.ruolo}-${s.decorInq}-${i}`}
+                  onClick={() => onPatch({ ruoloScelto: s.ruolo })}
+                  title="Usa questo ruolo per la riga e per il CSV"
+                  className={`w-full text-left px-3 py-2 text-xs flex items-baseline gap-3 transition-colors ${
+                    attivo ? 'bg-slate-800/70' : 'hover:bg-slate-800/40'
+                  }`}
+                >
+                  <span className={`font-mono w-10 ${attivo ? 'text-indigo-300' : 'text-slate-300'}`}>
+                    {s.ruolo}
+                  </span>
+                  <span className="text-slate-400 font-mono">
+                    {gg(s.decorInq)} → {s.finRap ? gg(s.finRap) : 'aperto'}
+                  </span>
+                  {s.druolo && <span className="text-slate-500 truncate">{s.druolo}</span>}
+                  {coperti.length > 0 && (
+                    <span className="text-emerald-400/90 whitespace-nowrap">
+                      copre {coperti.map(etichettaMese).join(', ')}
+                    </span>
+                  )}
+                  {s.areaConto && (
+                    <span className="ml-auto font-mono text-slate-600">{s.areaConto}</span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        <div className="mt-2 flex items-center gap-3 text-xs">
+          <span className="text-slate-500">
+            In elenco: <span className="font-mono text-slate-300">{ruoloDi(r) ?? '—'}</span>
+            {r.ruoloScelto
+              ? <span className="text-amber-400"> (scelto a mano; anagrafica: {r.ruolo ?? '—'})</span>
+              : <span className="text-slate-600"> (dall’anagrafica)</span>}
+          </span>
+          {r.ruoloScelto && (
+            <button
+              onClick={() => onPatch({ ruoloScelto: null })}
+              className="text-slate-400 hover:text-slate-200 underline decoration-dotted"
+            >
+              torna a quello dell’anagrafica
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Area del conto ────────────────────────────────── */}
+      <div>
+        <p className="text-xs font-medium text-slate-400 mb-1">Area del conto (per i TXT)</p>
+        <p className="text-xs text-slate-500 mb-2">
+          {r.areaConto
+            ? <>In anagrafica: <span className="font-mono text-slate-300">{r.areaConto}</span>
+                {r.areaConto === 'NON_NOTO' && ' — l’estrazione non ha trovato una coordinata CSA attiva.'}</>
+            : <>In anagrafica non c’è: l’ultimo import SGE non portava la colonna AREA_CONTO,
+               oppure questa persona non c’era.</>}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          {AREE_TXT.map(a => {
+            const attiva = areaDi(r) === a.chiave
+            return (
+              <button
+                key={a.chiave}
+                onClick={() => onPatch({ areaContoScelta: a.chiave })}
+                className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
+                  attiva
+                    ? 'bg-slate-700 border-slate-600 text-white'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {a.nomeFile}
+              </button>
+            )
+          })}
+          {r.areaContoScelta && (
+            <button
+              onClick={() => onPatch({ areaContoScelta: null })}
+              className="text-xs text-slate-400 hover:text-slate-200 underline decoration-dotted"
+            >
+              togli la scelta
+            </button>
+          )}
+          <span className="text-xs text-amber-500/80">
+            Assegnata a mano vale solo per questa lavorazione: non corregge l’anagrafica.
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, anagrafiche, storico }: {
   r:            RigaLavoro
   modo:         ModoValore
   mesiFinestra: string[]
@@ -1647,6 +1973,8 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
   onToggleMese: (k: string) => void
   onElimina:    () => void
   anagrafiche:  AnagraficaApi[]
+  /** Storia dei ruoli della matricola, se gia' caricata in blocco. */
+  storico?:     StoricoRuoloApi[]
 }) {
   const anni = [...new Set(mesiFinestra.map(k => k.slice(0, 4)))]
 
@@ -1656,6 +1984,23 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
   const [cerca, setCerca] = useState(
     r.nominativo.split(/\s+/).filter(t => !/^\d+$/.test(t)).join(' '),
   )
+
+  /** Pannello dei dettagli anagrafici: chiuso finche' non serve. */
+  const [dettagli, setDettagli] = useState(false)
+
+  // Ambiguita' e scoperture sui mesi SELEZIONATI, cioe' su quelli che
+  // finiranno davvero nel CSV. Si calcolano solo se lo storico e' gia' in
+  // memoria; il pannello, quando lo si apre, se lo carica comunque da solo.
+  const ambigui = useMemo(
+    () => (storico ? mesiAmbigui(storico, r.mesiScelti) : []),
+    [storico, r.mesiScelti],
+  )
+  const scoperti = useMemo(
+    () => (storico ? mesiScoperti(storico, r.mesiScelti) : []),
+    [storico, r.mesiScelti],
+  )
+  /** C'e' da decidere finche' l'operatore non ha scelto lui il ruolo. */
+  const daDecidere = ambigui.length > 0 && !r.ruoloScelto
   const suggeriti = useMemo(() => {
     const q = cerca.trim().toLowerCase()
     if (q.length < 2 || r.matricola) return []
@@ -1677,22 +2022,58 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
         </div>
 
         {r.matricola ? (
-          <span className="font-mono text-sm text-indigo-300 flex items-center gap-1.5">
-            {r.matricola}
-            {/* Area del conto ignota: finirebbe fuori da tutti i TXT. */}
-            {!AREE_TXT_CHIAVI.includes(r.areaConto ?? '') && (
-              <span
-                title="Nessuna coordinata CSA attiva in anagrafica: resta fuori dai TXT per area"
-                className="w-2 h-2 rounded-full bg-red-500 inline-block"
-              />
-            )}
-          </span>
+          <span className="font-mono text-sm text-indigo-300">{r.matricola}</span>
         ) : (
           <span className="text-xs text-amber-400">
             {r.esito === 'ambiguo' ? 'più persone corrispondono' : 'non trovato in anagrafiche'}
           </span>
         )}
-        {r.ruolo && <span className="text-xs text-slate-500">{r.ruolo}</span>}
+
+        {/* Ruolo e area del conto: non piu' due etichette morte ma il modo per
+            aprire i dettagli anagrafici e correggerli. Il pallino rosso
+            sull'area vuol dire "resta fuori da tutti i TXT". */}
+        {r.matricola && (
+          <button
+            onClick={() => setDettagli(d => !d)}
+            title={daDecidere
+              ? 'Su questi mesi la persona risulta avere più di un ruolo: apri e scegli'
+              : 'Ruoli di questa matricola, e area del conto per i TXT'}
+            className={`px-2 py-1 rounded-lg border text-xs flex items-center gap-2 transition-colors ${
+              daDecidere
+                ? 'bg-amber-950/40 border-amber-800/70 text-amber-200 hover:border-amber-700'
+                : dettagli
+                  ? 'bg-slate-800 border-slate-600 text-slate-200'
+                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+            }`}
+          >
+            <span className={r.ruoloScelto ? 'text-amber-300' : ''}>
+              {ruoloDi(r) ?? 'ruolo ignoto'}
+            </span>
+            {r.ruoloScelto && <span className="text-amber-500/70">a mano</span>}
+            <span className="text-slate-700">|</span>
+            {AREE_TXT_CHIAVI.includes(areaDi(r) ?? '') ? (
+              <span className={`font-mono ${r.areaContoScelta ? 'text-amber-300' : 'text-slate-500'}`}>
+                {areaDi(r)}
+                {r.areaContoScelta && <span className="ml-1 text-amber-500/70">a mano</span>}
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-red-400">
+                <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />
+                conto ignoto
+              </span>
+            )}
+            {daDecidere && (
+              <>
+                <span className="text-amber-700">|</span>
+                <span className="font-medium">
+                  {ambigui.length === 1
+                    ? 'ruolo ambiguo su 1 mese'
+                    : `ruolo ambiguo su ${ambigui.length} mesi`}
+                </span>
+              </>
+            )}
+          </button>
+        )}
 
         <div className="ml-auto flex items-center gap-2">
           <button
@@ -1721,6 +2102,13 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
         </div>
       </header>
 
+      {dettagli && r.matricola && (
+        <DettagliAnagrafici
+          r={r} storico={storico} ambigui={ambigui} scoperti={scoperti}
+          onPatch={onPatch} onChiudi={() => setDettagli(false)}
+        />
+      )}
+
       {/* Nome ambiguo: sceglie l'operatore, mai il programma */}
       {r.esito === 'ambiguo' && !r.matricola && (
         <div className="px-5 py-3 bg-amber-950/20 border-b border-slate-800">
@@ -1733,6 +2121,9 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
                 key={c.matricola}
                 onClick={() => onPatch({
                   matricola: c.matricola, nomeCompleto: c.nomeCompleto, ruolo: c.ruolo,
+                  // Cambia la persona: le scelte fatte a mano sulla precedente
+                  // non la seguono.
+                  ruoloScelto: null, areaContoScelta: null,
                 })}
                 className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700
                            text-sm text-slate-200 transition-colors"
@@ -1766,7 +2157,10 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
               placeholder="090027"
               onChange={e => {
                 const v = e.target.value.trim()
-                onPatch({ matricola: v ? v.padStart(6, '0') : null })
+                onPatch({
+                  matricola: v ? v.padStart(6, '0') : null,
+                  ruoloScelto: null, areaContoScelta: null,
+                })
               }}
               className="w-28 px-2 py-1 rounded bg-slate-950 border border-slate-700
                          text-slate-100 text-sm font-mono focus:outline-none focus:border-indigo-500"
@@ -1784,6 +2178,8 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
                     ruolo:        a.ruolo,
                     areaConto:    a.areaConto ?? null,
                     esito:        'trovato',
+                    ruoloScelto:  null,
+                    areaContoScelta: null,
                   })}
                   className="w-full text-left px-3 py-2 hover:bg-slate-800/50 transition
                              flex items-baseline gap-3"

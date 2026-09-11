@@ -68,6 +68,23 @@ while IFS= read -r f; do
         echo "  → esempi sintetici: matricole 09xxxx · idAb 99xxx · provvedimenti 90xxxx"
         FAIL=1
       fi
+      # Seconda rete, a VOLUME. Quella sopra cerca la parola "matricola" sulla
+      # stessa riga, e un ELENCO di dati non ce l'ha: il 2026-09-10 un file di
+      # riconciliazione con 4.797 matricole vere passava indisturbato, perche'
+      # le sue righe erano ('000001','PO',DATE '2000-01-01') e basta.
+      # Qui non si guarda il contesto ma la QUANTITA': molti valori DISTINTI a
+      # sei cifre che iniziano per zero non sono capitoli, sono un'estrazione.
+      # Calibrato sul repo: ogni file legittimo del progetto sta a 0, il file
+      # incriminato stava a 4.795. La soglia e' larga apposta.
+      N=$(printf '%s' "$CONTENT" \
+            | grep -oE "(^|[^0-9])0[0-9]{5}([^0-9]|$)" \
+            | grep -oE "0[0-9]{5}" \
+            | grep -vE "^($ALLOW_MATR)$" | sort -u | wc -l)
+      if [ "$N" -ge 20 ]; then
+        echo "BLOCCATO: $f contiene $N valori distinti a 6 cifre che iniziano per 0."
+        echo "  Un elenco di questa misura non e' fatto di capitoli: sembra un'estrazione."
+        FAIL=1
+      fi
       ;;
   esac
 

@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.09.09-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.09.11-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -163,7 +163,8 @@ CEDOLINO_SAMPLE="/percorso/Cedolino_....pdf" npm run test --workspace=server
 - **Abbinamenti d'ufficio** — scegliendo il tipo (o la voce) si compilano voce e capitolo: DR `09834`/`000601` (maggiorazioni, a **parti** = 30), BS `09947`/`000706` (borse non esenti, IRAP, a **importo**), BE `09766`/`000602` (borse esenti, a **importo**). Restano modificabili a mano; se divergono compare un avviso che dice cosa, senza bloccare.
 - **Controlli bloccanti prima dell'export** — mesi non selezionati, tipo/voce/data provvedimento mancanti, importo assente o non valido sulle voci a importo, **stesso numero di provvedimento su matricole diverse**, righe con mesi ma CSA mai letto.
 - **Export CSV per HR Suite** — stesso tracciato a 24 colonne delle liquidazioni; `dataProvvedimento` in ISO, `dataCompetenzaVoce` in `GG/MM/AAAA`; la colonna inattiva (parti o importo) va a **0**, non vuota.
-- **Export TXT matricole per area del conto** — un file per `ITALIA` / `SEPA` / `EXTRA_UE`, oppure Italia + estero, oppure uno solo. Ci finisce **solo chi ha mesi selezionati**; chi non ha una coordinata CSA nota resta fuori, e' segnalato con un pallino rosso sulla riga ed elencato per nome sotto il pulsante.
+- **Export TXT matricole per area del conto** — un file per `ITALIA` / `SEPA` / `EXTRA_UE`, oppure Italia + estero, oppure uno solo. Ci finisce **solo chi ha mesi selezionati**; chi non ha una coordinata CSA nota resta fuori, e' segnalato con un pallino rosso sulla riga ed elencato per nome sotto il pulsante — e da li' si puo' assegnargli l'area a mano (vedi *Dettagli anagrafici per riga*).
+- **Dettagli anagrafici per riga** — il pulsante con ruolo e area del conto, in testa a ogni persona, apre l'elenco **di tutti i rapporti** che PGS conosce per quella matricola (`GET /emolumenti/storico-ruoli/:matricola`, letto solo quando si apre il pannello). Serve perche' l'elenco ne mostra **uno solo**, quello con la decorrenza piu' alta: per i docenti basta, per dottorandi e borsisti no — sono contratti brevi in catena, e la stessa persona puo' essere stata `DR` fino all'anno scorso ed essere `BS` adesso. Da li' si sceglie il ruolo giusto per il mese liquidato, e si assegna a mano l'area del conto a chi in anagrafica non ce l'ha. Le due scelte restano **nella lavorazione** (`ruoloScelto`, `areaContoScelta`), sono marcate *a mano* in interfaccia e **non tornano in anagrafica**: quella si corregge solo re-importando da SGE. Il ruolo scelto e' quello che finisce nel CSV.
 - **Lavorazioni salvate** (`emolumenti_lavorazioni`) — nome, stato bozza/archiviata, data di liquidazione e ID liquidazione CSA all'archiviazione (**stesso modale delle liquidazioni**). Il payload JSONB conserva l'input **e lo snapshot di cio' che CSA mostrava**: riaprendo si rivede lo stesso quadro senza rileggere, e premendo di nuovo *Leggi da CSA* si vede cosa e' cambiato. Ciclo di vita (apri, duplica, archivia, riapri, elimina) governato **solo dall'elenco**; l'eliminazione e' ammessa sulle sole bozze, e il vincolo sta nel repository, non nell'interfaccia.
 
 **Sicurezza**: tutte le rotte `/api/v1/emolumenti` sono admin + audit **awaited**, letture comprese — il payload contiene nominativi, matricole e importi.
@@ -318,6 +319,18 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 ## Changelog
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.09.11
+**Storico dei ruoli e scelta manuale nell'area Emolumenti**
+- **Perche' serve.** L'elenco mostra un ruolo solo, quello con la decorrenza piu' alta. Per i docenti basta; per dottorandi e borsisti no, perche' i ruoli **si sovrappongono davvero**: la stessa persona puo' avere una borsa e un dottorato attivi nello stesso mese, e in CSA sono due rapporti distinti. Su questa popolazione nessuna risoluzione automatica "ruolo alla data" puo' funzionare — decide l'operatore.
+- **`GET /api/v1/emolumenti/storico-ruoli/:matricola`** e la versione in blocco **`POST /api/v1/emolumenti/storico-ruoli`** — la storia anagrafica completa di una matricola via `findByMatricola`, admin + audit come il resto dell'area, **senza codice fiscale**. Nessun metodo nuovo nei repository.
+- **Pannello dettagli per riga.** Il pulsante con ruolo e area del conto apre l'elenco dei rapporti con le date, e da li' si sceglie. La scelta resta **nella lavorazione** (`ruoloScelto`, `areaContoScelta`), e' marcata *a mano* in interfaccia e **non torna in anagrafica** — quella si corregge solo re-importando da SGE. Il ruolo scelto e' quello che finisce nel CSV.
+- **L'ambiguita' si vede senza cercarla.** Si calcola sui **mesi selezionati** e all'ultimo giorno del mese, che e' la data che finisce nel CSV come `dataCompetenzaVoce`: se piu' di un rapporto e' aperto a quella data la riga lo dichiara in testa, e ogni rapporto mostra quali mesi copre. Segnalato anche il caso opposto — un mese selezionato che nessun rapporto copre, dove il CSV porterebbe un ruolo che l'anagrafica non conferma.
+- **Area del conto assegnabile a mano** per chi in anagrafica non ce l'ha e resterebbe fuori da tutti i TXT.
+
+**Guardrail PII — controllo a volume nel pre-commit**
+- Il controllo sulle matricole guardava il **contesto**: segnalava solo quando sulla stessa riga compariva la parola "matricola". Ma un **elenco** di dati parole di contesto non ne ha, e un file di riconciliazione con 4.797 matricole vere passava con **zero** righe intercettate. Aggiunta una seconda rete sulla **quantita'**: oltre 20 valori distinti a sei cifre che iniziano per zero il commit si blocca a prescindere dal contesto. Calibrata sul repository — ogni file legittimo del progetto sta a 0.
+- `.gitignore`: i file di diagnostica e bonifica dell'anagrafica (`DIAGNOSI_*`, `VERIFICHE_*`, `VERIFICA_*`, `RICONCILIA_*`) seguono gli altri interni dell'ateneo.
 
 ### 26.09.09
 **Area Emolumenti (dottorandi e borse) + area del conto in anagrafiche**

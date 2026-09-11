@@ -217,6 +217,88 @@ export async function emolumentiRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ risultati })
   })
 
+  // GET /storico-ruoli/:matricola
+  //   → { matricola, storico[] }
+  //
+  // Tutta la storia anagrafica di una matricola, un rapporto per riga.
+  //
+  // Perche' esiste: findAll() — quella che alimenta risolvi-nominativi — fa
+  // DISTINCT ON (matricola) ORDER BY decor_inq DESC, cioe' restituisce UNA
+  // riga sola, quella con la decorrenza piu' alta. Per PA/PO/RU va bene: un
+  // ruolo dura anni. Per DR/BS/BE no: sono contratti brevi in catena (evento
+  // 169, 018/024, 060 di proroga) intervallati da rapporti PE/AR/TU che
+  // l'estrazione SGE scarta, e "l'ultimo per decorrenza" non e' detto sia il
+  // ruolo giusto per il mese che si sta liquidando. Qui si vedono tutti e
+  // sceglie l'operatore.
+  //
+  // La scelta NON torna in anagrafica: resta nella lavorazione. L'anagrafica
+  // si corregge solo re-importando da SGE, che e' la sua unica sorgente.
+  //
+  // Il codice fiscale non esce di qui: si mappano solo i campi elencati sotto
+  // (findByMatricola lo restituisce decifrato, quindi lo scarto e' voluto).
+  app.get('/storico-ruoli/:matricola', pii, async (request, reply) => {
+    const { matricola } = z.object({
+      matricola: z.string().trim().regex(/^\d{1,6}$/),
+    }).parse(request.params)
+
+    const mat  = padMatricola(matricola)
+    const rows = await anagRepo.findByMatricola(mat)
+
+    await audit(request.user?.id, request.ip, {
+      endpoint: 'storico-ruoli', matricola: mat, nRighe: rows.length,
+    })
+
+    return reply.send({
+      matricola: mat,
+      storico: rows.map(r => ({
+        ruolo:     r.ruolo,
+        druolo:    r.druolo,
+        decorInq:  r.decorInq,
+        finRap:    r.finRap,
+        idAb:      r.idAb,
+        areaConto: r.areaConto,
+      })),
+    })
+  })
+
+  // POST /storico-ruoli  { matricole[] }  → { storici: { matricola: [...] } }
+  //
+  // Versione in blocco della rotta qui sopra: una sola chiamata per tutto
+  // l'elenco, invece di una per riga. Serve perche' l'interfaccia deve poter
+  // segnalare l'ambiguita' PRIMA che l'operatore apra i dettagli: su
+  // dottorandi e borsisti i ruoli si sovrappongono davvero — la stessa persona
+  // puo' avere borsa e dottorato attivi nello stesso mese — e chi liquida deve
+  // vedere subito su quali righe c'e' da scegliere.
+  //
+  // Sono N letture indicizzate su una tabella piccola, tutte locali: il costo
+  // sta nel viaggio HTTP, ed e' quello che si risparmia.
+  app.post('/storico-ruoli', pii, async (request, reply) => {
+    const b = z.object({
+      matricole: z.array(z.string().min(1).max(20)).min(1).max(MAX_MATRICOLE),
+    }).parse(request.body)
+
+    const matricole = [...new Set(b.matricole.map(padMatricola))]
+
+    await audit(request.user?.id, request.ip, {
+      endpoint: 'storico-ruoli-bulk', nMatricole: matricole.length,
+    })
+
+    const storici: Record<string, unknown[]> = {}
+    for (const m of matricole) {
+      const rows = await anagRepo.findByMatricola(m)
+      storici[m] = rows.map(r => ({
+        ruolo:     r.ruolo,
+        druolo:    r.druolo,
+        decorInq:  r.decorInq,
+        finRap:    r.finRap,
+        idAb:      r.idAb,
+        areaConto: r.areaConto,
+      }))
+    }
+
+    return reply.send({ storici })
+  })
+
   // ==========================================================
   // LAVORAZIONI — salvataggio e recupero del lavoro in corso
   //
