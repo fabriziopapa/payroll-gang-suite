@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.09.11.2-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.09.11.3-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -319,6 +319,13 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 ## Changelog
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.09.11.3
+**Il salvataggio della liquidazione cadeva dopo aver accettato il ruolo dal DB**
+- **Sintomo.** Dopo *Aggiorna Ruolo*, scegliendo *«Usa ruolo storico dal DB»* nella modale dei conflitti, il salvataggio rispondeva `400 validation_error` e **l'intera bozza non si salvava** — 57 nominativi persi per cinque righe.
+- **Causa.** In `DettaglioCard` il ramo che applica il ruolo del DB scriveva `druolo: item.druoloDb ?? undefined`. In `anagrafiche` il campo `druolo` e' **sempre NULL** (l'import SGE non porta la descrizione del ruolo), quindi `druoloDb` e' null, `?? undefined` lo rende `undefined` e `JSON.stringify` **elimina la chiave**. Lato server `NominativoSchema` vuole `druolo` come stringa obbligatoria: chiave assente, validazione fallita, PUT respinta. `RuoloDisambiguaModal`, che fa la stessa identica cosa, usava gia' `?? ''` — il difetto era in un ramo solo, ed e' il motivo per cui *«Ruolo ambiguo»* funzionava e *«Ruolo diverso dal dato storico»* no.
+- **Correzione, su due livelli.** `?? ''` al posto di `?? undefined`, cosi' il dato che parte e' giusto; e `druolo` reso `.optional().default('')` in `BozzaDatiSchema`, perche' un campo puramente descrittivo e sempre nullo non deve poter bloccare il salvataggio di una bozza intera — ne' oggi, ne' da un client piu' vecchio.
+- Nessuna migrazione: `druolo` non entra nel CSV per HR ed e' solo di visualizzazione.
 
 ### 26.09.11.2
 **Anagrafiche: da quale query nasce il file, e gli errori d'import si possono leggere**

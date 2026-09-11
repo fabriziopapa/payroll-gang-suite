@@ -379,8 +379,15 @@ export default function DettaglioCard({
             const item = conflittoItems.find(c => c.nomId === nomId)
             if (item) {
               updateNominativo(nomId, {
-                ruolo:           item.ruoloDb,
-                druolo:          item.druoloDb ?? undefined,
+                ruolo:  item.ruoloDb,
+                // `?? ''` e NON `?? undefined`: in anagrafiche `druolo` e'
+                // sempre NULL (l'import SGE non porta la descrizione del
+                // ruolo), e `undefined` fa sparire la chiave da JSON.stringify.
+                // Lato server NominativoSchema vuole `druolo` come stringa
+                // obbligatoria: chiave assente = validation_error, e cade il
+                // salvataggio dell'INTERA bozza, non solo di quella riga.
+                // RuoloDisambiguaModal, che fa la stessa cosa, usa gia' `?? ''`.
+                druolo:          item.druoloDb ?? '',
                 ruoloModificato: false,
               })
             }

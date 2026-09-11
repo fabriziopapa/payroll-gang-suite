@@ -18,7 +18,10 @@ const NominativoSchema = z.object({
   cognomeNome:     z.string().max(200),
   codFisc:         z.string().max(20).optional(),
   ruolo:           z.string().max(20),
-  druolo:          z.string().max(200),
+  // Descrittivo e sempre NULL in anagrafiche: non deve poter bloccare il
+  // salvataggio di una bozza intera. Default '' cosi' a valle resta una
+  // stringa e nessun consumatore deve gestire l'assenza.
+  druolo:          z.string().max(200).optional().default(''),
   dettaglioId:     z.string().max(50),
   importoLordo:    z.number().finite(),
   parti:           z.number().finite().optional(),
