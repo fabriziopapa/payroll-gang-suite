@@ -46,6 +46,9 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
   const [capitolo, setCapitolo]                     = useState(existing?.capitolo ?? '')
   const [competenza, setCompetenza]                 = useState(existing?.competenzaLiquidazione ?? '')
   const competenzaRef = useRef<HTMLInputElement>(null)
+  /** Vero fra il focus e il rilascio del mouse che l'ha causato: serve a non
+   *  far collassare dal click la selezione appena fatta in `onFocus`. */
+  const competenzaAppenaFocus = useRef(false)
   const [dataCompetenzaVoce, setDataCompetenzaVoce] = useState(existing?.dataCompetenzaVoce ?? '')
   const [dataRifFigli, setDataRifFigli]             = useState(existing?.dataRiferimentoFigli ?? '')
   // Radio scorporo: 'none' | 'standard' | 'contoterzi'
@@ -163,6 +166,32 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
    * la ricalcola quando la competenza e' completa, e resta sovrascrivibile
    * a mano.
    */
+  /**
+   * Entrando nel campo — con il mouse o con Tab — si seleziona tutto, cosi'
+   * la prima cifra digitata sostituisce quello che c'era invece di
+   * infilarcisi dentro.
+   *
+   * Non basta portare il cursore a zero: con `03/2005` gia' scritto,
+   * digitare `072026` da li' produrrebbe `07202603/2005`, cioe' dodici cifre,
+   * e finirebbe dritto nel ramo d'errore. Selezionando, la prima cifra pulisce
+   * il campo da sola.
+   *
+   * `onMouseUp` va intercettato **una volta sola**, quella che segue il
+   * focus: il browser al rilascio del mouse collasserebbe la selezione sul
+   * punto cliccato. Un secondo click, a campo gia' attivo, resta libero di
+   * posizionare il cursore dove si vuole.
+   */
+  function onCompetenzaFocus(el: HTMLInputElement) {
+    competenzaAppenaFocus.current = true
+    el.select()
+  }
+
+  function onCompetenzaMouseUp(e: React.MouseEvent<HTMLInputElement>) {
+    if (!competenzaAppenaFocus.current) return
+    competenzaAppenaFocus.current = false
+    e.preventDefault()
+  }
+
   function onCompetenzaChange(valore: string) {
     const cifre = valore.replace(/\D/g, '')
 
@@ -178,7 +207,7 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
         const el = competenzaRef.current
         if (!el) return
         el.focus()
-        el.setSelectionRange(0, 0)
+        el.setSelectionRange(0, 0)   // campo gia' vuoto: cursore in testa
       })
       return
     }
@@ -516,6 +545,9 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
                   <Field label="Competenza (MM/YYYY) *" error={errors.competenza}>
                     <input ref={competenzaRef} value={competenza}
                       onChange={e => onCompetenzaChange(e.target.value)}
+                      onFocus={e => onCompetenzaFocus(e.currentTarget)}
+                      onMouseUp={onCompetenzaMouseUp}
+                      onBlur={() => { competenzaAppenaFocus.current = false }}
                       placeholder="04/2026" inputMode="numeric" maxLength={7}
                       className={errors.competenza ? inputErrCls : inputCls} />
                   </Field>
