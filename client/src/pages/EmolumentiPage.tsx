@@ -1803,8 +1803,23 @@ function DettagliAnagrafici({ r, storico, ambigui, scoperti, onPatch, onChiudi }
   /** Ruoli distinti trovati: se sono piu' d'uno la scelta non e' scontata. */
   const ruoliDistinti = new Set((righe ?? []).map(s => s.ruolo))
 
+  /** Senza area del conto la persona resta fuori da TUTTI i TXT e non si puo'
+   *  liquidare: in quel caso e' quella la cosa da sistemare, e la sua sezione
+   *  va mostrata per prima. L'ordine e' dato con `order` invece di duplicare
+   *  il JSX, cosi' esiste una sola versione di ciascun blocco. */
+  const contoIgnoto = !AREE_TXT_CHIAVI.includes(areaDi(r) ?? '')
+
   return (
-    <div className="px-5 py-4 bg-slate-950/60 border-b border-slate-800 space-y-4">
+    <div className="px-5 py-4 bg-slate-950/60 border-b border-slate-800 flex flex-col gap-4">
+
+      {/* Chiudi in testa al pannello: i due blocchi sotto si scambiano di
+          posto, e un comando che si sposta con loro non si trova piu'. */}
+      <div className="flex items-baseline">
+        <p className="text-xs font-medium text-slate-400">Dettagli anagrafici</p>
+        <button onClick={onChiudi} className="ml-auto text-xs text-slate-500 hover:text-slate-300">
+          chiudi
+        </button>
+      </div>
 
       {/* ── L'ambiguità, per prima: è la cosa da decidere ──── */}
       {ambigui.length > 0 && (
@@ -1841,7 +1856,7 @@ function DettagliAnagrafici({ r, storico, ambigui, scoperti, onPatch, onChiudi }
       )}
 
       {/* ── Ruoli ─────────────────────────────────────────── */}
-      <div>
+      <div style={{ order: contoIgnoto ? 2 : 1 }}>
         <div className="flex items-baseline gap-3 mb-2">
           <p className="text-xs font-medium text-slate-400">Rapporti in anagrafica</p>
           {righe == null && !errore && (
@@ -1852,9 +1867,6 @@ function DettagliAnagrafici({ r, storico, ambigui, scoperti, onPatch, onChiudi }
               {righe.length} rapporto/i · {ruoliDistinti.size} ruolo/i distinto/i
             </p>
           )}
-          <button onClick={onChiudi} className="ml-auto text-xs text-slate-500 hover:text-slate-300">
-            chiudi
-          </button>
         </div>
 
         {errore && <p className="text-xs text-red-400">{errore}</p>}
@@ -1922,7 +1934,7 @@ function DettagliAnagrafici({ r, storico, ambigui, scoperti, onPatch, onChiudi }
       </div>
 
       {/* ── Area del conto ────────────────────────────────── */}
-      <div>
+      <div style={{ order: contoIgnoto ? 1 : 2 }}>
         <p className="text-xs font-medium text-slate-400 mb-1">Area del conto (per i TXT)</p>
         <p className="text-xs text-slate-500 mb-2">
           {r.areaConto
@@ -2037,7 +2049,9 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
             onClick={() => setDettagli(d => !d)}
             title={daDecidere
               ? 'Su questi mesi la persona risulta avere più di un ruolo: apri e scegli'
-              : 'Ruoli di questa matricola, e area del conto per i TXT'}
+              : !AREE_TXT_CHIAVI.includes(areaDi(r) ?? '')
+                ? 'Senza area del conto resta fuori da tutti i TXT: apri e assegnala'
+                : 'Ruoli di questa matricola, e area del conto per i TXT'}
             className={`px-2 py-1 rounded-lg border text-xs flex items-center gap-2 transition-colors ${
               daDecidere
                 ? 'bg-amber-950/40 border-amber-800/70 text-amber-200 hover:border-amber-700'
@@ -2060,6 +2074,7 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
               <span className="flex items-center gap-1.5 text-red-400">
                 <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />
                 conto ignoto
+                <span className="text-red-300/70 underline decoration-dotted">assegna</span>
               </span>
             )}
             {daDecidere && (

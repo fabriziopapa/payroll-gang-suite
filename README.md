@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.09.11-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.09.11.1-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -319,6 +319,12 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 ## Changelog
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.09.11.1
+**L'area del conto si assegnava gia', ma non si trovava**
+- Il pallino rosso *conto ignoto* diceva che qualcosa non andava, non che li' si rimediava: chi non ha una coordinata CSA nota resta fuori da tutti i TXT e non si puo' liquidare, e la strada per sbloccarlo era la seconda sezione di un pannello che si apre da un'etichetta. Ora il chip porta scritto **assegna**, il suggerimento del pulsante dice cosa comporta (*"resta fuori da tutti i TXT: apri e assegnala"*), e aprendo il pannello su una riga senza conto la sezione **Area del conto** viene mostrata **per prima**, sopra l'elenco dei rapporti.
+- L'ordine e' dato con `order` su un contenitore flex, non duplicando il JSX: di ciascun blocco esiste una versione sola. Il comando *chiudi* e' salito in testa al pannello, perche' un comando che si sposta insieme ai blocchi non si ritrova.
+- Nessun cambiamento di comportamento: la scelta manuale valeva gia' quanto l'anagrafica in `areaDi()` e nei TXT, e continua a non toccare l'anagrafica.
 
 ### 26.09.11
 **Storico dei ruoli e scelta manuale nell'area Emolumenti**
