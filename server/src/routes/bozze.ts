@@ -99,7 +99,7 @@ export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
     })
     const existing = await requireOwner(id, req.user!.id, req.user!.isAdmin, reply)
     if (!existing) return
-    const bozza = await repo.update(id, schema.parse(req.body))
+    const bozza = await repo.update(id, schema.parse(req.body), req.user!.id)
     await auditRepo.log({ userId: req.user!.id, azione: 'BOZZA_MODIFICATA', entita: 'bozze', entitaId: id, dettagli: { nome: bozza.nome }, ip: req.ip })
     return reply.send(bozza)
   })
@@ -120,7 +120,7 @@ export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
     const info = LiquidazioneInfoSchema.parse(req.body ?? {})
     const existing = await requireOwner(id, req.user!.id, req.user!.isAdmin, reply)
     if (!existing) return
-    const bozza = await repo.archive(id, info)
+    const bozza = await repo.archive(id, info, req.user!.id)
     await auditRepo.log({ userId: req.user!.id, azione: 'BOZZA_ARCHIVIATA', entita: 'bozze', entitaId: id, dettagli: { dataLiquidazione: info.dataLiquidazione, idLiquidazioneCsa: info.idLiquidazioneCsa }, ip: req.ip })
     return reply.send(bozza)
   })
@@ -134,7 +134,7 @@ export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
     if (existing.stato !== 'archiviata') {
       return reply.code(409).send({ error: 'NOT_ARCHIVED' })
     }
-    const bozza = await repo.updateLiquidazioneInfo(id, info)
+    const bozza = await repo.updateLiquidazioneInfo(id, info, req.user!.id)
     await auditRepo.log({ userId: req.user!.id, azione: 'BOZZA_LIQUIDAZIONE_INFO', entita: 'bozze', entitaId: id, dettagli: { dataLiquidazione: info.dataLiquidazione, idLiquidazioneCsa: info.idLiquidazioneCsa }, ip: req.ip })
     return reply.send(bozza)
   })
@@ -143,7 +143,7 @@ export async function bozzeRoutes(app: FastifyInstance): Promise<void> {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params)
     const existing = await requireOwner(id, req.user!.id, req.user!.isAdmin, reply)
     if (!existing) return
-    const bozza = await repo.restore(id)
+    const bozza = await repo.restore(id, req.user!.id)
     await auditRepo.log({ userId: req.user!.id, azione: 'BOZZA_RIPRISTINATA', entita: 'bozze', entitaId: id, dettagli: { nome: bozza.nome }, ip: req.ip })
     return reply.send(bozza)
   })

@@ -4,6 +4,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../store/useStore'
+import { nomeOppureTe } from '../utils/utente'
 import { bozzeApi, type BozzaApi } from '../api/endpoints'
 import { showToast } from '../components/ToastManager'
 import { ConfirmDialog } from '../components/ConfirmDialog'
@@ -303,8 +304,7 @@ export default function DashboardPage() {
               <BozzaCard
                 key={b.id}
                 bozza={b}
-                isOwn={b.createdBy === user?.id}
-                createdByUsername={b.createdByUsername}
+                userId={user?.id ?? null}
                 onOpen={() => handleOpenEditor(b)}
                 onView={() => handleOpenViewer(b)}
                 onArchive={() => handleArchive(b)}
@@ -445,10 +445,10 @@ function StatCard({ label, value, color }: {
   )
 }
 
-function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onView, onArchive, onDelete, onCopy, isArchiving, isDeleting, isCopying }: {
+function BozzaCard({ bozza, userId, onOpen, onView, onArchive, onDelete, onCopy, isArchiving, isDeleting, isCopying }: {
   bozza:              BozzaApi
-  isOwn:              boolean
-  createdByUsername:  string | null
+  /** Id dell'utente collegato: serve a scrivere «te» invece del suo nome. */
+  userId:             string | null
   onOpen:             () => void
   onView:             () => void
   onArchive:          () => void
@@ -465,6 +465,15 @@ function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onView, onArchive,
   const updatedAt    = new Date(bozza.updatedAt).toLocaleDateString('it-IT', {
     day: '2-digit', month: 'short', year: 'numeric',
   })
+  // `null` quando l'utente e' stato cancellato (il join da' NULL) o quando la
+  // riga precede la migrazione 0015: in quel caso la frase si omette invece di
+  // mostrare un «da —» che non dice niente.
+  // Proprieta' della riga: NON e' una scelta di visualizzazione, governa il
+  // pulsante Elimina. Ricavata da `userId` invece di arrivare come prop: un
+  // dato derivabile passato a mano e' un dato che puo' arrivare incoerente.
+  const isOwn        = !!userId && bozza.createdBy === userId
+  const modificatore = nomeOppureTe(bozza.updatedByUsername, bozza.updatedBy, userId)
+  const creatore     = nomeOppureTe(bozza.createdByUsername, bozza.createdBy, userId)
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-4
@@ -486,27 +495,24 @@ function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onView, onArchive,
         )}
       </div>
 
-      {/* Info */}
+      {/* Info — stesso impianto dell'area Emolumenti: il titolo da solo sulla
+          prima riga, i metadati sotto in grigio tenue.
+
+          La pillola col nome del creatore stava DENTRO il flex del titolo, con
+          sfondo pieno e bordo: aveva lo stesso risalto del nome della
+          liquidazione pur essendo un metadato, e accanto alla pillola di stato
+          («Bozza»/«Archiviata») si leggeva come un'etichetta di stato anche
+          lei. Mostrava inoltre l'indirizzo intero, di cui due terzi sono un
+          dominio identico su ogni riga. */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <p className="text-white font-medium text-sm truncate">{bozza.nome}</p>
-          {/* Badge creatore */}
-          {createdByUsername && (
-            <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded border font-medium
-              ${isOwn
-                ? 'bg-indigo-900/30 border-indigo-800/60 text-indigo-400'
-                : 'bg-violet-900/40 border-violet-700/50 text-violet-400'}`}
-            >
-              {isOwn ? 'Tu' : createdByUsername}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-3 mt-0.5">
+        <p className="text-white font-medium text-sm truncate">{bozza.nome}</p>
+        <div className="flex items-center gap-3 mt-0.5 flex-wrap">
           {bozza.protocolloDisplay && (
             <span className="text-xs text-slate-500 truncate">{bozza.protocolloDisplay}</span>
           )}
-          <span className="text-xs text-slate-600">
-            {createdAt !== updatedAt ? `Modificato ${updatedAt}` : `Creato ${createdAt}`}
+          <span className="text-xs text-slate-500" title={bozza.updatedByUsername ?? undefined}>
+            Modificato {updatedAt}
+            {modificatore ? ` da ${modificatore}` : ''}
           </span>
           {isArchiviata && bozza.dataLiquidazione && (
             <span className="text-xs text-amber-500/80">
@@ -521,6 +527,14 @@ function BozzaCard({ bozza, isOwn, createdByUsername, onOpen, onView, onArchive,
             </span>
           )}
         </div>
+        {/* Riga a parte, e in grigio piu' tenue: la creazione e' contorno e non
+            deve rubare spazio a chi ha toccato la liquidazione per ultimo, che
+            e' l'informazione che si cerca. */}
+        {creatore && (
+          <p className="text-xs text-slate-600 mt-0.5" title={bozza.createdByUsername ?? undefined}>
+            Creata da {creatore} il {createdAt}
+          </p>
+        )}
       </div>
 
       {/* Badge stato */}

@@ -205,6 +205,9 @@ export interface BozzaRow {
   idLiquidazioneCsa:  string | null
   createdBy:          string | null
   createdByUsername:  string | null
+  /** Chi ha salvato per ultimo. NULL sulle righe precedenti alla 0015. */
+  updatedBy:          string | null
+  updatedByUsername:  string | null
   createdAt:          Date
   updatedAt:          Date
 }
@@ -230,6 +233,8 @@ export interface BozzaSummaryRow {
   idLiquidazioneCsa: string | null
   createdBy:         string | null
   createdByUsername: string | null
+  updatedBy:         string | null
+  updatedByUsername: string | null
   createdAt:         Date
   updatedAt:         Date
 }
@@ -270,12 +275,17 @@ export interface IBozzeRepository {
   searchFull(opts: BozzaSearchOpts): Promise<BozzaRow[]>
   findById(id: string): Promise<BozzaRow | null>
   create(data: BozzaInput): Promise<BozzaRow>
-  update(id: string, data: Partial<BozzaInput>): Promise<BozzaRow>
+  /**
+   * `userId` in coda a tutti i metodi che scrivono: e' chi ha fatto la
+   * modifica, e finisce in `updated_by` accanto a `updated_at`. Facoltativo
+   * per non rompere i chiamanti esistenti, ma le rotte lo passano sempre.
+   */
+  update(id: string, data: Partial<BozzaInput>, userId?: string | null): Promise<BozzaRow>
   /** Archivia la bozza salvando data liquidazione (obbligatoria) e ID CSA (facoltativo). */
-  archive(id: string, info: LiquidazioneInfo): Promise<BozzaRow>
-  restore(id: string): Promise<BozzaRow>
+  archive(id: string, info: LiquidazioneInfo, userId?: string | null): Promise<BozzaRow>
+  restore(id: string, userId?: string | null): Promise<BozzaRow>
   /** Aggiorna data liquidazione / ID CSA di una bozza già archiviata. */
-  updateLiquidazioneInfo(id: string, info: LiquidazioneInfo): Promise<BozzaRow>
+  updateLiquidazioneInfo(id: string, info: LiquidazioneInfo, userId?: string | null): Promise<BozzaRow>
   delete(id: string): Promise<void>
 }
 

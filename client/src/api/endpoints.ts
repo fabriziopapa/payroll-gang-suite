@@ -79,6 +79,10 @@ export interface BozzaApi {
   idLiquidazioneCsa:  string | null
   createdBy:          string | null
   createdByUsername:  string | null
+  /** Chi ha salvato per ultimo. NULL sulle liquidazioni precedenti alla
+   *  migrazione 0015: si popola al primo salvataggio. */
+  updatedBy:          string | null
+  updatedByUsername:  string | null
   createdAt:          string
   updatedAt:          string
 }

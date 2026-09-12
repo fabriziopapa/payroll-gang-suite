@@ -4,6 +4,7 @@
 // ============================================================
 
 import { eq, and, sql, type SQL } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/pg-core'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import * as schema from '../schema.js'
 import { encrypt, decrypt } from '../../services/cryptoService.js'
@@ -66,6 +67,14 @@ export function revealCf(dati: unknown): unknown {
   return mapCfFields(dati, decField, false)
 }
 
+/**
+ * Due join sulla STESSA tabella `users` — chi ha creato e chi ha salvato per
+ * ultimo — quindi due alias distinti: senza, Postgres non sa a quale dei due
+ * ci si riferisce.
+ */
+const autore       = alias(schema.users, 'autore')
+const modificatore = alias(schema.users, 'modificatore')
+
 /** Colonne selezionate con dati JSONB — usato solo da findById */
 const SEL = {
   id:                schema.bozze.id,
@@ -76,9 +85,11 @@ const SEL = {
   dataLiquidazione:  schema.bozze.dataLiquidazione,
   idLiquidazioneCsa: schema.bozze.idLiquidazioneCsa,
   createdBy:         schema.bozze.createdBy,
+  updatedBy:         schema.bozze.updatedBy,
   createdAt:         schema.bozze.createdAt,
   updatedAt:         schema.bozze.updatedAt,
-  createdByUsername: schema.users.username,
+  createdByUsername: autore.username,
+  updatedByUsername: modificatore.username,
 }
 
 /** FIX H-1: colonne senza dati JSONB — usato dalla lista (GET /bozze) */
@@ -90,9 +101,11 @@ const SEL_SUMMARY = {
   dataLiquidazione:  schema.bozze.dataLiquidazione,
   idLiquidazioneCsa: schema.bozze.idLiquidazioneCsa,
   createdBy:         schema.bozze.createdBy,
+  updatedBy:         schema.bozze.updatedBy,
   createdAt:         schema.bozze.createdAt,
   updatedAt:         schema.bozze.updatedAt,
-  createdByUsername: schema.users.username,
+  createdByUsername: autore.username,
+  updatedByUsername: modificatore.username,
 }
 
 export class PgBozzeRepository implements IBozzeRepository {
@@ -102,7 +115,8 @@ export class PgBozzeRepository implements IBozzeRepository {
     const base = this.db
       .select(SEL)
       .from(schema.bozze)
-      .leftJoin(schema.users, eq(schema.bozze.createdBy, schema.users.id))
+      .leftJoin(autore,       eq(schema.bozze.createdBy, autore.id))
+      .leftJoin(modificatore, eq(schema.bozze.updatedBy, modificatore.id))
 
     const rows = userId
       ? await base.where(eq(schema.bozze.createdBy, userId)).orderBy(schema.bozze.updatedAt)
@@ -120,7 +134,8 @@ export class PgBozzeRepository implements IBozzeRepository {
     const base = this.db
       .select(SEL_SUMMARY)
       .from(schema.bozze)
-      .leftJoin(schema.users, eq(schema.bozze.createdBy, schema.users.id))
+      .leftJoin(autore,       eq(schema.bozze.createdBy, autore.id))
+      .leftJoin(modificatore, eq(schema.bozze.updatedBy, modificatore.id))
 
     const rows = userId
       ? await base.where(eq(schema.bozze.createdBy, userId)).orderBy(schema.bozze.updatedAt)
@@ -187,11 +202,14 @@ export class PgBozzeRepository implements IBozzeRepository {
              b.data_liquidazione,
              b.id_liquidazione_csa,
              b.created_by,
-             u.username AS created_by_username,
+             b.updated_by,
+             u.username  AS created_by_username,
+             um.username AS updated_by_username,
              b.created_at,
              b.updated_at
       FROM bozze b
-      LEFT JOIN users u ON u.id = b.created_by
+      LEFT JOIN users u  ON u.id  = b.created_by
+      LEFT JOIN users um ON um.id = b.updated_by
       WHERE ${where}
       ORDER BY b.updated_at DESC
     `)
@@ -212,11 +230,14 @@ export class PgBozzeRepository implements IBozzeRepository {
              b.data_liquidazione,
              b.id_liquidazione_csa,
              b.created_by,
-             u.username AS created_by_username,
+             b.updated_by,
+             u.username  AS created_by_username,
+             um.username AS updated_by_username,
              b.created_at,
              b.updated_at
       FROM bozze b
-      LEFT JOIN users u ON u.id = b.created_by
+      LEFT JOIN users u  ON u.id  = b.created_by
+      LEFT JOIN users um ON um.id = b.updated_by
       WHERE ${where}
       ORDER BY b.updated_at DESC
     `)
@@ -227,7 +248,8 @@ export class PgBozzeRepository implements IBozzeRepository {
     const [row] = await this.db
       .select(SEL)
       .from(schema.bozze)
-      .leftJoin(schema.users, eq(schema.bozze.createdBy, schema.users.id))
+      .leftJoin(autore,       eq(schema.bozze.createdBy, autore.id))
+      .leftJoin(modificatore, eq(schema.bozze.updatedBy, modificatore.id))
       .where(eq(schema.bozze.id, id))
       .limit(1)
 
@@ -243,6 +265,9 @@ export class PgBozzeRepository implements IBozzeRepository {
         protocolloDisplay: data.protocolloDisplay  ?? null,
         dati:              protectCf(data.dati)    as Record<string, unknown>,   // PGS-05
         createdBy:         data.createdBy          ?? null,
+        // Chi crea e' anche l'ultimo che ha salvato: non e' un'ipotesi, e'
+        // successo adesso.
+        updatedBy:         data.createdBy          ?? null,
       })
       .returning({ id: schema.bozze.id })
 
@@ -250,9 +275,12 @@ export class PgBozzeRepository implements IBozzeRepository {
     return (await this.findById(ins.id))!
   }
 
-  async update(id: string, data: Partial<BozzaInput>): Promise<BozzaRow> {
+  async update(id: string, data: Partial<BozzaInput>, userId?: string | null): Promise<BozzaRow> {
+    // `updatedBy` accanto a `updatedAt`: chi e quando sono lo stesso fatto e
+    // vanno scritti insieme, altrimenti prima o poi divergono.
     const set: Partial<typeof schema.bozze.$inferInsert> = {
       updatedAt: new Date(),
+      updatedBy: userId ?? null,
     }
     if (data.nome              !== undefined) set.nome              = data.nome
     if (data.protocolloDisplay !== undefined) set.protocolloDisplay = data.protocolloDisplay
@@ -271,7 +299,7 @@ export class PgBozzeRepository implements IBozzeRepository {
     return (await this.findById(upd.id))!
   }
 
-  async archive(id: string, info: LiquidazioneInfo): Promise<BozzaRow> {
+  async archive(id: string, info: LiquidazioneInfo, userId?: string | null): Promise<BozzaRow> {
     const [upd] = await this.db
       .update(schema.bozze)
       .set({
@@ -279,6 +307,7 @@ export class PgBozzeRepository implements IBozzeRepository {
         dataLiquidazione:  info.dataLiquidazione,
         idLiquidazioneCsa: info.idLiquidazioneCsa ?? null,
         updatedAt:         new Date(),
+        updatedBy:         userId ?? null,
       })
       .where(and(
         eq(schema.bozze.id,    id),
@@ -290,10 +319,10 @@ export class PgBozzeRepository implements IBozzeRepository {
     return (await this.findById(upd.id))!
   }
 
-  async restore(id: string): Promise<BozzaRow> {
+  async restore(id: string, userId?: string | null): Promise<BozzaRow> {
     const [upd] = await this.db
       .update(schema.bozze)
-      .set({ stato: 'bozza', updatedAt: new Date() })
+      .set({ stato: 'bozza', updatedAt: new Date(), updatedBy: userId ?? null })
       .where(and(
         eq(schema.bozze.id,    id),
         eq(schema.bozze.stato, 'archiviata'),
@@ -308,13 +337,16 @@ export class PgBozzeRepository implements IBozzeRepository {
    * Aggiorna data liquidazione / ID CSA su una bozza GIÀ archiviata
    * (l'ID CSA è facoltativo all'archiviazione e integrabile in seguito).
    */
-  async updateLiquidazioneInfo(id: string, info: LiquidazioneInfo): Promise<BozzaRow> {
+  async updateLiquidazioneInfo(
+    id: string, info: LiquidazioneInfo, userId?: string | null,
+  ): Promise<BozzaRow> {
     const [upd] = await this.db
       .update(schema.bozze)
       .set({
         dataLiquidazione:  info.dataLiquidazione,
         idLiquidazioneCsa: info.idLiquidazioneCsa ?? null,
         updatedAt:         new Date(),
+        updatedBy:         userId ?? null,
       })
       .where(and(
         eq(schema.bozze.id,    id),
@@ -341,6 +373,8 @@ type RowShape = {
   dataLiquidazione: string | null; idLiquidazioneCsa: string | null
   createdBy: string | null; createdAt: Date; updatedAt: Date
   createdByUsername: string | null
+  updatedBy: string | null
+  updatedByUsername: string | null
 }
 
 function toRow(r: RowShape): BozzaRow {
@@ -354,6 +388,8 @@ function toRow(r: RowShape): BozzaRow {
     idLiquidazioneCsa: r.idLiquidazioneCsa ?? null,
     createdBy:         r.createdBy         ?? null,
     createdByUsername: r.createdByUsername  ?? null,
+    updatedBy:         r.updatedBy         ?? null,
+    updatedByUsername: r.updatedByUsername  ?? null,
     createdAt:         r.createdAt,
     updatedAt:         r.updatedAt,
   }
@@ -366,6 +402,8 @@ type SummaryRowShape = {
   dataLiquidazione: string | null; idLiquidazioneCsa: string | null
   createdBy: string | null; createdAt: Date; updatedAt: Date
   createdByUsername: string | null
+  updatedBy: string | null
+  updatedByUsername: string | null
 }
 
 function toSummaryRow(r: SummaryRowShape): BozzaSummaryRow {
@@ -378,6 +416,8 @@ function toSummaryRow(r: SummaryRowShape): BozzaSummaryRow {
     idLiquidazioneCsa: r.idLiquidazioneCsa ?? null,
     createdBy:         r.createdBy         ?? null,
     createdByUsername: r.createdByUsername  ?? null,
+    updatedBy:         r.updatedBy         ?? null,
+    updatedByUsername: r.updatedByUsername  ?? null,
     createdAt:         r.createdAt,
     updatedAt:         r.updatedAt,
   }

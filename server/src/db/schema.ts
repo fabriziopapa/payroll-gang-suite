@@ -231,11 +231,15 @@ export const bozze = pgTable('bozze', {
   /** ID liquidazione generato da CSA, es. "1ND999999001220240442801". Facoltativo. */
   idLiquidazioneCsa: varchar('id_liquidazione_csa', { length: 40 }),
   createdBy:         uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  /** Chi ha salvato per ultimo. NULL sulle righe create prima della
+   *  migrazione 0015: non le riempiamo con `createdBy`, sarebbe un'ipotesi. */
+  updatedBy:         uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
   createdAt:         timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:         timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   index('idx_bozze_stato').on(t.stato),
   index('idx_bozze_created_by').on(t.createdBy),
+  index('idx_bozze_updated_by').on(t.updatedBy),
 ])
 
 // ------------------------------------------------------------

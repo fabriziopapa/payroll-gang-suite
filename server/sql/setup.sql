@@ -285,6 +285,8 @@ CREATE TABLE IF NOT EXISTS bozze (
   data_liquidazione   DATE,
   id_liquidazione_csa VARCHAR(40),
   created_by         UUID         REFERENCES users(id) ON DELETE SET NULL,
+  -- Chi ha salvato per ultimo (ex migrazione 0015)
+  updated_by         UUID         REFERENCES users(id) ON DELETE SET NULL,
   created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   updated_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
@@ -292,8 +294,10 @@ CREATE TABLE IF NOT EXISTS bozze (
 -- aggiunge colonne a tabelle già create): idempotente, no-op su DB nuovi.
 ALTER TABLE bozze ADD COLUMN IF NOT EXISTS data_liquidazione   DATE;
 ALTER TABLE bozze ADD COLUMN IF NOT EXISTS id_liquidazione_csa VARCHAR(40);
+ALTER TABLE bozze ADD COLUMN IF NOT EXISTS updated_by UUID REFERENCES users(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_bozze_stato      ON bozze (stato);
 CREATE INDEX IF NOT EXISTS idx_bozze_created_by ON bozze (created_by);
+CREATE INDEX IF NOT EXISTS idx_bozze_updated_by ON bozze (updated_by);
 
 -- ------------------------------------------------------------
 -- EMOLUMENTI — LAVORAZIONI (area dottorandi e borse)

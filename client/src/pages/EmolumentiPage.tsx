@@ -33,6 +33,8 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 // con gli stessi campi e le stesse parole.
 import ArchiviaLiquidazioneModal from '../components/ArchiviaLiquidazioneModal'
 import { serializeCsv, downloadCsv, lastDayOfMonth } from '../utils/biz'
+import { nomeOppureTe } from '../utils/utente'
+import { useStore } from '../store/useStore'
 import { TIPO_PROVVEDIMENTO_DEFAULT } from '../utils/provvedimento'
 import type { CsvExportRow } from '../types'
 
@@ -141,16 +143,6 @@ function etichettaMese(k: string): string {
   return `${MESI_LUNGHI[Number(m)]} ${y}`
 }
 
-/**
- * Lo username e' un indirizzo di posta dell'ateneo: in elenco si mostra la
- * parte prima della @, che basta a riconoscere la persona. Il dominio,
- * identico su ogni riga, sarebbe solo rumore — l'indirizzo intero resta nel
- * suggerimento della riga per chi ha bisogno di quello.
- */
-function soloUtente(username: string): string {
-  const i = username.indexOf('@')
-  return i > 0 ? username.slice(0, i) : username
-}
 
 // ── Stato di lavoro ──────────────────────────────────────────
 
@@ -360,6 +352,8 @@ function parseIncollato(raw: string): Array<{ nominativo: string; numeroProvvedi
 
 export default function EmolumentiPage() {
   const annoCorrente = new Date().getFullYear()
+  /** Serve solo a scrivere «te» invece del proprio nome nell'elenco. */
+  const utenteId = useStore(s => s.user?.id ?? null)
 
   // Passo 1
   const [raw, setRaw] = useState('')
@@ -1190,7 +1184,9 @@ export default function EmolumentiPage() {
                   >
                     {l.tipo ? `${l.tipo} · ` : ''}
                     Modificato {new Date(l.updatedAt).toLocaleDateString('it-IT')}
-                    {l.updatedByUsername ? ` da ${soloUtente(l.updatedByUsername)}` : ''}
+                    {nomeOppureTe(l.updatedByUsername, l.updatedBy, utenteId)
+                      ? ` da ${nomeOppureTe(l.updatedByUsername, l.updatedBy, utenteId)}`
+                      : ''}
                     {l.dataLiquidazione ? ` · liquidata ${l.dataLiquidazione}` : ''}
                     {l.idLiquidazioneCsa ? ` · ${l.idLiquidazioneCsa}` : ''}
                   </p>
@@ -1198,9 +1194,9 @@ export default function EmolumentiPage() {
                       deve rubare spazio a chi ha toccato la lavorazione per
                       ultimo, che e' l'informazione che si cerca. Assente se
                       l'utente e' stato cancellato (il join da' NULL). */}
-                  {l.createdByUsername && (
-                    <p className="text-xs text-slate-600" title={l.createdByUsername}>
-                      Creata da {soloUtente(l.createdByUsername)}
+                  {nomeOppureTe(l.createdByUsername, l.createdBy, utenteId) && (
+                    <p className="text-xs text-slate-600" title={l.createdByUsername ?? undefined}>
+                      Creata da {nomeOppureTe(l.createdByUsername, l.createdBy, utenteId)}
                       {' il '}{new Date(l.createdAt).toLocaleDateString('it-IT')}
                     </p>
                   )}

@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.09.12-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.09.12.1-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -319,6 +319,16 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 ## Changelog
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.09.12.1
+**Liquidazioni: stessa riga di Emolumenti, e via la pillola con l'indirizzo**
+- **Cosa non funzionava nella pillola.** Il nome del creatore stava **dentro il flex del titolo**, con sfondo pieno e bordo: aveva lo stesso risalto del nome della liquidazione pur essendo un metadato, e accanto alla pillola di stato (*Bozza* / *Archiviata*) si leggeva come un'etichetta di stato anche lei. Mostrava l'indirizzo intero — `nome.cognome@uniparthenope.it`, di cui due terzi sono un dominio identico su ogni riga — e alternava due formati per lo stesso campo: `Tu` per se stessi, l'indirizzo completo per gli altri.
+- **Ora l'impianto e' quello di Emolumenti**: titolo da solo, metadati sotto in grigio tenue. Prima riga *«Prot. … · Modificato 11 set 2026 da paolo.varvara · Liquidata …»*, seconda *«Creata da te il 11 set 2026»*. Il `Tu` non si perde, diventa **«da te»**: si legge senza bisogno di un colore che lo spieghi.
+- **`updated_by` su `bozze`** (migrazione **0015**, gemella della 0014): le due aree erano rimaste asimmetriche, in Emolumenti si vedeva chi aveva salvato per ultimo e in Liquidazioni no. Con piu' persone sullo stesso elenco la domanda che si fa e' *"chi ha toccato questa liquidazione?"*, non *"chi l'ha creata tre mesi fa"*. Scritto in `update`, `archive`, `restore` e `updateLiquidazioneInfo`, sempre accanto a `updated_at`.
+- **Via anche un condizionale nascosto**: la riga dei metadati scriveva *«Modificato»* **oppure** *«Creato»*, mai entrambi (`createdAt !== updatedAt ? … : …`). Con due righe l'informazione raddoppia senza costare spazio.
+- **`soloUtente()`/`nomeOppureTe()` in `client/src/utils/utente.ts`**, importati da entrambe le pagine: la copia locale in `EmolumentiPage` e' stata rimossa. Due copie della stessa funzione divergono, e il giorno che si cambia formato in una pagina l'altra resta indietro.
+- **`isOwn` non e' piu' una prop.** Governa il pulsante *Elimina*, quindi e' un controllo di permesso: ora si ricava dentro la card da `userId`. Un dato derivabile passato a mano e' un dato che puo' arrivare incoerente con quello da cui deriva.
+- Le liquidazioni precedenti alla 0015 restano senza *modificato da* — non riempite con il creatore, sarebbe un'ipotesi — e si popolano al primo salvataggio, archiviazione o riapertura.
 
 ### 26.09.12
 **Emolumenti: chi ha creato e chi ha salvato per ultimo**
