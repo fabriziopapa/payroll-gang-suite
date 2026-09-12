@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# ============================================================
+# commit-msg guard — nessuna attribuzione a strumenti nei messaggi.
+#
+# Attivazione (una volta per clone, la stessa del pre-commit):
+#   git config core.hooksPath .githooks
+#
+# PERCHE'. Il repository e' PUBBLICO e la storia e' permanente: una riga
+# di attribuzione entrata per distrazione si toglie solo riscrivendo la
+# storia, cioe' con un force-push — e un force-push su questo progetto
+# fa fallire il `pull --ff-only` del deploy, che deve poi recuperare con
+# bundle e reset (vedi pgs-update-aapanel.sh). Il costo di una riga
+# sbagliata non e' la riga: e' la riscrittura della storia.
+#
+# Fino a oggi la regola "zero co-author" era affidata alla memoria di
+# chi committava. Questo hook la rende una proprieta' del repository.
+#
+# COSA BLOCCA. Le righe di co-autore e le firme automatiche degli
+# assistenti: Co-Authored-By, "Generated with", i loro indirizzi e
+# domini, i nomi dei prodotti, l'emoji del robot.
+#
+# FALSI POSITIVI. Se un messaggio deve legittimamente nominare uno di
+# questi prodotti (per esempio una voce di changelog su un'integrazione),
+# la via e' esplicita e tracciata:
+#   git commit --no-verify
+# Meglio una deroga consapevole che un controllo cosi' larve da non
+# fermare nulla.
+# ============================================================
+set -Eeuo pipefail
+
+FILE="$1"
+[ -f "$FILE" ] || exit 0
+
+# Le righe di commento le rimuove git: non vanno controllate.
+CORPO=$(grep -v '^#' "$FILE" || true)
+
+VIETATI='co-?authored?[ -]?by|co-?created[ -]?with|generated[ -]with|assisted[ -]by|claude|anthropic|copilot|chatgpt|openai|gemini|antigravity|noreply@|🤖'
+
+TROVATI=$(printf '%s' "$CORPO" | grep -niE "$VIETATI" | head -5 || true)
+
+if [ -n "$TROVATI" ]; then
+  {
+    echo
+    echo "✗ COMMIT BLOCCATO — attribuzione a strumenti nel messaggio."
+    echo
+    printf '%s\n' "$TROVATI" | sed 's/^/    /'
+    echo
+    echo "  Il repository e' pubblico e la storia e' permanente: togliere"
+    echo "  queste righe dopo richiede un force-push, che manda il deploy in"
+    echo "  recupero con bundle e reset."
+    echo
+    echo "  Riscrivi il messaggio senza quelle righe. Se il riferimento e'"
+    echo "  legittimo e voluto:  git commit --no-verify"
+    echo
+  } >&2
+  exit 1
+fi
+
+exit 0

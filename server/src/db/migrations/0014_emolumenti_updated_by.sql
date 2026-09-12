@@ -19,13 +19,18 @@
 -- Le righe esistenti restano a NULL, e non le riempiamo con `created_by`:
 -- sarebbe un'ipotesi, non un fatto. Si popolano da se' al primo salvataggio.
 --
--- Applicare a mano, COME PROPRIETARIO della tabella (vedi
--- server/sql/owner_payroll_user.sql): `setup.sql` crea le tabelle come
--- `postgres`, quindi un ALTER da un altro utente viene rifiutato con
--- "must be owner of table".
+-- NON si applica a mano. La applica ./pgs-migra.sh, che la registra in
+-- `schema_migrations`, riallinea i permessi e si ferma se qualcosa non
+-- torna:
 --
---   psql -h <DB_HOST> -p <DB_PORT> -U payroll_user -d payroll_gang \
---        -f server/src/db/migrations/0014_emolumenti_updated_by.sql
+--   ./pgs-migra.sh applica
+--
+-- Dal 2026-09-12 le migrazioni girano come SUPERUTENTE del database,
+-- perche' `payroll_user` non possiede piu' alcun oggetto (vedi
+-- server/sql/permessi.sql). L'intestazione precedente di questo file
+-- diceva di applicarla come `payroll_user`: era sbagliata, ed e' cio'
+-- che ha prodotto l'incidente del 2026-09-12 su `bozze` — migrazione
+-- rifiutata con "must be owner of table" e deploy proseguito comunque.
 --
 -- Additiva e idempotente: si puo' applicare a codice vecchio ancora in
 -- esecuzione, senza fermare niente.

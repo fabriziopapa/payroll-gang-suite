@@ -435,81 +435,36 @@ CREATE INDEX IF NOT EXISTS idx_templati_pdf_region_family     ON templati_pdf_re
 CREATE INDEX IF NOT EXISTS idx_templati_pdf_region_created_by ON templati_pdf_region (created_by);
 
 -- ============================================================
--- PRIVILEGI MINIMI (least privilege)
+-- PERMESSI E PROPRIETA'
+--
+-- Non stanno qui: stanno in server/sql/permessi.sql, unica fonte di
+-- verita', rilanciabile da solo tutte le volte che serve — dopo una
+-- migrazione, dopo un ripristino dal pannello, quando si sospetta una
+-- deriva. Tenerli in due posti significa che il giorno in cui se ne
+-- corregge uno si finisce con due macchine dai permessi diversi.
+--
+-- REGOLA. Gli oggetti restano di proprieta' del superutente che esegue
+-- questo file; `payroll_user` riceve i soli permessi DML. Non possedendo
+-- le tabelle non puo' farci ALTER ne' DROP, quindi le migrazioni girano
+-- da superutente. Conserva CREATE sullo schema, ma serve ai ripristini
+-- (aaPanel e cpanel-restore-dump.sh girano come payroll_user), non al DDL
+-- sulle tabelle esistenti: vedi permessi.sql.
+--
+-- Fino al 2026-09-12 qui c'era un blocco DO che passava la proprieta'
+-- di tutti gli oggetti a `payroll_user`, per dargli i diritti DDL e far
+-- girare le migrazioni con l'utente dell'applicazione. Nasceva da una
+-- diagnosi sbagliata dell'incidente del 2026-09-09 ("must be owner of
+-- table"): la causa vera era lo script di deploy che non controllava
+-- l'esito del psql e proseguiva su una migrazione fallita, non la
+-- proprieta' delle tabelle. Il blocco e' stato rimosso, e
+-- `owner_payroll_user.sql` e' sostituito da `proprieta_postgres.sql`,
+-- che fa l'opposto.
+--
+-- \ir = include relativo a QUESTO file: funziona da qualunque
+-- directory si lanci psql.
 -- ============================================================
 
-GRANT CONNECT ON DATABASE payroll_gang TO payroll_user;
-GRANT USAGE ON SCHEMA public TO payroll_user;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO payroll_user;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO payroll_user;
-
--- Audit log: solo INSERT (l'applicazione non può modificare, cancellare o svuotare)
-REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM payroll_user;
-
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO payroll_user;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT USAGE, SELECT ON SEQUENCES TO payroll_user;
-
--- ============================================================
--- PROPRIETA DEGLI OGGETTI
---
--- Questo file gira come `postgres`, quindi senza questo blocco tutte le
--- tabelle resterebbero di proprieta' del superutente. L'applicazione si
--- connette come `payroll_user`, che avrebbe i permessi DML ma non quelli
--- DDL: la prima migrazione con un ALTER TABLE verrebbe rifiutata con
---     ERROR: must be owner of table <nome>
--- e — se lo script di deploy non controlla l'esito del psql — il codice
--- nuovo partirebbe contro uno schema vecchio (accaduto il 2026-09-09).
---
--- Le sequenze create da una colonna SERIAL/IDENTITY sono "linked" alla
--- loro tabella: Postgres rifiuta un ALTER SEQUENCE ... OWNER TO separato
--- e seguono da sole il proprietario della tabella, quindi si saltano.
---
--- Ogni oggetto e' trattato a se': un errore su uno non fa fallire il
--- resto. Idempotente.
--- ============================================================
-
-DO $$
-DECLARE
-  r       record;
-  oggetto text;
-  fatti   int := 0;
-BEGIN
-  FOR r IN
-    SELECT c.oid, c.relkind, n.nspname AS sch, c.relname AS nome
-    FROM   pg_class c
-    JOIN   pg_namespace n ON n.oid = c.relnamespace
-    WHERE  n.nspname = 'public'
-    AND    c.relkind IN ('r','p','S','v','m')
-    AND    pg_get_userbyid(c.relowner) <> 'payroll_user'
-    AND    NOT (c.relkind = 'S' AND EXISTS (
-             SELECT 1 FROM pg_depend d
-             WHERE  d.objid = c.oid AND d.classid = 'pg_class'::regclass
-             AND    d.deptype IN ('a','i')))
-    -- audit_log resta di `postgres`: il REVOKE sull'immutabilita' vale solo
-    -- finche' payroll_user NON e' proprietario — un proprietario puo' sempre
-    -- riconcedersi UPDATE/DELETE/TRUNCATE. Una migrazione su questa tabella
-    -- richiedera' il superutente, ed e' il prezzo giusto da pagare.
-    AND    c.relname <> 'audit_log'
-    ORDER  BY c.relkind, c.relname
-  LOOP
-    oggetto := CASE r.relkind
-                 WHEN 'S' THEN 'SEQUENCE' WHEN 'v' THEN 'VIEW'
-                 WHEN 'm' THEN 'MATERIALIZED VIEW' ELSE 'TABLE' END;
-    BEGIN
-      EXECUTE format('ALTER %s %I.%I OWNER TO payroll_user', oggetto, r.sch, r.nome);
-      fatti := fatti + 1;
-    EXCEPTION WHEN OTHERS THEN
-      RAISE NOTICE 'saltato %.%: %', r.sch, r.nome, SQLERRM;
-    END;
-  END LOOP;
-  RAISE NOTICE 'Oggetti passati a payroll_user: %', fatti;
-END
-$$;
-
--- Serve a payroll_user per creare nuovi oggetti nelle migrazioni future.
-GRANT USAGE, CREATE ON SCHEMA public TO payroll_user;
+\ir permessi.sql
 
 -- ============================================================
 -- SEED — app_settings: NESSUNO.
