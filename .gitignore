@@ -90,9 +90,30 @@ pgs-cf-origin-lock.sh
 pgs-xff-check.sh
 pgs-push.ps1
 cpanel-setup.sh
-cpanel-check.sh
-cpanel-restore-dump.sh
 cpanel-preprod-lock.sh
+
+# ── Due eccezioni deliberate: cpanel-check.sh e cpanel-restore-dump.sh ─
+# Erano qui sopra, e il 2026-09-12 sono stati rimessi in git dopo averli
+# esaminati riga per riga: non contengono indirizzi, domini, credenziali
+# ne' porte SSH. Tutto e' parametrizzato con valori di default (pgs,
+# payroll_gang, payroll_user, 3001, 127.0.0.1) che sono GIA' pubblici in
+# setup.sql, .env.example ed ecosystem.config.cjs. Tenerli fuori non
+# nascondeva nulla, e costava tre cose reali:
+#   · un `reset --hard` li cancella (accaduto il 2026-09-12: la
+#     pre-produzione ha perso cinque script operativi, perche' erano
+#     tracciati ad agosto e non piu' nel commit "base pulita");
+#   · ogni correzione va replicata a mano su ogni macchina, e le copie
+#     divergono senza che nessuno lo sappia;
+#   · distribuirli richiede scp fra macchine che non sempre si parlano.
+# Restano fuori quelli che contengono davvero informazione operativa:
+# i runbook, cpanel-setup.sh, gli script di deploy e pgs-push.ps1.
+#
+# ATTENZIONE all'esecuzione: un file tracciato vive nella cartella
+# dell'applicazione, scrivibile dall'utente applicativo (pgs / www). Root
+# non deve eseguire un file che quell'utente potrebbe modificare: si
+# copia in una posizione di root, come fa da sempre pgs-update.sh:
+#   install -o root -g root -m 700 <repo>/cpanel-restore-dump.sh \
+#           /root/pgs-operativo/cpanel-restore-dump.sh
 nginx.conf.example
 pgs-hardening.conf.example
 cpanel-proxy.conf.example
@@ -109,14 +130,6 @@ cpanel-basicauth.conf.example
 ANAGRAFICA_PGS_AREA_CONTO.sql
 INDAGINE_IBAN_PAESE.sql
 PIANO_AREA_EMOLUMENTI_*.md
-# Diagnostica e bonifica dell'anagrafica (2026-09-10): stessa natura dei file
-# qui sopra — descrivono gli schemi Oracle dell'ateneo e i processi interni.
-# I glob coprono anche quelli che verranno: un file di lavoro nato da
-# un'estrazione non deve poter finire nel repo per dimenticanza.
-DIAGNOSI_*.sql
-VERIFICHE_*.sql
-VERIFICA_*.sql
-RICONCILIA_*.sql
 
 # ── Estrazioni e analisi con dati reali ──────────────────────
 # Rete di sicurezza: qualunque file di lavoro nato da un'estrazione vera.
@@ -125,6 +138,32 @@ estrazioni/
 analisi/
 *_REALE.*
 *-reale.*
+
+# I file di lavoro dell'analisi, per famiglia di nome e ANCORATI alla
+# radice (lo / iniziale): server/sql/ e le migrazioni non vengono toccati.
+#
+# Perche' per famiglia e non uno per uno: fino al 2026-09-12 qui erano
+# elencati a mano solo ANAGRAFICA_PGS_AREA_CONTO.sql e
+# INDAGINE_IBAN_PAESE.sql, e i sei file nati il 10 e l'11 settembre
+# restavano scoperti — fra cui RICONCILIA_ESTRAZIONE_20260911.sql, che
+# sono 418 KB di INSERT con 6.454 matricole. Li salvava solo il fatto che
+# nessuno avesse lanciato `git add -A`. Un elenco che va aggiornato a
+# mano a ogni analisi e' una protezione che prima o poi non c'e'.
+#
+# Se un giorno uno di questi file va davvero pubblicato, dopo averlo
+# ripulito:  git add -f <nome>
+/DIAGNOSI_*.sql
+/RICONCILIA_*.sql
+/VERIFICA_*.sql
+/VERIFICHE_*.sql
+/ESTRAZIONE_*.sql
+/BONIFICA_*.sql
+/INDAGINE_*.sql
+/ANAGRAFICA_*.sql
+
+# Rete finale: qualunque .sql di lavoro in radice con una data nel nome.
+/*_20[0-9][0-9][0-1][0-9][0-3][0-9].sql
+/*_20[0-9][0-9]-[0-1][0-9]-[0-3][0-9].sql
 
 # ── Legacy root src (non usato, solo in radice) ──────────────
 /src/
