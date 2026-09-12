@@ -384,7 +384,7 @@ export async function emolumentiRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(409).send({ error: 'NOME_GIA_USATO' })
     }
 
-    const row = await lavRepo.update(id, b)
+    const row = await lavRepo.update(id, b, request.user?.id ?? null)
     if (!row) return reply.code(404).send({ error: 'LAVORAZIONE_NON_TROVATA' })
 
     await auditLav(request.user?.id, request.ip, { op: 'update', id, nome: row.nome })
@@ -399,7 +399,9 @@ export async function emolumentiRoutes(app: FastifyInstance): Promise<void> {
       idLiquidazioneCsa: z.string().trim().max(40).optional(),
     }).parse(request.body)
 
-    const row = await lavRepo.archivia(id, b.dataLiquidazione, b.idLiquidazioneCsa)
+    const row = await lavRepo.archivia(
+      id, b.dataLiquidazione, b.idLiquidazioneCsa, request.user?.id ?? null,
+    )
     // 404 anche se la lavorazione esiste ma non e' piu' una bozza: il client
     // ha una vista vecchia e deve ricaricare, non insistere.
     if (!row) return reply.code(404).send({ error: 'LAVORAZIONE_NON_ARCHIVIABILE' })
@@ -413,7 +415,7 @@ export async function emolumentiRoutes(app: FastifyInstance): Promise<void> {
   // POST /lavorazioni/:id/riapri
   app.post('/lavorazioni/:id/riapri', pii, async (request, reply) => {
     const { id } = idParam.parse(request.params)
-    const row = await lavRepo.riapri(id)
+    const row = await lavRepo.riapri(id, request.user?.id ?? null)
     if (!row) return reply.code(404).send({ error: 'LAVORAZIONE_NON_RIAPRIBILE' })
 
     await auditLav(request.user?.id, request.ip, { op: 'riapri', id, nome: row.nome })

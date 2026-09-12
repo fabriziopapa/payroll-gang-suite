@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.09.11.5-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.09.12-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -319,6 +319,15 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 ## Changelog
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.09.12
+**Emolumenti: chi ha creato e chi ha salvato per ultimo**
+- **`updated_by` su `emolumenti_lavorazioni`** (migrazione **0014**, additiva e idempotente). `created_by` c'era dalla 0012 e diceva chi aveva creato; mancava il rovescio — a chi chiedere quando una lavorazione non torna. Con piu' persone sullo stesso elenco e' la domanda che si fa piu' spesso.
+- **L'elenco mostra entrambi.** Prima riga: *«Modificato 12/09/2026 da fabrizio.papa»*; seconda: *«Creata da … il …»*. Dello username si mostra la parte prima della @ — il dominio, identico su ogni riga, sarebbe solo rumore — e l'indirizzo intero resta nel suggerimento.
+- **Perche' una colonna e non l'audit.** Il dato ci sarebbe gia' in `audit_log`: le rotte delle lavorazioni registrano **ogni** operazione, letture comprese. Ma l'audit serve a ricostruire cosa e' successo, non a far funzionare l'interfaccia: legando l'elenco alla sua ritenzione, il giorno che lo si sfoltisce l'informazione sparisce da schermo. Tenerli separati e' il motivo per cui l'audit puo' essere archiviato senza rompere niente.
+- **Dettagli di implementazione.** Due `leftJoin` sulla stessa tabella `users` con alias distinti (`autore`, `modificatore`) — `left` e non `inner` perche' un utente cancellato azzera il riferimento (`ON DELETE SET NULL`) e la lavorazione deve comunque comparire. `updatedBy` si scrive **accanto** a `updatedAt` in `update`/`archivia`/`riapri`: chi e quando sono lo stesso fatto, separarli significa vederli divergere prima o poi. Alla creazione vale il creatore, che non e' un'ipotesi: ha salvato adesso.
+- I due `*Username` sono **facoltativi** nei tipi: li risolve solo l'elenco, le altre risposte restituiscono la riga come sta in tabella. Dichiararli obbligatori sarebbe promettere un dato che in quei casi non c'e'.
+- Le lavorazioni create prima della 0014 restano senza *modificato da* e **non le riempiamo con il creatore**: sarebbe un'ipotesi, non un fatto. Si popolano da se' al primo salvataggio.
 
 ### 26.09.11.5
 **Il campo competenza non si lasciava scrivere — e le azioni ora stanno anche in fondo**

@@ -141,6 +141,17 @@ function etichettaMese(k: string): string {
   return `${MESI_LUNGHI[Number(m)]} ${y}`
 }
 
+/**
+ * Lo username e' un indirizzo di posta dell'ateneo: in elenco si mostra la
+ * parte prima della @, che basta a riconoscere la persona. Il dominio,
+ * identico su ogni riga, sarebbe solo rumore — l'indirizzo intero resta nel
+ * suggerimento della riga per chi ha bisogno di quello.
+ */
+function soloUtente(username: string): string {
+  const i = username.indexOf('@')
+  return i > 0 ? username.slice(0, i) : username
+}
+
 // ── Stato di lavoro ──────────────────────────────────────────
 
 /**
@@ -1173,12 +1184,26 @@ export default function EmolumentiPage() {
                   >
                     {l.nome}
                   </button>
-                  <p className="text-xs text-slate-500">
+                  <p
+                    className="text-xs text-slate-500"
+                    title={l.updatedByUsername ?? undefined}
+                  >
                     {l.tipo ? `${l.tipo} · ` : ''}
                     Modificato {new Date(l.updatedAt).toLocaleDateString('it-IT')}
+                    {l.updatedByUsername ? ` da ${soloUtente(l.updatedByUsername)}` : ''}
                     {l.dataLiquidazione ? ` · liquidata ${l.dataLiquidazione}` : ''}
                     {l.idLiquidazioneCsa ? ` · ${l.idLiquidazioneCsa}` : ''}
                   </p>
+                  {/* Riga a parte: la creazione e' un fatto di contorno e non
+                      deve rubare spazio a chi ha toccato la lavorazione per
+                      ultimo, che e' l'informazione che si cerca. Assente se
+                      l'utente e' stato cancellato (il join da' NULL). */}
+                  {l.createdByUsername && (
+                    <p className="text-xs text-slate-600" title={l.createdByUsername}>
+                      Creata da {soloUtente(l.createdByUsername)}
+                      {' il '}{new Date(l.createdAt).toLocaleDateString('it-IT')}
+                    </p>
+                  )}
                 </div>
 
                 <span className={`ml-auto text-xs px-2.5 py-0.5 rounded-full border ${

@@ -971,8 +971,15 @@ export interface LavorazioneApi {
   /** ID liquidazione CSA — facoltativo, come nelle bozze. */
   idLiquidazioneCsa: string | null
   createdBy:        string | null
+  /** Chi ha salvato per ultimo. NULL sulle lavorazioni create prima della
+   *  migrazione 0014: si popola al primo salvataggio. */
+  updatedBy:        string | null
   createdAt:        string
   updatedAt:        string
+  /** Risolti con un join solo nell'ELENCO: le altre risposte restituiscono la
+   *  riga come sta in tabella e non li portano. Da qui il `?`. */
+  createdByUsername?: string | null
+  updatedByUsername?: string | null
 }
 
 /** Lavorazione completa: `dati` e' il payload serializzato dalla pagina. */

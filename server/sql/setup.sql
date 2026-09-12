@@ -315,14 +315,19 @@ CREATE TABLE IF NOT EXISTS emolumenti_lavorazioni (
   id_liquidazione_csa VARCHAR(40),
   dati                JSONB        NOT NULL,
   created_by          UUID REFERENCES users(id) ON DELETE SET NULL,
+  -- Chi ha salvato per ultimo (update/archivia/riapri)
+  updated_by          UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
--- Migrazione 0013 sui DB che hanno gia' la tabella: idempotente.
+-- Migrazioni 0013 e 0014 sui DB che hanno gia' la tabella: idempotenti.
 ALTER TABLE emolumenti_lavorazioni
   ADD COLUMN IF NOT EXISTS id_liquidazione_csa VARCHAR(40);
+ALTER TABLE emolumenti_lavorazioni
+  ADD COLUMN IF NOT EXISTS updated_by UUID REFERENCES users(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_emol_lav_stato      ON emolumenti_lavorazioni (stato);
 CREATE INDEX IF NOT EXISTS idx_emol_lav_created_by ON emolumenti_lavorazioni (created_by);
+CREATE INDEX IF NOT EXISTS idx_emol_lav_updated_by ON emolumenti_lavorazioni (updated_by);
 CREATE INDEX IF NOT EXISTS idx_emol_lav_updated    ON emolumenti_lavorazioni (updated_at DESC);
 
 -- ------------------------------------------------------------

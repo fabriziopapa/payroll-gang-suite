@@ -261,11 +261,16 @@ export const emolumentiLavorazioni = pgTable('emolumenti_lavorazioni', {
   /** Input + snapshot CSA. Contiene PII: rotte admin + audit. Nessun IBAN. */
   dati:             jsonb('dati').notNull(),
   createdBy:        uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  /** Chi ha salvato per ultimo (update/archivia/riapri). NULL sulle righe
+   *  create prima della migrazione 0014: non le riempiamo con `createdBy`,
+   *  sarebbe un'ipotesi. Si popolano da se' al primo salvataggio. */
+  updatedBy:        uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
   createdAt:        timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:        timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   index('idx_emol_lav_stato').on(t.stato),
   index('idx_emol_lav_created_by').on(t.createdBy),
+  index('idx_emol_lav_updated_by').on(t.updatedBy),
 ])
 
 // ------------------------------------------------------------
