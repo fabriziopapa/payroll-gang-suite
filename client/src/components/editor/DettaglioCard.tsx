@@ -246,7 +246,7 @@ export default function DettaglioCard({
     const toConflitto:  ConflittoItem[]   = []
 
     // UNA sola richiesta bulk per tutto il gruppo (niente fan-out → niente rate-limit)
-    let bulk: Record<string, RuoloAtApiResult[]> = {}
+    let bulk: Record<string, RuoloAtApiResult[]>
     try {
       bulk = await anagraficheApi.ruoloAtBulk(noms.map(n => n.matricola), dataDate)
     } catch {

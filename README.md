@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.09.12.2-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.09.20-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -319,6 +319,17 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 ## Changelog
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.09.20
+**Tre correzioni emerse dal primo controllo statico sul progetto**
+
+*Nessun cambiamento di comportamento voluto: un difetto latente e due frammenti di codice inerte.*
+
+- **`ViewerPage`: un hook sotto il guard.** `closeSearch` (`useCallback`) stava dopo `if (!viewerBozza) return null`. React identifica gli hook per **ordine di chiamata**, non per nome: il componente ne eseguiva undici quando la bozza mancava e dodici quando c'era. Finche' l'effetto del guard fa in tempo a navigare via, il componente si smonta e non succede nulla; se invece la bozza torna disponibile mentre e' ancora montato, il render si interrompe con *"Rendered more hooks than during the previous render"*. Spostato sopra il guard: dipendenze vuote, usa solo setter di stato, nessuna differenza di comportamento.
+- **`DettaglioCard`: inizializzatore mai letto.** `let bulk = {}` veniva sempre sovrascritto dalla richiesta bulk, oppure mai letto perche' il `catch` esce con `return`. Tolto.
+- **I mockup HTML non entrano piu' in git.** Un prototipo di pagina in radice conteneva una matricola vera, copiata da un'estrazione per vedere come rendeva a schermo: non era tracciato, ma nemmeno ignorato, e **nessuno dei due controlli del pre-commit lo avrebbe fermato** — a volume una sola matricola non fa soglia, a contesto l'HTML scrive `class="mat"` e non la parola cercata. Bastava un `git add -A`. Ora `/mockup*.html` e' escluso per famiglia, non per nome: un elenco da aggiornare a mano a ogni prototipo e' una protezione che prima o poi non c'e'.
+- **`nominativi.test.ts`: un residuo della bonifica del 2026-09-09.** Il test *"una matricola al posto del nome si risolve, anche senza zeri davanti"* cercava un numero che nella fixture sintetica non esiste: quando le matricole vere furono sostituite con quelle di esempio, il valore atteso fu aggiornato e l'input no. La funzione era ed e' corretta — `padStart(6, '0')` risolve `90027` in `090027` — a essere sbagliata era la prova. Ora il test cerca `90027` e passa. Nota di metodo: il `pre-commit` non poteva intercettare quel frammento, perche' cerca sei cifre che iniziano per zero e li' ce n'erano cinque senza zero; allargarlo a cinque cifre bloccherebbe ogni numero del progetto, quindi resta com'e'.
+- **`pdfBuilder`: escape ridondante.** `[^a-zA-Z0-9_\-]` diventa `[^a-zA-Z0-9_-]`: in ultima posizione dentro una classe di caratteri il trattino e' gia' letterale. Comportamento identico.
 
 ### 26.09.12.2
 **Installazione e migrazioni: un registro, un proprietario, un deploy che si ferma**

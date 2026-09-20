@@ -73,7 +73,7 @@ test('nome inesistente: non trovato, nessun candidato inventato', () => {
 })
 
 test('una matricola al posto del nome si risolve, anche senza zeri davanti', () => {
-  assert.equal(risolviNominativo('11524', ANAG).candidati[0]!.matricola, '090027')
+  assert.equal(risolviNominativo('90027', ANAG).candidati[0]!.matricola, '090027')
   assert.equal(risolviNominativo('090027', ANAG).esito, 'trovato')
 })
 

@@ -27,7 +27,7 @@ function sanitizeSegment(s: string, maxLen = 80): string {
   return (s || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')   // strip accent diacritics (è→e, à→a …)
-    .replace(/[^a-zA-Z0-9_\-]/g, '_') // solo alfanumerici + _ -
+    .replace(/[^a-zA-Z0-9_-]/g, '_') // solo alfanumerici + _ -
     .replace(/_+/g, '_')              // collassa underscore multipli
     .replace(/^_+|_+$/g, '')          // trim underscores perimetrali
     .slice(0, maxLen)
