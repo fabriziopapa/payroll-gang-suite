@@ -69,6 +69,16 @@ export default function ViewerPage() {
     return () => clearTimeout(t)
   }, [currentMatch])
 
+  // closeSearch sta QUI, sopra il guard, e non in fondo insieme a stepMatch:
+  // e' un hook, e React identifica gli hook per ORDINE DI CHIAMATA. Sotto il
+  // `return null` veniva eseguito solo quando viewerBozza esiste, cioe' un
+  // numero di hook diverso fra un render e l'altro -> "Rendered more hooks
+  // than during the previous render". Ogni hook di questo componente deve
+  // stare SOPRA il guard.
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false); setQuery(''); setMatchPos(0)
+  }, [])
+
   // Guard: nessuna bozza in viewer → torna alla dashboard
   useEffect(() => {
     if (!viewerBozza) navigate('dashboard')
@@ -89,9 +99,6 @@ export default function ViewerPage() {
     : null
 
   // ── Ricerca: helper ──────────────────────────────────────────
-  const closeSearch = useCallback(() => {
-    setSearchOpen(false); setQuery(''); setMatchPos(0)
-  }, [])
   function stepMatch(delta: 1 | -1) {
     if (matches.length === 0) return
     setMatchPos(p => (p + delta + matches.length) % matches.length)
