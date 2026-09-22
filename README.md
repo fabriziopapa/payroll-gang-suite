@@ -57,7 +57,8 @@ payroll-gang-suite/
 │       └── utils/               # CSV / PDF / EML builder, calcoli scorporo (biz.ts)
 ├── server/                      # API REST Fastify
 │   ├── sql/
-│   │   ├── owner_payroll_user.sql  # Proprieta' oggetti a payroll_user (migrazioni senza superutente)
+│   │   ├── proprieta_postgres.sql  # Proprieta' oggetti al superutente (serve dopo un restore da pannello)
+│   │   ├── permessi.sql            # Privilegi + autoverifica: rilanciato da pgs-migra.sh dopo ogni migrazione
 │   │   └── setup.sql            # ★ Setup DB CONSOLIDATO: unico file per installazione da zero
 │   │                            #   (ruolo + database + 18 tabelle + indici + grants + proprieta + seed)
 │   └── src/
@@ -65,9 +66,11 @@ payroll-gang-suite/
 │       ├── auth/                # TOTP (RFC 6238) + JWT ES256 + refresh rotante Argon2id
 │       ├── db/
 │       │   ├── schema.ts        # ★ Schema Drizzle — fonte di verità del DB
-│       │   ├── migrations/      # 0001…0013 — SOLO storico del DB di produzione esistente
+│       │   ├── migrations/      # 0001…0016 — applicate da ./pgs-migra.sh, registrate in schema_migrations
 │       │   │                    #   (già incluse in setup.sql: NON eseguire su install nuova)
 │       │   └── repositories/    # Repository pattern (PgBozze, PgUsers, PgCertificati, …)
+│       ├── lib/                 # clientIp.ts (IP reale dietro Cloudflare) ·
+│       │                        # areaConto.ts (regola IT/SEPA/EXTRA_UE — elenco EPC v8.0, con test)
 │       ├── middleware/          # authenticate.ts (JWT preHandler)
 │       ├── routes/              # /api/v1: auth, bozze, anagrafiche, voci, capitoli,
 │       │                        # settings, users, certificati, emolumenti,

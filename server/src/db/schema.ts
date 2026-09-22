@@ -6,6 +6,7 @@ import { sql } from 'drizzle-orm'
 import {
   pgTable,
   varchar,
+  char,
   boolean,
   integer,
   serial,
@@ -133,6 +134,8 @@ export const anagrafiche = pgTable('anagrafiche', {
    * PRIVACY: qui NON deve mai finire un IBAN, nemmeno parziale — solo l'area.
    */
   areaConto:         varchar('area_conto', { length: 10 }),
+  // Il FATTO da cui areaConto si deriva: due lettere, mai un IBAN (0016).
+  nazIban:           char('naz_iban', { length: 2 }),
 }, (t) => [
   uniqueIndex('anagrafiche_matricola_decor_inq_key').on(t.matricola, t.decorInq),
   index('idx_anag_matricola').on(t.matricola),
