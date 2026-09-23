@@ -77,20 +77,75 @@ export type AreaConto = 'IT' | 'SEPA' | 'EXTRA_UE' | 'NON_NOTO'
  *                banca estera: `REVOITM2` (Revolut) e `BPPIITRRXXX` (Poste)
  *                hanno entrambi IBAN italiani. Classificare dal BIC li
  *                manderebbe fuori dall'Italia.
+ * @param data    'AAAA-MM-GG' facoltativa: classifica con l'elenco in
+ *                vigore quel giorno (storia di paesi_conto). Omessa = oggi.
  * @returns       'IT' | 'SEPA' | 'EXTRA_UE' | 'NON_NOTO'
  *
  * Assente, vuoto o non nel formato di due lettere -> 'NON_NOTO'.
  * Il chiamante che sa PERCHE' manca lo registra a parte.
  */
-export function areaConto(nazIban: string | null | undefined): AreaConto {
+export function areaConto(nazIban: string | null | undefined, data?: string): AreaConto {
   if (nazIban === null || nazIban === undefined) return 'NON_NOTO'
 
   const naz = String(nazIban).trim().toUpperCase()
   if (!/^[A-Z]{2}$/.test(naz)) return 'NON_NOTO'
 
-  if (naz === 'IT')            return 'IT'
-  if (PREFISSI_SEPA.has(naz))  return 'SEPA'
+  if (naz === 'IT')                          return 'IT'
+  if (areaDallElenco(naz, data) === 'SEPA')  return 'SEPA'
+  // EXTRA_UE sia per i paesi segnati EXTRA_UE sia per quelli che l'elenco
+  // non conosce: e' il comportamento di sempre, e un paese sconosciuto non
+  // puo' finire da solo in SEPA.
   return 'EXTRA_UE'
+}
+
+// ── L'elenco dei paesi tenuto da PGS (tabella paesi_conto, migrazione 0019) ──
+//
+// La regola resta QUI; i dati che la regola consulta vengono dal database e
+// si caricano in memoria all'avvio e dopo ogni cambio (routes/areaConto.ts).
+// Sono poche decine di righe: tenerle in memoria evita una query a ogni
+// classificazione e lascia areaConto() sincrona e pura rispetto ai suoi
+// argomenti e all'elenco caricato.
+//
+// Finche' l'elenco non e' caricato (test, avvio, tabella assente perche' la
+// migrazione non e' ancora stata applicata) vale PREFISSI_SEPA: lo stesso
+// elenco con cui la tabella nasce.
+
+/** Una riga di paesi_conto. Date 'AAAA-MM-GG'; validoAl null = in vigore. */
+export interface VocePaese {
+  codice:    string
+  area:      'SEPA' | 'EXTRA_UE'
+  validoDal: string
+  validoAl:  string | null
+  fonte:     string
+}
+
+let elencoPaesi: ReadonlyArray<VocePaese> | null = null
+
+/** Sostituisce l'elenco in memoria. null = torna all'elenco scritto nel codice. */
+export function impostaElencoPaesi(voci: ReadonlyArray<VocePaese> | null): void {
+  elencoPaesi = voci ? [...voci] : null
+}
+
+/** true se in memoria c'e' l'elenco del database, false se vale quello del codice. */
+export function elencoDalDatabase(): boolean {
+  return elencoPaesi !== null
+}
+
+/** Oggi a Roma, 'AAAA-MM-GG'. */
+function oggi(): string {
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Rome' }).format(new Date())
+}
+
+/**
+ * L'area che l'elenco da' a un paese a una data (oggi se omessa), oppure
+ * null se in quella data il paese non c'e'.
+ */
+export function areaDallElenco(naz: string, data?: string): 'SEPA' | 'EXTRA_UE' | null {
+  if (!elencoPaesi) return PREFISSI_SEPA.has(naz) ? 'SEPA' : null
+  const d = data ?? oggi()
+  const v = elencoPaesi.find(x =>
+    x.codice === naz && x.validoDal <= d && (x.validoAl === null || x.validoAl >= d))
+  return v?.area ?? null
 }
 
 /**
@@ -118,10 +173,13 @@ export interface NazioneClassificata {
  * con `naz: null`: chi chiama vede che il dato in ingresso non era una
  * nazione, invece di ricevere indietro la stringa che ha mandato.
  */
-export function classificaNazioni(nazioni: ReadonlyArray<string | null | undefined>): NazioneClassificata[] {
+export function classificaNazioni(
+  nazioni: ReadonlyArray<string | null | undefined>,
+  data?: string,
+): NazioneClassificata[] {
   return nazioni.map(v => {
     const naz = normalizzaNazione(v)
-    return { naz, area: areaConto(naz) }
+    return { naz, area: areaConto(naz, data) }
   })
 }
 

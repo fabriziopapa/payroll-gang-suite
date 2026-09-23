@@ -879,6 +879,30 @@ export interface UpdateStatusApi {
   messaggio?:           string
 }
 
+/** Una riga dell'elenco dei paesi (paesi_conto). Date 'AAAA-MM-GG'. */
+export interface PaeseContoApi {
+  id:        number
+  codice:    string
+  area:      'SEPA' | 'EXTRA_UE'
+  validoDal: string
+  validoAl:  string | null
+  fonte:     string
+  nota:      string | null
+  createdAt: string
+}
+
+export const paesiContoApi = {
+  /** Elenco in vigore e storia completa. */
+  elenco: () =>
+    apiFetch<{ inVigore: PaeseContoApi[]; storia: PaeseContoApi[] }>('/area-conto/paesi'),
+  /** Cambia l'area di un paese da una data (admin). Non sovrascrive: apre una riga nuova. */
+  cambia: (body: { codice: string; area: 'SEPA' | 'EXTRA_UE'; validoDal?: string; nota: string }) =>
+    apiFetch<{ nuova: PaeseContoApi; chiusa: PaeseContoApi | null }>('/area-conto/paesi', {
+      method: 'POST',
+      body:   JSON.stringify(body),
+    }),
+}
+
 export const systemApi = {
   /**
    * Stato degli aggiornamenti disponibili. Il server si limita a leggere un

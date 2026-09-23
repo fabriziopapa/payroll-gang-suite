@@ -10,6 +10,7 @@ import {
   boolean,
   integer,
   serial,
+  bigserial,
   uuid,
   timestamp,
   date,
@@ -506,3 +507,23 @@ export type Certificato            = typeof certificati.$inferSelect
 export type NewCertificato         = typeof certificati.$inferInsert
 export type PdfRegionTemplate      = typeof templatiPdfRegion.$inferSelect
 export type NewPdfRegionTemplate   = typeof templatiPdfRegion.$inferInsert
+
+// ------------------------------------------------------------
+// PAESI E AREA DEL CONTO (migrazione 0019)
+// Una riga per paese e per periodo; una sola in vigore (valido_al NULL).
+// Nessun dato personale: solo codici paese.
+// ------------------------------------------------------------
+export const paesiConto = pgTable('paesi_conto', {
+  id:        bigserial('id', { mode: 'number' }).primaryKey(),
+  codice:    char('codice', { length: 2 }).notNull(),
+  area:      varchar('area', { length: 10 }).notNull(),     // 'SEPA' | 'EXTRA_UE'
+  validoDal: date('valido_dal').notNull(),
+  validoAl:  date('valido_al'),
+  fonte:     varchar('fonte', { length: 80 }).notNull(),
+  nota:      varchar('nota', { length: 300 }),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('paesi_conto_in_vigore').on(t.codice).where(sql`valido_al IS NULL`),
+  index('paesi_conto_codice').on(t.codice, t.validoDal),
+])

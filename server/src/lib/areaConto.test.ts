@@ -2,7 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   areaConto, segmentoNomeFile, PREFISSI_SEPA, EPC_VERSIONE,
-  classificaNazioni, normalizzaNazione,
+  classificaNazioni, normalizzaNazione, impostaElencoPaesi, areaDallElenco,
+  type VocePaese,
 } from './areaConto.js'
 
 // ── L'elenco: quantita' e contenuto ──────────────────────────
@@ -123,4 +124,37 @@ test('normalizzaNazione: due lettere maiuscole o null', () => {
   assert.equal(normalizzaNazione('BEL'), null)
   assert.equal(normalizzaNazione(''), null)
   assert.equal(normalizzaNazione(null), null)
+})
+
+// ── L'elenco dal database (paesi_conto) e la sua storia ──────
+test("elenco caricato: vale il database, anche nel tempo", () => {
+  const voci: VocePaese[] = [
+    { codice: 'LT', area: 'SEPA',     validoDal: '2025-12-24', validoAl: null,         fonte: 'EPC409-09 v8.0' },
+    // un paese che entra in SEPA a una data: prima era EXTRA_UE
+    { codice: 'RS', area: 'EXTRA_UE', validoDal: '2020-01-01', validoAl: '2026-04-30', fonte: 'manuale' },
+    { codice: 'RS', area: 'SEPA',     validoDal: '2026-05-01', validoAl: null,         fonte: 'manuale' },
+    { codice: 'IN', area: 'EXTRA_UE', validoDal: '2026-09-24', validoAl: null,         fonte: 'manuale' },
+  ]
+  try {
+    impostaElencoPaesi(voci)
+    assert.equal(areaConto('LT', '2026-01-10'), 'SEPA')
+    assert.equal(areaConto('RS', '2026-03-31'), 'EXTRA_UE')
+    assert.equal(areaConto('RS', '2026-05-01'), 'SEPA')
+    assert.equal(areaConto('IN'), 'EXTRA_UE')
+    // un paese che l'elenco non conosce resta EXTRA_UE, mai SEPA da solo
+    assert.equal(areaConto('DE'), 'EXTRA_UE')
+    // IT e' IT qualunque cosa dica l'elenco
+    assert.equal(areaConto('IT'), 'IT')
+    // prima dell'ingresso nell'elenco, LT non c'era
+    assert.equal(areaDallElenco('LT', '2025-01-01'), null)
+    assert.deepEqual(classificaNazioni(['RS'], '2026-03-31'), [{ naz: 'RS', area: 'EXTRA_UE' }])
+  } finally {
+    impostaElencoPaesi(null)
+  }
+})
+
+test("senza elenco caricato vale quello scritto nel codice", () => {
+  impostaElencoPaesi(null)
+  assert.equal(areaConto('LT'), 'SEPA')
+  assert.equal(areaConto('US'), 'EXTRA_UE')
 })

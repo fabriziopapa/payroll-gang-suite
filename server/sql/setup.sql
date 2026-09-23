@@ -174,6 +174,80 @@ END $$;
 DROP INDEX IF EXISTS anagrafiche_matricola_decor_inq_key;
 
 -- ------------------------------------------------------------
+-- PAESI E AREA DEL CONTO (migrazione 0019)
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS paesi_conto (
+  id          BIGSERIAL    PRIMARY KEY,
+  codice      CHAR(2)      NOT NULL CHECK (codice ~ '^[A-Z]{2}$'),
+  area        VARCHAR(10)  NOT NULL CHECK (area IN ('SEPA', 'EXTRA_UE')),
+  valido_dal  DATE         NOT NULL,
+  valido_al   DATE,
+  fonte       VARCHAR(80)  NOT NULL,
+  nota        VARCHAR(300),
+  created_by  UUID         REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  CHECK (valido_al IS NULL OR valido_al >= valido_dal)
+);
+
+-- UNA sola riga in vigore per paese: un paese non puo' essere insieme SEPA
+-- ed EXTRA_UE. Lo garantisce il database, non il codice.
+CREATE UNIQUE INDEX IF NOT EXISTS paesi_conto_in_vigore
+  ON paesi_conto (codice) WHERE valido_al IS NULL;
+CREATE INDEX IF NOT EXISTS paesi_conto_codice ON paesi_conto (codice, valido_dal);
+
+COMMENT ON TABLE paesi_conto IS
+  'Area del conto per paese dell''IBAN (SEPA / EXTRA_UE), con la sua storia. Una riga in vigore per paese (valido_al NULL). IT e'' SEPA: l''area IT la da'' la regola, non la tabella.';
+
+-- Elenco iniziale: EPC409-09 "EPC List of SEPA Scheme Countries" v8.0 del
+-- 24/12/2025, 42 prefissi IBAN. E' lo stesso elenco di lib/areaConto.ts.
+-- Si semina solo se il paese non ha gia' una riga in vigore: rilanciarla
+-- non duplica e non sovrascrive un cambio fatto nel frattempo.
+INSERT INTO paesi_conto (codice, area, valido_dal, fonte) VALUES
+  ('AD', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('AL', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('AT', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('BE', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('BG', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('CH', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('CY', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('CZ', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('DE', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('DK', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('EE', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('ES', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('FI', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('FR', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('GB', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('GI', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('GR', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('HR', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('HU', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('IE', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('IS', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('IT', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('LI', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('LT', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('LU', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('LV', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('MC', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('MD', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('ME', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('MK', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('MT', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('NL', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('NO', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('PL', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('PT', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('RO', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('RS', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('SE', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('SI', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('SK', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('SM', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0'),
+  ('VA', 'SEPA', DATE '2025-12-24', 'EPC409-09 v8.0')
+ON CONFLICT (codice) WHERE valido_al IS NULL DO NOTHING;
+
+-- ------------------------------------------------------------
 -- IMPORT LOG ANAGRAFICHE SGE
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS anag_import_log (

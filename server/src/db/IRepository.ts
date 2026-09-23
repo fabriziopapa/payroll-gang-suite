@@ -3,7 +3,7 @@
 // Cambia driver DB senza toccare nulla al di sopra di questo layer
 // ============================================================
 
-import type { AreaConto } from '../lib/areaConto.js'
+import type { AreaConto, VocePaese } from '../lib/areaConto.js'
 
 // ------------------------------------------------------------
 // Risultato operazione di import XML
@@ -111,6 +111,36 @@ export interface AnagraficaRow {
    * dal database con la migrazione 0018.
    */
   areaConto:  AreaConto
+}
+
+// ------------------------------------------------------------
+// Paesi e area del conto (paesi_conto, migrazione 0019)
+// ------------------------------------------------------------
+
+/** Una riga di paesi_conto con chi e quando l'ha scritta. */
+export interface PaeseContoRow extends VocePaese {
+  id:        number
+  nota:      string | null
+  createdBy: string | null
+  createdAt: Date
+}
+
+export type EsitoCambioPaese =
+  | { esito: 'fatto'; chiusa: PaeseContoRow | null; nuova: PaeseContoRow }
+  | { esito: 'invariato' }
+  | { esito: 'data-non-valida'; validoDalInVigore: string }
+
+export interface IPaesiContoRepository {
+  /** Tutte le righe, storia compresa, per codice e data. */
+  tutte(): Promise<PaeseContoRow[]>
+  /**
+   * Cambia l'area di un paese da una data: chiude la riga in vigore al
+   * giorno prima e ne apre una nuova, in una transazione. Non sovrascrive.
+   */
+  cambia(p: {
+    codice: string; area: 'SEPA' | 'EXTRA_UE'; validoDal: string
+    fonte: string; nota: string | null; userId: string | null
+  }): Promise<EsitoCambioPaese>
 }
 
 // ------------------------------------------------------------
