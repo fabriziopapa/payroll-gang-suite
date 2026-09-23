@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.09.23-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.09.24-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -70,11 +70,12 @@ payroll-gang-suite/
 │       │   │                    #   (già incluse in setup.sql: NON eseguire su install nuova)
 │       │   └── repositories/    # Repository pattern (PgBozze, PgUsers, PgCertificati, …)
 │       ├── lib/                 # clientIp.ts (IP reale dietro Cloudflare) ·
-│       │                        # areaConto.ts (regola IT/SEPA/EXTRA_UE — elenco EPC v8.0, con test)
+│       │                        # areaConto.ts (regola IT/SEPA/EXTRA_UE — elenco EPC v8.0, con test;
+│       │                        #   unica fonte dell'area del conto, anche per GET /area-conto)
 │       ├── middleware/          # authenticate.ts (JWT preHandler)
 │       ├── routes/              # /api/v1: auth, bozze, anagrafiche, voci, capitoli,
 │       │                        # settings, users, certificati, emolumenti,
-│       │                        # pdf-region, cineca
+│       │                        # pdf-region, cineca, area-conto (areaConto.ts)
 │       ├── schemas/             # Zod validazione (BozzaDatiSchema, …)
 │       └── services/            # cryptoService, importService, mailerService, cinecaService
 │           ├── emolumenti/      #   risoluzione nominativi → matricole (logica pura + test)
@@ -172,7 +173,30 @@ CEDOLINO_SAMPLE="/percorso/Cedolino_....pdf" npm run test --workspace=server
 
 **Sicurezza**: tutte le rotte `/api/v1/emolumenti` sono admin + audit **awaited**, letture comprese — il payload contiene nominativi, matricole e importi.
 
-**Schema DB**: `emolumenti_lavorazioni` e `anagrafiche.area_conto` sono in `server/sql/setup.sql` (consolidato). Le migrazioni `0011`, `0012`, `0013` restano come riferimento del DB di produzione esistente.
+**Area del conto: in anagrafica c'e' solo la nazione.** L'estrazione SGE porta `NAZ_IBAN` (due lettere, mai un IBAN), l'import la salva in `anagrafiche.naz_iban`, e l'area — `IT` / `SEPA` / `EXTRA_UE`, oppure `NON_NOTO` se la nazione manca o non si riconosce — si **calcola** ogni volta con `server/src/lib/areaConto.ts`. La stessa funzione risponde a `GET /api/v1/area-conto?naz=IT,LT,BE` (utente autenticato; restituisce anche la versione dell'elenco EPC). La colonna `area_conto` e' ancora nel database ma nessuno la legge ne' la scrive: verra' tolta con una migrazione successiva. Le **Liquidazioni** non usano l'area del conto: queste modifiche non le toccano.
+
+**Import dell'anagrafica e nazione.** La colonna `NAZ_IBAN` e' facoltativa, e i tre casi sono distinti di proposito:
+
+| Nel file | Cosa succede a `naz_iban` |
+|---|---|
+| colonna assente (file SGE vecchio) | non si tocca |
+| colonna presente, cella vuota | diventa `NULL` → area `NON_NOTO` |
+| due lettere (`IT`, ` lt `) | si scrive, maiuscola |
+| valore non valido (`ITA`) | non si tocca; errore di riga nel referto |
+
+Un file con `AREA_CONTO` e senza `NAZ_IBAN` (la vecchia estrazione) si importa, ma quella colonna si ignora e il referto lo dice. Le altre colonne dell'estrazione (`COORD_ATTIVE`, `COORD_NON_CSA`, …) si ignorano.
+
+**Il primo import dopo il rilascio riscrive tutte le righe del file, una volta.** L'impronta di ogni riga contiene ora la nazione con un'etichetta (`naz:IT`): senza, per i conti italiani sarebbe rimasta identica a quella vecchia (che finiva con l'area `IT`), l'import avrebbe saltato quelle righe e `naz_iban` non sarebbe mai stata scritta. Il referto del primo import mostra quindi quasi tutto come *aggiornato*: e' atteso. Dal secondo torna differenziale.
+
+**Nelle lavorazioni l'area si fotografa.** Ogni riga salva area **e nazione** quando nasce, e non si ricalcola da sola. *Aggiorna ruoli e conti* aggiorna l'area in automatico solo se non si perde nulla: se una riga passerebbe da un'area nota a `NON_NOTO`, lo chiede.
+
+**Procedura di rilascio** (dopo il deploy, subito): importare in *Anagrafiche* un file prodotto con `RU_TAB` **nella versione con `NAZ_IBAN`**. Fino a quell'import tutte le nazioni sono vuote e ogni anagrafica risulta `NON_NOTO`; le lavorazioni gia' salvate non cambiano. Verifica, sul server:
+
+```bash
+psql -d <database> -X -c "SELECT (naz_iban IS NOT NULL) AS con_nazione, count(*) FROM anagrafiche GROUP BY 1;"
+```
+
+**Schema DB**: `emolumenti_lavorazioni` e `anagrafiche.naz_iban` sono in `server/sql/setup.sql` (consolidato); `anagrafiche.area_conto` c'e' ancora, inutilizzata. Le migrazioni `0011`…`0016` restano come riferimento del DB di produzione esistente.
 
 ---
 
@@ -323,6 +347,17 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.09.24
+**Area del conto: in anagrafica solo la nazione, l'area si calcola**
+
+*Nessuna migrazione. Tocca l'import dell'anagrafica e l'area Emolumenti; le Liquidazioni non usano l'area del conto e restano come sono.*
+
+- **L'import legge `NAZ_IBAN` e non piu' `AREA_CONTO`.** Con la nuova estrazione (`AREA_CONTO` non c'e' piu') l'import precedente non aggiornava ne' la nazione ne' l'area di nessuno: un cambio di conto non entrava in PGS. Ora la nazione si salva, e colonna assente, cella vuota e valore non valido hanno tre comportamenti diversi (vedi *Sezione Dottorandi e borse*).
+- **`area_conto` non si legge e non si scrive piu'.** L'area si calcola dalla nazione con `lib/areaConto.ts` ogni volta che un'anagrafica si legge; la colonna resta nel database finche' una migrazione successiva non la toglie. Tolta anche da `schema.ts`, ed e' questo che rendera' sicura quella migrazione: il codice in esecuzione non la seleziona piu'.
+- **`GET /api/v1/area-conto?naz=…`** — dato il paese dell'IBAN restituisce `IT` / `SEPA` / `EXTRA_UE`, o `NON_NOTO` se non si risolve, con la versione dell'elenco EPC. Nessuna regola nella rotta: chiama la stessa funzione dell'anagrafica.
+- **L'impronta delle righe cambia per tutte, una volta.** Senza etichetta, la nazione `IT` avrebbe prodotto la stessa impronta dell'area `IT` e l'import avrebbe saltato proprio i conti italiani. Il primo import dopo il rilascio riscrive tutte le righe del file.
+- **Emolumenti: la riga fotografa anche la nazione**, e *Aggiorna ruoli e conti* non toglie piu' da solo un'area nota: il passaggio a `NON_NOTO` si conferma. Corretto anche *Usa … dall'anagrafica* sulle aree scelte a mano: toglieva la scelta ma lasciava l'area salvata a suo tempo invece di quella proposta.
 
 ### 26.09.23
 - Emolumenti: la data di competenza e' modificabile mese per mese e il ruolo viene

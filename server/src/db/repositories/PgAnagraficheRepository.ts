@@ -7,6 +7,7 @@ import { eq, lte, gte, or, isNull, and, desc, sql, inArray } from 'drizzle-orm'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import * as schema from '../schema.js'
 import { encrypt, decrypt } from '../../services/cryptoService.js'
+import { areaConto } from '../../lib/areaConto.js'
 import type {
   IAnagraficheRepository,
   AnagraficaInput,
@@ -41,7 +42,7 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
         id, matricola, cogn_nome, ruolo, druolo,
         decor_inq, fin_rap, data_aggiornamento,
         created_at, updated_at,
-        id_ab, cognome, nome, dt_nascita, genere, cod_fis, hash_record, area_conto
+        id_ab, cognome, nome, dt_nascita, genere, cod_fis, hash_record, naz_iban
       FROM anagrafiche
       WHERE fin_rap IS NULL
          OR fin_rap >= (CURRENT_DATE - INTERVAL '3 years')
@@ -225,72 +226,87 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
     }
     const uniqueItems = Array.from(dedupMap.values())
 
-    // Elabora in batch per non saturare la connessione
-    for (let i = 0; i < uniqueItems.length; i += BATCH_SIZE) {
-      const batch = uniqueItems.slice(i, i + BATCH_SIZE)
+    // Due gruppi, due istruzioni: chi porta la nazione (anche null = "nessuna
+    // coordinata") e chi non la porta (undefined = file senza colonna
+    // NAZ_IBAN). Nell'ON CONFLICT il valore EXCLUDED.naz_iban sarebbe NULL in
+    // entrambi i casi e non li distinguerebbe: la differenza va decisa qui,
+    // prima dell'INSERT, cambiando il SET. Non con un COALESCE, che non
+    // saprebbe mai cancellare un conto sparito.
+    const gruppi: Array<{ conNazione: boolean; items: AnagraficaInput[] }> = [
+      { conNazione: true,  items: uniqueItems.filter(it => it.nazIban !== undefined) },
+      { conNazione: false, items: uniqueItems.filter(it => it.nazIban === undefined) },
+    ]
 
-      const values = batch.map(item => ({
-        matricola:         item.matricola,
-        cognNome:          item.cognNome,
-        ruolo:             item.ruolo,
-        druolo:            item.druolo             ?? null,
-        decorInq:          item.decorInq,
-        finRap:            item.finRap             ?? null,
-        dataAggiornamento: item.dataAggiornamento
-          .toISOString()
-          .slice(0, 10),
-        updatedAt:         new Date(),
-        idAb:              item.idAb               ?? null,
-        cognome:           item.cognome             ?? null,
-        nome:              item.nome               ?? null,
-        dtNascita:         item.dtNascita           ?? null,
-        genere:            item.genere             ?? null,
-        // F-1: cifra il CF a riposo (encrypt sul plaintext sorgente). EXCLUDED.
-        // cod_fis nell'ON CONFLICT eredita questo valore già cifrato.
-        codFis:            item.codFis ? encrypt(item.codFis) : null,
-        hashRecord:        item.hashRecord          ?? null,
-        areaConto:         item.areaConto           ?? null,
-      }))
+    for (const { conNazione, items: gruppo } of gruppi) {
+      // Elabora in batch per non saturare la connessione
+      for (let i = 0; i < gruppo.length; i += BATCH_SIZE) {
+        const batch = gruppo.slice(i, i + BATCH_SIZE)
 
-      const rows = await this.db
-        .insert(schema.anagrafiche)
-        .values(values)
-        .onConflictDoUpdate({
-          target: [schema.anagrafiche.matricola, schema.anagrafiche.decorInq],
-          set: {
-            cognNome:          sql`EXCLUDED.cogn_nome`,
-            ruolo:             sql`EXCLUDED.ruolo`,
-            druolo:            sql`EXCLUDED.druolo`,
-            finRap:            sql`EXCLUDED.fin_rap`,
-            dataAggiornamento: sql`EXCLUDED.data_aggiornamento`,
-            updatedAt:         sql`now()`,
-            idAb:              sql`EXCLUDED.id_ab`,
-            cognome:           sql`EXCLUDED.cognome`,
-            nome:              sql`EXCLUDED.nome`,
-            dtNascita:         sql`EXCLUDED.dt_nascita`,
-            genere:            sql`EXCLUDED.genere`,
-            codFis:            sql`EXCLUDED.cod_fis`,
-            hashRecord:        sql`EXCLUDED.hash_record`,
-            // COALESCE: un file senza AREA_CONTO (formato SGE precedente) non
-            // deve azzerare l'area già acquisita.
-            areaConto:         sql`COALESCE(EXCLUDED.area_conto, ${schema.anagrafiche.areaConto})`,
-          },
-          // Aggiorna solo se hash cambiato — confronto O(1) su stringa fissa
-          where: sql`
-            ${schema.anagrafiche.hashRecord} IS DISTINCT FROM EXCLUDED.hash_record
-          `,
+        const values = batch.map(item => ({
+          matricola:         item.matricola,
+          cognNome:          item.cognNome,
+          ruolo:             item.ruolo,
+          druolo:            item.druolo             ?? null,
+          decorInq:          item.decorInq,
+          finRap:            item.finRap             ?? null,
+          dataAggiornamento: item.dataAggiornamento
+            .toISOString()
+            .slice(0, 10),
+          updatedAt:         new Date(),
+          idAb:              item.idAb               ?? null,
+          cognome:           item.cognome             ?? null,
+          nome:              item.nome               ?? null,
+          dtNascita:         item.dtNascita           ?? null,
+          genere:            item.genere             ?? null,
+          // F-1: cifra il CF a riposo (encrypt sul plaintext sorgente). EXCLUDED.
+          // cod_fis nell'ON CONFLICT eredita questo valore già cifrato.
+          codFis:            item.codFis ? encrypt(item.codFis) : null,
+          hashRecord:        item.hashRecord          ?? null,
+          nazIban:           item.nazIban             ?? null,
+        }))
+
+        const rows = await this.db
+          .insert(schema.anagrafiche)
+          .values(values)
+          .onConflictDoUpdate({
+            target: [schema.anagrafiche.matricola, schema.anagrafiche.decorInq],
+            set: {
+              cognNome:          sql`EXCLUDED.cogn_nome`,
+              ruolo:             sql`EXCLUDED.ruolo`,
+              druolo:            sql`EXCLUDED.druolo`,
+              finRap:            sql`EXCLUDED.fin_rap`,
+              dataAggiornamento: sql`EXCLUDED.data_aggiornamento`,
+              updatedAt:         sql`now()`,
+              idAb:              sql`EXCLUDED.id_ab`,
+              cognome:           sql`EXCLUDED.cognome`,
+              nome:              sql`EXCLUDED.nome`,
+              dtNascita:         sql`EXCLUDED.dt_nascita`,
+              genere:            sql`EXCLUDED.genere`,
+              codFis:            sql`EXCLUDED.cod_fis`,
+              hashRecord:        sql`EXCLUDED.hash_record`,
+              // naz_iban si aggiorna SOLO se il file porta la colonna NAZ_IBAN
+              // (vedi il partizionamento qui sopra). Un file senza la colonna
+              // non cancella la nazione gia' nota; un file con la colonna e la
+              // cella vuota la cancella, perche' quello e' un fatto.
+              ...(conNazione ? { nazIban: sql`EXCLUDED.naz_iban` } : {}),
+            },
+            // Aggiorna solo se hash cambiato — confronto O(1) su stringa fissa
+            where: sql`
+              ${schema.anagrafiche.hashRecord} IS DISTINCT FROM EXCLUDED.hash_record
+            `,
+          })
+          .returning({
+            id:         schema.anagrafiche.id,
+            wasInserted: sql<boolean>`(created_at = updated_at)`,
+          })
+
+        rows.forEach(r => {
+          if (r.wasInserted) result.inserted++
+          else result.updated++
         })
-        .returning({
-          id:         schema.anagrafiche.id,
-          wasInserted: sql<boolean>`(created_at = updated_at)`,
-        })
-
-      rows.forEach(r => {
-        if (r.wasInserted) result.inserted++
-        else result.updated++
-      })
-      // Righe non restituite = già presenti e invariate
-      result.skipped += batch.length - rows.length
+        // Righe non restituite = già presenti e invariate
+        result.skipped += batch.length - rows.length
+      }
     }
 
     // Aggiorna last_import_anagrafiche nelle impostazioni
@@ -329,7 +345,7 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
         id, matricola, cogn_nome, ruolo, druolo,
         decor_inq, fin_rap, data_aggiornamento,
         created_at, updated_at,
-        id_ab, cognome, nome, dt_nascita, genere, cod_fis, area_conto
+        id_ab, cognome, nome, dt_nascita, genere, cod_fis, naz_iban
       FROM anagrafiche
       WHERE decor_inq <= ${data}
         AND (fin_rap IS NULL OR fin_rap >= ${data})
@@ -368,7 +384,9 @@ function toRow(r: typeof schema.anagrafiche.$inferSelect): AnagraficaRow {
     genere:            r.genere           ?? null,
     codFis:            decCf(r.codFis),   // F-1: decifra a riposo
     hashRecord:        r.hashRecord       ?? null,
-    areaConto:         r.areaConto        ?? null,
+    nazIban:           r.nazIban          ?? null,
+    // Calcolata, non letta: la regola sta in lib/areaConto.ts.
+    areaConto:         areaConto(r.nazIban),
   }
 }
 
@@ -395,7 +413,9 @@ function toRowRaw(r: unknown): AnagraficaRow {
     genere:            (row['genere'] as string | null) ?? null,
     codFis:            decCf(row['codFis'] as string | null),       // cod_fis → codFis, F-1 decifra
     hashRecord:        (row['hashRecord'] as string | null) ?? null, // hash_record → hashRecord
-    areaConto:         (row['areaConto']  as string | null) ?? null, // area_conto → areaConto
+    nazIban:           (row['nazIban']    as string | null) ?? null, // naz_iban → nazIban
+    // Calcolata, non letta: la regola sta in lib/areaConto.ts.
+    areaConto:         areaConto(row['nazIban'] as string | null),
   }
 }
 

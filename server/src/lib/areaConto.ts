@@ -100,3 +100,36 @@ export function areaConto(nazIban: string | null | undefined): AreaConto {
 export function segmentoNomeFile(area: Exclude<AreaConto, 'NON_NOTO'>): string {
   return area === 'IT' ? 'ITA' : area
 }
+
+/** Una nazione classificata, come la restituisce l'endpoint /area-conto. */
+export interface NazioneClassificata {
+  /** La nazione normalizzata (due lettere maiuscole), o null se non leggibile. */
+  naz:  string | null
+  area: AreaConto
+}
+
+/**
+ * Classifica piu' nazioni in una volta. E' la funzione dietro
+ * GET /api/v1/area-conto e dietro ogni punto del server che restituisce
+ * un'area: UNA regola, chiamata da tutti, mai ricopiata.
+ *
+ * Quello che non si risolve (vuoto, malformato, assente) torna NON_NOTO,
+ * con `naz: null`: chi chiama vede che il dato in ingresso non era una
+ * nazione, invece di ricevere indietro la stringa che ha mandato.
+ */
+export function classificaNazioni(nazioni: ReadonlyArray<string | null | undefined>): NazioneClassificata[] {
+  return nazioni.map(v => {
+    const naz = normalizzaNazione(v)
+    return { naz, area: areaConto(naz) }
+  })
+}
+
+/**
+ * Due lettere maiuscole, oppure null. Spazi e minuscole non cambiano la
+ * risposta; tutto il resto (tre lettere, cifre, vuoto) non e' una nazione.
+ */
+export function normalizzaNazione(v: string | null | undefined): string | null {
+  if (v === null || v === undefined) return null
+  const naz = String(v).trim().toUpperCase()
+  return /^[A-Z]{2}$/.test(naz) ? naz : null
+}

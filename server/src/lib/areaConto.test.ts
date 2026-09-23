@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   areaConto, segmentoNomeFile, PREFISSI_SEPA, EPC_VERSIONE,
+  classificaNazioni, normalizzaNazione,
 } from './areaConto.js'
 
 // ── L'elenco: quantita' e contenuto ──────────────────────────
@@ -95,4 +96,31 @@ test('ogni prefisso dell elenco classifica IT o SEPA, mai EXTRA_UE', () => {
     const a = areaConto(naz)
     assert.ok(a === 'IT' || a === 'SEPA', `${naz} ha dato ${a}`)
   }
+})
+
+// ── Classificazione in blocco (endpoint /area-conto) ─────────
+test('classificaNazioni: una risposta per ogni ingresso, nello stesso ordine', () => {
+  assert.deepEqual(classificaNazioni(['IT', 'lt', ' BE ', 'US']), [
+    { naz: 'IT', area: 'IT' },
+    { naz: 'LT', area: 'SEPA' },
+    { naz: 'BE', area: 'SEPA' },
+    { naz: 'US', area: 'EXTRA_UE' },
+  ])
+})
+
+test("classificaNazioni: cio' che non e' una nazione torna NON_NOTO con naz null", () => {
+  assert.deepEqual(classificaNazioni(['', 'ITA', '1T', null, undefined]), [
+    { naz: null, area: 'NON_NOTO' },
+    { naz: null, area: 'NON_NOTO' },
+    { naz: null, area: 'NON_NOTO' },
+    { naz: null, area: 'NON_NOTO' },
+    { naz: null, area: 'NON_NOTO' },
+  ])
+})
+
+test('normalizzaNazione: due lettere maiuscole o null', () => {
+  assert.equal(normalizzaNazione(' be '), 'BE')
+  assert.equal(normalizzaNazione('BEL'), null)
+  assert.equal(normalizzaNazione(''), null)
+  assert.equal(normalizzaNazione(null), null)
 })

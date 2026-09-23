@@ -183,6 +183,13 @@ interface RigaLavoro {
    *  matricole: non e' un IBAN, non entra nel CSV per HR. */
   areaConto:           string | null
   /**
+   * Paese dell'IBAN da cui `areaConto` e' stata calcolata, fotografato
+   * quando la riga e' nata (o riverificata). Si salva con la lavorazione:
+   * riaprendola si vede su che conto era la persona ALLORA, non oggi.
+   * null nei salvataggi anteriori al campo e quando l'anagrafica non ce l'ha.
+   */
+  nazIban:             string | null
+  /**
    * Ruolo scelto a mano dall'operatore, PER MESE: "AAAA-MM" -> codice ruolo.
    *
    * E' per mese e non per riga perche' il ruolo stesso lo e'. Una persona che
@@ -309,12 +316,17 @@ function ruoloDi(
  * risolvi-nominativi, cioe' da una fotografia presa quando i nomi sono stati
  * incollati, e nel frattempo un import SGE puo' averla cambiata.
  */
-function areaDaStorico(storico: StoricoRuoloApi[] | undefined): string | null {
+function areaDaStorico(storico: StoricoRuoloApi[] | undefined): { area: string; naz: string | null } | null {
   if (!storico) return null
   for (const s of [...storico].sort((a, b) => b.decorInq.localeCompare(a.decorInq))) {
-    if (s.areaConto) return s.areaConto
+    if (s.areaConto) return { area: s.areaConto, naz: s.nazIban ?? null }
   }
   return null
+}
+
+/** Un'area che dice davvero dove si paga (non "ignoto"). */
+function areaNota(a: string | null): boolean {
+  return a !== null && a !== 'NON_NOTO'
 }
 
 /**
@@ -322,7 +334,10 @@ function areaDaStorico(storico: StoricoRuoloApi[] | undefined): string | null {
  * solo. Due famiglie, entrambe volute:
  *   - 'ruolo': a quella data i rapporti sono due o piu', oppure ce n'e' uno
  *     solo ma l'operatore ne aveva scelto un altro a mano
- *   - 'area':  l'anagrafica propone un'area diversa da quella assegnata a mano
+ *   - 'area':  l'anagrafica propone un'area diversa da quella assegnata a mano,
+ *              oppure toglierebbe un'area nota (IT/SEPA/EXTRA_UE -> NON_NOTO):
+ *              perdere il conto di una riga gia' lavorata si conferma, non
+ *              succede da solo
  * Il caso semplice -- un ruolo solo e nessuna scelta a mano -- non entra in
  * coda: si aggiorna da se', in silenzio, ed e' la maggioranza.
  */
@@ -330,7 +345,7 @@ type VoceRiverifica =
   | { tipo: 'ruolo'; chiave: string; rigaId: number; nominativo: string; matricola: string
       mese: string; opzioni: StoricoRuoloApi[]; attuale: string | null; aMano: boolean }
   | { tipo: 'area'; chiave: string; rigaId: number; nominativo: string; matricola: string
-      proposta: string | null; attuale: string | null }
+      proposta: string | null; nazProposta: string | null; attuale: string | null; aMano: boolean }
 
 /** L'area del conto che vale davvero. Stessa precedenza. */
 function areaDi(r: RigaLavoro): string | null {
@@ -377,6 +392,7 @@ function deserializzaRighe(v: unknown): RigaLavoro[] {
       dataProvvedimento:   String(o['dataProvvedimento'] ?? ''),
       importi:             (o['importi'] as Record<string, string>) ?? {},
       areaConto:           (o['areaConto'] as string | null) ?? null,
+      nazIban:             (o['nazIban'] as string | null) ?? null,
       // Salvataggi anteriori alle scelte manuali: assenti = nessuna scelta,
       // e la riga si comporta esattamente come prima.
       //
@@ -622,17 +638,33 @@ export default function EmolumentiPage() {
         if (cambiato) auto.push({ id: r.id, patch: { ruoliScelti: nuoviScelti } })
 
         // ── area del conto
-        const proposta = areaDaStorico(st)
+        const prop     = areaDaStorico(st)
+        const proposta = prop?.area ?? null
         if (r.areaContoScelta) {
           if (proposta && proposta !== r.areaContoScelta) {
             coda.push({
               tipo: 'area', chiave: `${r.id}|area`, rigaId: r.id,
               nominativo: r.nominativo, matricola: r.matricola,
-              proposta, attuale: r.areaContoScelta,
+              proposta, nazProposta: prop?.naz ?? null, attuale: r.areaContoScelta, aMano: true,
             })
           }
         } else if (proposta && proposta !== r.areaConto) {
-          auto.push({ id: r.id, patch: { areaConto: proposta } })
+          if (areaNota(r.areaConto) && !areaNota(proposta)) {
+            // Una riga che aveva un conto e ora lo perderebbe: si chiede.
+            // E' anche la rete per l'intervallo fra il rilascio e il primo
+            // import con NAZ_IBAN, quando le nazioni sono ancora vuote.
+            coda.push({
+              tipo: 'area', chiave: `${r.id}|area`, rigaId: r.id,
+              nominativo: r.nominativo, matricola: r.matricola,
+              proposta, nazProposta: prop?.naz ?? null, attuale: r.areaConto, aMano: false,
+            })
+          } else {
+            auto.push({ id: r.id, patch: { areaConto: proposta, nazIban: prop?.naz ?? null } })
+          }
+        } else if (proposta && prop?.naz && prop.naz !== r.nazIban) {
+          // Stessa area, nazione nuova o prima assente (LT -> BE, o salvataggi
+          // anteriori al campo): si aggiorna la fotografia, l'area non cambia.
+          auto.push({ id: r.id, patch: { nazIban: prop.naz } })
         }
       }
 
@@ -734,6 +766,7 @@ export default function EmolumentiPage() {
       dataProvvedimento:   dataProv,
       importi:             {},
       areaConto:           null,
+      nazIban:             null,
       ruoliScelti:         {},
       areaContoScelta:     null,
       ...base,
@@ -772,6 +805,7 @@ export default function EmolumentiPage() {
             candidati:           r.candidati,
             dataProvvedimento:   incollate[i]?.dataProvvedimento || dataProv,
             areaConto:           r.areaConto,
+            nazIban:             r.nazIban,
           }))
         })
 
@@ -802,6 +836,7 @@ export default function EmolumentiPage() {
         matricola:    a.matricola,
         ruolo:        a.ruolo,
         areaConto:    a.areaConto ?? null,
+        nazIban:      a.nazIban ?? null,
       })]
     })
     setCerca('')
@@ -1879,7 +1914,11 @@ export default function EmolumentiPage() {
                 if (v.tipo === 'ruolo') {
                   if (valore) aggiorna(r.id, { ruoliScelti: { ...r.ruoliScelti, [v.mese]: valore } })
                 } else {
-                  aggiorna(r.id, { areaContoScelta: valore })
+                  // Si segue l'anagrafica: via la scelta a mano (se c'era) e
+                  // si prende la sua area CON la sua nazione. Prima si
+                  // toglieva solo la scelta e la riga ricadeva sull'area
+                  // salvata a suo tempo, non su quella proposta.
+                  aggiorna(r.id, { areaContoScelta: null, areaConto: v.proposta, nazIban: v.nazProposta })
                 }
               }}
               onChiudi={() => setDaConfermare([])}
@@ -2223,8 +2262,11 @@ function ModaleRiverifica({ voci, dateCompetenza, onApplica, onChiudi }: {
           ) : (
             <>
               <p className="text-slate-400 text-xs mb-3">
-                Avevi assegnato <span className="font-mono text-amber-300">{v.attuale}</span> a mano.
-                L’anagrafica ora dice <span className="font-mono text-slate-200">{v.proposta}</span>.
+                {v.aMano
+                  ? <>Avevi assegnato <span className="font-mono text-amber-300">{v.attuale}</span> a mano.</>
+                  : <>In questa lavorazione la riga ha <span className="font-mono text-amber-300">{v.attuale}</span>.</>}
+                {' '}L’anagrafica ora dice <span className="font-mono text-slate-200">{v.proposta}</span>
+                {v.nazProposta && <> (nazione <span className="font-mono">{v.nazProposta}</span>)</>}.
               </p>
               <button onClick={() => scegli(null)}
                       className="w-full px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700
@@ -2232,7 +2274,9 @@ function ModaleRiverifica({ voci, dateCompetenza, onApplica, onChiudi }: {
                                  text-slate-200 transition">
                 Usa <span className="font-mono">{v.proposta}</span> dall’anagrafica
                 <span className="block text-slate-500 text-xs mt-0.5">
-                  toglie la scelta manuale: da qui in poi segue l’anagrafica
+                  {v.aMano
+                    ? 'toglie la scelta manuale: da qui in poi segue l’anagrafica'
+                    : 'la riga perde l’area che aveva: “Lascia com’è” la conserva'}
                 </span>
               </button>
             </>
@@ -2435,10 +2479,10 @@ function DettagliAnagrafici({ r, storico, ambigui, scoperti, dateCompetenza, onP
         <p className="text-xs font-medium text-slate-400 mb-1">Area del conto (per i TXT)</p>
         <p className="text-xs text-slate-500 mb-2">
           {r.areaConto
-            ? <>In anagrafica: <span className="font-mono text-slate-300">{r.areaConto}</span>
-                {r.areaConto === 'NON_NOTO' && ' — l’estrazione non ha trovato una coordinata CSA attiva.'}</>
-            : <>In anagrafica non c’è: l’ultimo import SGE non portava la colonna AREA_CONTO,
-               oppure questa persona non c’era.</>}
+            ? <>Dall’anagrafica: <span className="font-mono text-slate-300">{r.areaConto}</span>
+                {r.nazIban && <> (nazione <span className="font-mono text-slate-300">{r.nazIban}</span>)</>}
+                {r.areaConto === 'NON_NOTO' && ' — nessuna nazione del conto: nessuna coordinata CSA attiva, oppure la persona non era nell’ultimo import con NAZ_IBAN.'}</>
+            : <>In anagrafica non c’è: questa persona non è stata trovata.</>}
         </p>
         <div className="flex flex-wrap items-center gap-2">
           {AREE_TXT.map(a => {
@@ -2712,6 +2756,7 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
                     nomeCompleto: a.cognNome,
                     ruolo:        a.ruolo,
                     areaConto:    a.areaConto ?? null,
+                    nazIban:      a.nazIban ?? null,
                     esito:        'trovato',
                     ruoliScelti:  {},
                     areaContoScelta: null,

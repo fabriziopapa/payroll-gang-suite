@@ -207,12 +207,18 @@ export async function emolumentiRoutes(app: FastifyInstance): Promise<void> {
     // area. La agganciamo QUI e non dentro risolviElenco: quel modulo e' logica
     // pura sui nomi, con i suoi test, e non deve sapere nulla di conti bancari.
     // NB: e' una classificazione, non un IBAN — l'IBAN non entra mai in PGS.
-    const areaPerMatricola = new Map(anagAll.map(a => [a.matricola, a.areaConto ?? null]))
+    //
+    // L'area arriva CALCOLATA dalla nazione (lib/areaConto.ts, la stessa
+    // funzione di GET /area-conto). Insieme all'area va sulla riga anche la
+    // NAZIONE: la lavorazione le salva entrambe, e una riga gia' creata non
+    // si ricalcola da sola — e' questo che protegge le lavorazioni fatte
+    // prima da un cambio di conto o di elenco.
+    const contoPerMatricola = new Map(anagAll.map(a => [a.matricola, { areaConto: a.areaConto, nazIban: a.nazIban }]))
 
-    const risultati = risolviElenco(b.righe, anagrafiche).map(r => ({
-      ...r,
-      areaConto: r.matricola ? (areaPerMatricola.get(r.matricola) ?? null) : null,
-    }))
+    const risultati = risolviElenco(b.righe, anagrafiche).map(r => {
+      const c = r.matricola ? contoPerMatricola.get(r.matricola) : undefined
+      return { ...r, areaConto: c?.areaConto ?? null, nazIban: c?.nazIban ?? null }
+    })
 
     return reply.send({ risultati })
   })
@@ -257,6 +263,7 @@ export async function emolumentiRoutes(app: FastifyInstance): Promise<void> {
         finRap:    r.finRap,
         idAb:      r.idAb,
         areaConto: r.areaConto,
+        nazIban:   r.nazIban,
       })),
     })
   })
@@ -293,6 +300,7 @@ export async function emolumentiRoutes(app: FastifyInstance): Promise<void> {
         finRap:    r.finRap,
         idAb:      r.idAb,
         areaConto: r.areaConto,
+        nazIban:   r.nazIban,
       }))
     }
 

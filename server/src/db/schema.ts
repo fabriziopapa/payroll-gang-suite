@@ -127,14 +127,14 @@ export const anagrafiche = pgTable('anagrafiche', {
   // SHA-256 sui campi funzionali (calcolato sul PLAINTEXT lato import) —
   // confronto O(1) per import differenziale. Invariato dalla cifratura.
   hashRecord:        varchar('hash_record', { length: 64 }),
-  /**
-   * Area del conto su cui CSA paga: 'IT' | 'SEPA' | 'EXTRA_UE' | 'NON_NOTO'.
-   * Deriva da SIAAC.V_IE_AC_CRDPAG_AB_ALL (coordinata con FL_USO_CSA=1 valida
-   * alla data di estrazione), colonna CD_NAZIONE_ISO3166_1_A2.
-   * PRIVACY: qui NON deve mai finire un IBAN, nemmeno parziale — solo l'area.
-   */
-  areaConto:         varchar('area_conto', { length: 10 }),
-  // Il FATTO da cui areaConto si deriva: due lettere, mai un IBAN (0016).
+  // area_conto NON e' piu' dichiarata qui, di proposito. La colonna esiste
+  // ancora nel database (0011) ma l'applicazione non la legge ne' la scrive:
+  // l'area si calcola da naz_iban con lib/areaConto.ts. Toglierla da schema.ts
+  // PRIMA della migrazione che la elimina e' cio' che rende quella migrazione
+  // sicura: Drizzle non la seleziona piu', quindi il DROP non rompe il codice
+  // in esecuzione nell'intervallo fra migrazione e deploy.
+  //
+  // Il FATTO: paese dell'IBAN su cui CSA paga, due lettere, mai un IBAN (0016).
   nazIban:           char('naz_iban', { length: 2 }),
 }, (t) => [
   uniqueIndex('anagrafiche_matricola_decor_inq_key').on(t.matricola, t.decorInq),

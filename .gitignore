@@ -180,3 +180,6 @@ analisi/
 
 # ── SQL —
 client/public/assets/alessio-song.mp3
+
+# Prompt di lavoro: descrivono l'interno del progetto (repo pubblico)
+/PROMPT_*.md

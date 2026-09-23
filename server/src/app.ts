@@ -46,6 +46,7 @@ import { emolumentiRoutes }   from './routes/emolumenti.js'
 import { vociConfigRoutes }   from './routes/vociConfig.js'
 import { auditRoutes } from './routes/audit.js'
 import { systemRoutes }      from './routes/system.js'
+import { areaContoRoutes }   from './routes/areaConto.js'
 
 // ============================================================
 
@@ -229,6 +230,7 @@ await app.register(emolumentiRoutes,   { prefix: '/api/v1/emolumenti' })
 await app.register(vociConfigRoutes,  { prefix: '/api/v1/voci-config' })
 await app.register(auditRoutes,       { prefix: '/api/v1/audit' })
 await app.register(systemRoutes,      { prefix: '/api/v1/system' })
+await app.register(areaContoRoutes,   { prefix: '/api/v1/area-conto' })
 
 // Health check (no auth) — SEC-M07: solo status minimale, nessuna info di versione/sistema
 app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))

@@ -31,9 +31,11 @@ export interface AnagraficaApi {
   genere?:    string | null
   codFis?:    string | null
   /** Area del conto su cui CSA paga: 'IT' | 'SEPA' | 'EXTRA_UE' | 'NON_NOTO'.
-   *  null = anagrafica importata prima dell'introduzione del campo.
+   *  Calcolata dal server a partire da nazIban: non e' piu' un dato salvato.
    *  Non contiene l'IBAN: solo la classificazione. */
   areaConto?: string | null
+  /** Paese dell'IBAN su cui CSA paga (due lettere), null se assente. */
+  nazIban?:   string | null
 }
 
 export interface ImportXlsxResult extends ImportResult {
@@ -945,8 +947,10 @@ export interface RigaRisoltaApi {
   /** Valorizzato solo su 'ambiguo': la scelta resta all'operatore. */
   candidati:           CandidatoApi[]
   /** Area del conto su cui CSA paga: 'IT' | 'SEPA' | 'EXTRA_UE' | 'NON_NOTO'.
-   *  null = anagrafica senza il dato. Non e' un IBAN e non lo contiene. */
+   *  null = matricola non trovata. Non e' un IBAN e non lo contiene. */
   areaConto:           string | null
+  /** Paese dell'IBAN da cui l'area e' calcolata (due lettere), o null. */
+  nazIban:             string | null
 }
 
 
@@ -961,8 +965,10 @@ export interface StoricoRuoloApi {
   decorInq:  string        // YYYY-MM-DD
   finRap:    string | null // null = ancora aperto
   idAb:      number | null
-  /** Area del conto registrata su QUELLA riga d'anagrafica. */
+  /** Area del conto calcolata dalla nazione di QUELLA riga d'anagrafica. */
   areaConto: string | null
+  /** Paese dell'IBAN di quella riga (due lettere), o null. */
+  nazIban?:  string | null
 }
 
 /** Lavorazione dell'area Emolumenti — riga di elenco, senza il payload. */

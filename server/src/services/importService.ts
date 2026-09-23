@@ -6,6 +6,7 @@
 
 import { createHash } from 'crypto'
 import * as XLSX from 'xlsx'
+import { normalizzaNazione } from '../lib/areaConto.js'
 import type {
   IAnagraficheRepository,
   IVociRepository,
@@ -278,18 +279,66 @@ export async function importCapitoli(
 }
 
 /**
- * Valori ammessi per AREA_CONTO (colonna prodotta dall'estrazione SGE).
- * Un valore fuori da questo insieme viene scartato (→ undefined), non
- * scritto a DB: meglio nessun dato che un dato non interpretabile.
- * PRIVACY: qui non deve mai transitare un IBAN — se l'estrazione cambiasse
- * e mandasse un IBAN in questa colonna, il filtro lo scarta.
+ * La nazione del conto, letta dalla colonna NAZ_IBAN dell'estrazione.
+ *
+ * L'area del conto (IT / SEPA / EXTRA_UE / NON_NOTO) NON si importa piu':
+ * si calcola da questa nazione con lib/areaConto.ts ogni volta che serve.
+ * Un file che porta ancora AREA_CONTO (estrazione precedente) viene
+ * importato normalmente, ma quella colonna si ignora e il referto lo dice.
+ *
+ * Tre risposte, e non sono intercambiabili:
+ *   colonna assente          -> { nazIban: undefined }  la nazione a DB non si tocca
+ *   cella vuota              -> { nazIban: null }       nessuna coordinata CSA: si scrive NULL
+ *   due lettere (anche ' it')-> { nazIban: 'IT' }
+ *   altro ('ITA', '1T', ...) -> { nazIban: undefined, errore } la riga si importa,
+ *                               la nazione NO, e il referto lo segnala: un dato
+ *                               illeggibile non e' un fatto, e non deve diventare
+ *                               "nessun conto".
+ *
+ * PRIVACY: se un giorno l'estrazione mandasse un IBAN in questa colonna,
+ * non passerebbe il controllo delle due lettere e il messaggio d'errore NON
+ * lo riporta: dice solo quanti caratteri aveva.
  */
-const AREE_CONTO = new Set(['IT', 'SEPA', 'EXTRA_UE', 'NON_NOTO'])
+export function leggiNazIban(
+  valore: unknown,
+  colonnaPresente: boolean,
+): { nazIban: string | null | undefined; errore?: string } {
+  if (!colonnaPresente) return { nazIban: undefined }
+  const testo = String(valore ?? '').trim()
+  if (testo === '') return { nazIban: null }
+  const naz = normalizzaNazione(testo)
+  if (naz) return { nazIban: naz }
+  return {
+    nazIban: undefined,
+    errore:  `NAZ_IBAN non valida (${testo.length} caratteri, attese due lettere): nazione non aggiornata`,
+  }
+}
+
+/**
+ * Il pezzo della nazione dentro l'impronta della riga.
+ *
+ * PERCHE' HA UN'ETICHETTA. Fino alla versione precedente l'ultimo campo
+ * dell'impronta era l'AREA ('IT'). Se ci si mettesse la NAZIONE nuda, per
+ * tutti i conti italiani il campo varrebbe ancora 'IT': impronta identica,
+ * upsert saltato, naz_iban mai scritta. Con l'etichetta l'impronta cambia
+ * per tutti, una volta, al primo import con NAZ_IBAN — ed e' quel passaggio
+ * che popola la colonna. Dal secondo import in poi torna differenziale.
+ *
+ * Tre valori distinti anche qui: 'naz:?' (colonna assente), 'naz:' (cella
+ * vuota), 'naz:IT'.
+ */
+export function segmentoHashNazione(nazIban: string | null | undefined): string {
+  if (nazIban === undefined) return 'naz:?'
+  return `naz:${nazIban ?? ''}`
+}
 
 // ------------------------------------------------------------
 // Import Anagrafiche SGE — formato XLSX (ru_tab_def.xlsx)
 // Colonne: ID_AB, MATRICOLA, COGNOME, NOME, DT_NASCITA, GENERE,
-//          COD_FIS, RUOLO, DT_INIZIO, DT_FINE, AREA_CONTO (facoltativa)
+//          COD_FIS, RUOLO, DT_INIZIO, DT_FINE, NAZ_IBAN (facoltativa)
+// Le altre colonne dell'estrazione (COORD_ATTIVE, COORD_NON_CSA,
+// NAZ_IBAN_NON_CSA, MOD_PAG_NON_CSA, e AREA_CONTO dei file vecchi) si
+// ignorano: il filtro dei dati sta qui, non serve cambiare la query RU_TAB.
 // ------------------------------------------------------------
 
 /** Converte data Excel DD/MM/YYYY o serial number → YYYY-MM-DD */
@@ -373,6 +422,19 @@ export async function importAnagraficheXlsx(
   const errors: ImportResult['errors'] = []
   const dataAgg = dataAggiornamento.toISOString().slice(0, 10)
 
+  // Le intestazioni si leggono una volta: con defval '' ogni riga ha tutte le
+  // chiavi dell'intestazione, quindi la prima basta. "La colonna c'e' e la
+  // cella e' vuota" e "la colonna non c'e'" vanno distinti (vedi leggiNazIban).
+  const intestazioni = new Set(Object.keys(rows[0] ?? {}))
+  const haNazIban    = intestazioni.has('NAZ_IBAN')
+  if (!haNazIban && intestazioni.has('AREA_CONTO')) {
+    errors.push({
+      row:     0,
+      message: "Colonna AREA_CONTO ignorata: l'area del conto si calcola dalla nazione. " +
+               "Usare l'estrazione con NAZ_IBAN; con questo file le nazioni gia' presenti restano invariate.",
+    })
+  }
+
   // La chiave univoca a DB è (matricola, decor_inq): due righe dello stesso
   // file con la stessa coppia si sovrascrivono a vicenda e una delle due
   // sparisce senza traccia. Non la scartiamo (il comportamento resta quello
@@ -403,11 +465,8 @@ export async function importAnagraficheXlsx(
     const genere    = String(row['GENERE']  ?? '').trim() || undefined
     const idAb      = row['ID_AB'] ? Number(row['ID_AB']) : undefined
 
-    // AREA_CONTO: facoltativa (i file SGE precedenti non ce l'hanno).
-    // Se assente o non riconosciuta resta undefined -> l'upsert usa COALESCE
-    // e NON azzera il valore gia' presente a DB.
-    const areaContoRaw = String(row['AREA_CONTO'] ?? '').trim().toUpperCase()
-    const areaConto    = AREE_CONTO.has(areaContoRaw) ? areaContoRaw : undefined
+    const { nazIban, errore: erroreNaz } = leggiNazIban(row['NAZ_IBAN'], haNazIban)
+    if (erroreNaz) errors.push({ row: index + 1, message: `${erroreNaz} (matricola ${matricola})` })
 
     // La chiave a DB e' (matricola, decor_inq): due righe dello stesso file con
     // la stessa coppia si sovrascrivono e una sparisce senza traccia.
@@ -422,12 +481,13 @@ export async function importAnagraficheXlsx(
       chiaviViste.set(chiave, index + 1)
     }
 
-    // areaConto entra nell'hash: senza, un cambio di conto (es. da estero a
+    // La nazione entra nell'hash: senza, un cambio di conto (es. da estero a
     // italiano) lascerebbe l'hash invariato, l'upsert salterebbe la riga e
-    // l'area resterebbe quella vecchia per sempre.
+    // la nazione resterebbe quella vecchia per sempre. Etichettata: vedi
+    // segmentoHashNazione.
     const hashRecord = calcHash([
       matricola, ruolo, cognNome, decorInq,
-      finRap ?? '', codFis ?? '', genere ?? '', areaConto ?? '',
+      finRap ?? '', codFis ?? '', genere ?? '', segmentoHashNazione(nazIban),
     ])
 
     items.push({
@@ -445,7 +505,7 @@ export async function importAnagraficheXlsx(
       genere,
       codFis,
       hashRecord,
-      areaConto,
+      nazIban,
     })
   })
 

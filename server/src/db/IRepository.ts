@@ -3,6 +3,8 @@
 // Cambia driver DB senza toccare nulla al di sopra di questo layer
 // ============================================================
 
+import type { AreaConto } from '../lib/areaConto.js'
+
 // ------------------------------------------------------------
 // Risultato operazione di import XML
 // ------------------------------------------------------------
@@ -35,7 +37,18 @@ export interface AnagraficaInput {
   genere?:     string
   codFis?:     string
   hashRecord?: string  // SHA-256 campi funzionali
-  areaConto?:  string  // 'IT' | 'SEPA' | 'EXTRA_UE' | 'NON_NOTO'
+  /**
+   * Paese dell'IBAN su cui CSA paga (due lettere). E' il FATTO: l'area del
+   * conto non si salva piu', si calcola da qui con lib/areaConto.ts.
+   *   undefined -> il file non ha la colonna NAZ_IBAN: il valore a DB NON si tocca
+   *   null      -> la colonna c'e' e la cella e' vuota: nessuna coordinata CSA,
+   *                si scrive NULL (e l'area risulta NON_NOTO)
+   *   'IT', ... -> si scrive
+   * Le tre cose sono diverse di proposito: appiattire undefined e null
+   * vorrebbe dire o non cancellare mai un conto sparito, o cancellare tutto
+   * importando un file vecchio.
+   */
+  nazIban?: string | null
 }
 
 /**
@@ -83,7 +96,15 @@ export interface AnagraficaRow {
   genere:     string | null
   codFis:     string | null
   hashRecord: string | null
-  areaConto:  string | null
+  /** Paese dell'IBAN (due lettere) o null. Mai un IBAN. */
+  nazIban:    string | null
+  /**
+   * Area del conto CALCOLATA da nazIban con lib/areaConto.ts nel momento in
+   * cui la riga si legge. Non e' piu' una colonna: la colonna area_conto
+   * resta nel database solo finche' la migrazione successiva non la toglie,
+   * e nessuno la legge ne' la scrive.
+   */
+  areaConto:  AreaConto
 }
 
 // ------------------------------------------------------------

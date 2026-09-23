@@ -11,8 +11,9 @@ import Pagination from '../components/Pagination'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { usePageLoad } from '../hooks/usePageLoad'
 
-// Area del conto su cui CSA paga. Non e' l'IBAN e non lo contiene: e' solo la
-// classificazione calcolata in fase di estrazione SGE.
+// Area del conto su cui CSA paga. Non e' l'IBAN e non lo contiene: e' la
+// classificazione che il SERVER calcola dalla nazione (lib/areaConto.ts),
+// ogni volta che l'elenco si legge. L'estrazione porta solo la nazione.
 const AREA_CONTO_LABEL: Record<string, string> = {
   IT:       'IT',
   SEPA:     'SEPA',
@@ -126,7 +127,8 @@ export default function AnagrafichePage() {
         (a.cognNome ?? '').toLowerCase().includes(q) ||
         (a.ruolo ?? '').toLowerCase().includes(q) ||
         (a.druolo ?? '').toLowerCase().includes(q) ||
-        (a.areaConto ?? '').toLowerCase().includes(q)
+        (a.areaConto ?? '').toLowerCase().includes(q) ||
+        (a.nazIban ?? '').toLowerCase().includes(q)
       if (!match) continue
 
       if (!map.has(a.matricola)) {
@@ -298,8 +300,10 @@ export default function AnagrafichePage() {
                     </td>
                     <td className="px-4 py-2.5">
                       {a.areaConto ? (
-                        <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${AREA_CONTO_STYLE[a.areaConto] ?? 'bg-slate-800 text-slate-400'}`}>
+                        <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${AREA_CONTO_STYLE[a.areaConto] ?? 'bg-slate-800 text-slate-400'}`}
+                              title={a.nazIban ? `Nazione del conto: ${a.nazIban}` : 'Nessuna nazione del conto'}>
                           {AREA_CONTO_LABEL[a.areaConto] ?? a.areaConto}
+                          {a.nazIban && a.nazIban !== 'IT' && <span className="opacity-70"> · {a.nazIban}</span>}
                         </span>
                       ) : (
                         <span className="text-slate-600 text-xs">—</span>
