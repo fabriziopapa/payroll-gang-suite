@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.09.24.1-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.09.24.2-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -44,7 +44,8 @@ payroll-gang-suite/
 ├── client/                      # SPA React/Vite
 │   └── src/
 │       ├── api/                 # Client API tipizzati (endpoints.ts, client.ts — JWT + auto-refresh)
-│       ├── components/          # Componenti React (ConfirmDialog, ToastManager, Layout, …)
+│       ├── components/          # Componenti React (ConfirmDialog, ToastManager, Layout,
+│       │                        #   ModaleContiCsa, …)
 │       │   ├── editor/          #   DettaglioCard, DettaglioFormModal, ComunicazioneModal
 │       │   └── certificatoTemplate/  # Editor template certificato
 │       ├── constants/           # csvDefaults, scorporoCoefficients, palette gruppi
@@ -78,7 +79,8 @@ payroll-gang-suite/
 │       │                        # pdf-region, cineca, area-conto (areaConto.ts)
 │       ├── schemas/             # Zod validazione (BozzaDatiSchema, …)
 │       └── services/            # cryptoService, importService, mailerService, cinecaService
-│           ├── emolumenti/      #   risoluzione nominativi → matricole (logica pura + test)
+│           ├── emolumenti/      #   risoluzione nominativi → matricole, testate CSA → conto
+│           │                    #   per matricola (logica pura + test)
 │           ├── cedolino/        #   parser PDF cedolino + calculator
 │           ├── certificato/     #   stampa unione DOCX (+ assets)
 │           └── pdfRegion/       #   estrazione via template regioni
@@ -196,6 +198,8 @@ Un file con `AREA_CONTO` e senza `NAZ_IBAN` (la vecchia estrazione) si importa, 
 - una riga si toglie solo se l'estrazione **dovrebbe** contenerla e non la contiene, e dopo aver controllato che non sia l'unica a rispondere per qualche data.
 
 **Il primo import dopo il rilascio riscrive tutte le righe del file, una volta.** L'impronta di ogni riga contiene ora la nazione con un'etichetta (`naz:IT`): senza, per i conti italiani sarebbe rimasta identica a quella vecchia (che finiva con l'area `IT`), l'import avrebbe saltato quelle righe e `naz_iban` non sarebbe mai stata scritta. Il referto del primo import mostra quindi quasi tutto come *aggiornato*: e' atteso. Dal secondo torna differenziale.
+
+**Verifica conti da CSA** (pulsante nella lavorazione, accanto a *Aggiorna ruoli e conti*). La nazione dell'anagrafica e' una stima; il conto su cui CSA ha **pagato** e' un fatto. Il pulsante chiede anno e mese della liquidazione (proposti dalla data di liquidazione, se la lavorazione ce l'ha), i ruoli (quelli presenti nelle righe, comparto 1) e, facoltativo, il progressivo di una liquidazione precisa; legge `GET /v1/liquidazioni/liquidato/testate` (`POST /api/v1/emolumenti/conti-da-csa`, admin + audit) e confronta riga per riga. Regole: le testate con progressivo `000` (non liquidate) non classificano; chi ha solo quelle, chi ha una testata liquidata senza nazione, nazioni diverse o un progressivo malformato e' **da chiarire**, con il motivo. **Ogni differenza con la riga si conferma una per una**; dove CSA coincide la riga e' marcata *CSA ✓ MM/AAAA*. Il risultato si salva sulla riga (`contoCsa`) e resta anche quando la liquidazione in CSA viene cancellata — e' il flusso della liquidazione "a mazza secca" fatta apposta per sapere su quale conto CSA paga ciascuno. Della risposta CSA restano tre campi per testata (matricola, progressivo, nazione): IBAN, intestazioni e ABI/CAB si scartano in `normalizzaTestate` e non escono dal server.
 
 **Nelle lavorazioni l'area si fotografa.** Ogni riga salva area **e nazione** quando nasce, e non si ricalcola da sola. *Aggiorna ruoli e conti* aggiorna l'area in automatico solo se non si perde nulla: se una riga passerebbe da un'area nota a `NON_NOTO`, lo chiede.
 
@@ -356,6 +360,16 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.09.24.2
+**Emolumenti: "Verifica conti da CSA"**
+
+*Nessuna migrazione. Liquidazioni non toccate.*
+
+- **Nuovo pulsante nella lavorazione**: legge le testate di una liquidazione CSA (anno, mese, ruoli, progressivo facoltativo) e dice per ogni riga su quale conto CSA ha pagato. Le differenze con la riga si confermano una per una; confermati, da chiarire e non in liquidazione restano segnati sulla riga, anche dopo la cancellazione della liquidazione in CSA.
+- **Privacy**: della testata sopravvivono matricola, progressivo e nazione. La normalizzazione (`services/emolumenti/testate.ts`) e' logica pura con i suoi test, incluso quello che verifica che IBAN e intestazione non passino.
+- *Aggiorna ruoli e conti* non sovrascrive piu' da solo un conto **confermato da CSA** con la stima dell'anagrafica: lo chiede.
+- Corretto il testo del pannello dettagli: una riga senza area non vuol dire "persona non trovata".
 
 ### 26.09.24.1
 **Anagrafiche: il ruolo nella chiave, la nazione estesa alla persona**

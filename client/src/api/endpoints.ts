@@ -997,6 +997,27 @@ export interface LavorazioneFullApi extends LavorazioneApi {
   dati: Record<string, unknown>
 }
 
+/** Esito per matricola di "Verifica conti da CSA". */
+export interface ContoDaCsaApi {
+  matricola:   string
+  /** Nazione su cui CSA ha pagato; null se da chiarire. */
+  nazIban:     string | null
+  /** 'IT' | 'SEPA' | 'EXTRA_UE'; null se da chiarire. */
+  area:        string | null
+  /** 'senza coordinata' | 'coordinate discordanti' | 'nazione assente' | 'progressivo assente' */
+  motivo:      string | null
+  progressivi: string
+}
+
+export interface ContiDaCsaApi {
+  conti:          ContoDaCsaApi[]
+  /** Matricole chieste che nelle testate di quel mese non ci sono. */
+  nonTrovate:     string[]
+  testateLette:   number
+  testateLiquide: number
+  epcVersione:    string
+}
+
 export const emolumentiApi = {
   /** Nomi incollati → matricole, contro l'anagrafica locale. Nessuna chiamata a CSA. */
   risolviNominativi: (righe: Array<{ nominativo: string; numeroProvvedimento?: string }>) =>
@@ -1012,6 +1033,17 @@ export const emolumentiApi = {
     apiFetch<{ matricola: string; storico: StoricoRuoloApi[] }>(
       `/emolumenti/storico-ruoli/${encodeURIComponent(matricola)}`,
     ),
+
+  /** Conto su cui CSA ha pagato, dalle testate del liquidato di un mese (admin).
+   *  Nessun IBAN: solo nazione, area e progressivi, e solo per le matricole chieste. */
+  contiDaCsa: (body: {
+    anno: number; mese: number; ruoli: string[]; comparto?: string
+    progrLiquidazione?: string; matricole: string[]
+  }) =>
+    apiFetch<ContiDaCsaApi>('/emolumenti/conti-da-csa', {
+      method: 'POST',
+      body:   JSON.stringify(body),
+    }),
 
   /** Storia dei ruoli per N matricole in una chiamata sola. Serve a segnalare
    *  l'ambiguità sulle righe prima che l'operatore apra i dettagli. */

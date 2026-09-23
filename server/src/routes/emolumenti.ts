@@ -25,11 +25,14 @@ import { PgAuditRepository } from '../db/repositories/PgAuditRepository.js'
 import { PgEmolumentiLavorazioniRepository } from '../db/repositories/PgEmolumentiLavorazioniRepository.js'
 import {
   getVociVariabili,
+  getLiquidatoTestate,
   CinecaApiError,
   CinecaNotConfiguredError,
   type VoceVariabileNorm,
 } from '../services/cinecaService.js'
 import { risolviElenco, type AnagraficaPerRicerca } from '../services/emolumenti/nominativi.js'
+import { contiDaTestate, type TestataNorm } from '../services/emolumenti/testate.js'
+import { EPC_VERSIONE } from '../lib/areaConto.js'
 
 /** Voce della maggiorazione per estero: il caso d'uso che ha originato l'area. */
 const VOCE_MAGGIORAZIONE_ESTERO = '09834'
@@ -167,6 +170,72 @@ export async function emolumentiRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({
       parametri: { codiceVoce, annoDa: annoDa ?? null, annoA: annoA ?? null },
       risultati,
+    })
+  })
+
+  // POST /conti-da-csa  { anno, mese, ruoli[], comparto?, progrLiquidazione?, matricole[] }
+  //   → { conti[], nonTrovate[], testateLette, testateLiquide, epcVersione, parametri }
+  //
+  // "Verifica conti da CSA" della lavorazione. Legge le testate del liquidato
+  // del mese (una chiamata per ruolo) e dice, per ogni matricola chiesta, su
+  // quale nazione CSA ha pagato e in che area cade. E' il dato piu' solido
+  // che esista: non una stima dall'anagrafica, il pagamento.
+  //
+  // Il flusso d'ufficio che lo usa: si fa in CSA una liquidazione "a mazza
+  // secca" di tutti, si legge qui, si aggiorna la lavorazione, poi la
+  // liquidazione si cancella. Per questo il risultato NON si salva qui: lo
+  // salva la lavorazione, riga per riga, e resta anche quando in CSA la
+  // liquidazione non c'e' piu'.
+  //
+  // PRIVACY. Della risposta CSA arrivano qui tre campi per testata (vedi
+  // normalizzaTestate); al client tornano solo le matricole CHIESTE, con
+  // nazione, area e progressivi. Nessun IBAN esce da cinecaService.
+  app.post('/conti-da-csa', pii, async (request, reply) => {
+    const b = z.object({
+      anno:              z.number().int().min(ANNO_MIN).max(ANNO_MAX),
+      mese:              z.number().int().min(1).max(12),
+      ruoli:             z.array(z.string().trim().regex(/^[A-Z0-9]{2}$/)).min(1).max(10),
+      comparto:          z.string().trim().regex(/^\d{1,2}$/).default('1'),
+      progrLiquidazione: z.string().trim().regex(/^\d{3}$/).optional(),
+      matricole:         z.array(z.string().min(1).max(20)).min(1).max(MAX_MATRICOLE),
+    }).parse(request.body)
+
+    const ruoli     = [...new Set(b.ruoli)]
+    const matricole = [...new Set(b.matricole.map(padMatricola))]
+
+    await audit(request.user?.id, request.ip, {
+      endpoint: 'conti-da-csa', anno: b.anno, mese: b.mese, ruoli, comparto: b.comparto,
+      progrLiquidazione: b.progrLiquidazione ?? null, nMatricole: matricole.length,
+    })
+
+    if (!cinecaConfigured) return reply.code(503).send({ error: 'CINECA_NON_CONFIGURATO' })
+
+    const testate: TestataNorm[] = []
+    try {
+      // In sequenza: sono poche chiamate (un ruolo per chiamata) e CSA-WS non
+      // va martellato.
+      for (const ruolo of ruoli) {
+        testate.push(...await getLiquidatoTestate({
+          anno: b.anno, mese: b.mese, ruolo, comparto: b.comparto,
+          ...(b.progrLiquidazione ? { progrLiquidazione: b.progrLiquidazione } : {}),
+        }))
+      }
+    } catch (err) {
+      return errReply(reply, err)
+    }
+
+    const esito   = contiDaTestate(testate)
+    const chieste = new Set(matricole)
+    const conti   = esito.conti.filter(c => chieste.has(c.matricola))
+    const trovate = new Set(conti.map(c => c.matricola))
+
+    return reply.send({
+      conti,
+      nonTrovate:     matricole.filter(m => !trovate.has(m)),
+      testateLette:   esito.testateLette,
+      testateLiquide: esito.testateLiquide,
+      epcVersione:    EPC_VERSIONE,
+      parametri:      { anno: b.anno, mese: b.mese, ruoli, comparto: b.comparto, progrLiquidazione: b.progrLiquidazione ?? null },
     })
   })
 

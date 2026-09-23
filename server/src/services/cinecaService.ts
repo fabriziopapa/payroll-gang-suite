@@ -8,6 +8,8 @@
 
 import { env, cinecaConfigured, cinecaProxyConfigured } from '../config/env.js'
 import type { LiquidatoVoce } from './verificaLiquidato/types.js'
+import { normalizzaTestate, type TestataNorm } from './emolumenti/testate.js'
+export type { TestataNorm }
 
 export class CinecaNotConfiguredError extends Error {
   constructor() {
@@ -227,6 +229,37 @@ export async function getLiquidatoDettaglio(
   }
   const body = await res.json()
   return Array.isArray(body) ? (body as LiquidatoVoce[]) : []
+}
+
+// ── Testate del liquidato (area Emolumenti: conti da CSA) ─────
+
+// Normalizzazione e tipo stanno in services/emolumenti/testate.ts (logica
+// pura, testabile senza configurazione CINECA).
+/**
+ * Testate del liquidato di un mese:
+ *   GET /v1/liquidazioni/liquidato/testate/?anno=&mese=&ruolo=&comparto=[&progrLiquidazione=]
+ * Una testata per pagamento: una matricola puo' averne piu' d'una.
+ */
+export async function getLiquidatoTestate(opts: {
+  anno: number; mese: number; ruolo: string; comparto: string; progrLiquidazione?: string
+}): Promise<TestataNorm[]> {
+  if (!cinecaConfigured) throw new CinecaNotConfiguredError()
+  const params: Record<string, string> = {
+    anno: String(opts.anno), mese: String(opts.mese), ruolo: opts.ruolo, comparto: opts.comparto,
+  }
+  if (opts.progrLiquidazione) params['progrLiquidazione'] = opts.progrLiquidazione
+  const qs  = new URLSearchParams(params).toString()
+  const res = await authedGet(`/v1/liquidazioni/liquidato/testate/?${qs}`)
+  if (!res.ok) {
+    throw new CinecaApiError(
+      `Lettura testate del liquidato (${opts.ruolo} ${opts.anno}/${opts.mese}) fallita (${res.status})`,
+      res.status,
+    )
+  }
+  const norm = normalizzaTestate(await res.json())
+  // Il messaggio non riporta il corpo: potrebbe contenere dati bancari.
+  if (!norm) throw new CinecaApiError('Testate del liquidato: formato di risposta inatteso', 502)
+  return norm
 }
 
 // ── Voci variabili (area Emolumenti) ──────────────────────────

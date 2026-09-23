@@ -32,6 +32,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 // LETTURA (vincolo §8.1): l'utente ritrova la maschera che gia' conosce,
 // con gli stessi campi e le stesse parole.
 import ArchiviaLiquidazioneModal from '../components/ArchiviaLiquidazioneModal'
+import ModaleContiCsa, { type ParametriContiCsa } from '../components/ModaleContiCsa'
 import { serializeCsv, downloadCsv, lastDayOfMonth } from '../utils/biz'
 import { nomeOppureTe } from '../utils/utente'
 import { useStore } from '../store/useStore'
@@ -190,6 +191,13 @@ interface RigaLavoro {
    */
   nazIban:             string | null
   /**
+   * L'ultima "Verifica conti da CSA" su questa riga: che cosa dicevano le
+   * testate della liquidazione letta. Resta salvata anche quando in CSA la
+   * liquidazione (per esempio quella "a mazza secca") viene cancellata.
+   * null = mai verificata.
+   */
+  contoCsa:            ContoCsaRiga | null
+  /**
    * Ruolo scelto a mano dall'operatore, PER MESE: "AAAA-MM" -> codice ruolo.
    *
    * E' per mese e non per riga perche' il ruolo stesso lo e'. Una persona che
@@ -329,6 +337,46 @@ function areaNota(a: string | null): boolean {
   return a !== null && a !== 'NON_NOTO'
 }
 
+/** Esito della verifica da CSA su una riga (vedi RigaLavoro.contoCsa). */
+interface ContoCsaRiga {
+  /** Liquidazione letta, 'AAAA-MM'. */
+  mese:        string
+  /** Progressivo chiesto, o null = tutte le liquidazioni del mese. */
+  progressivo: string | null
+  /** Quando, ISO. */
+  letto:       string
+  /**
+   *  'confermato'           la riga ha il conto che dice CSA
+   *  'diverso'              CSA dice altro e la differenza non e' (ancora) applicata
+   *  'non-in-liquidazione'  nessuna testata per questa matricola
+   *  'da-chiarire'          testate presenti ma non classificabili (vedi motivo)
+   */
+  esito:       'confermato' | 'diverso' | 'non-in-liquidazione' | 'da-chiarire'
+  naz:         string | null
+  area:        string | null
+  motivo:      string | null
+  progressivi: string | null
+}
+
+function leggiContoCsa(x: unknown): ContoCsaRiga | null {
+  if (!x || typeof x !== 'object') return null
+  const o = x as Record<string, unknown>
+  const esiti = ['confermato', 'diverso', 'non-in-liquidazione', 'da-chiarire'] as const
+  const esito = esiti.find(e => e === o['esito'])
+  if (!esito || typeof o['mese'] !== 'string') return null
+  const str = (k: string) => (typeof o[k] === 'string' ? o[k] as string : null)
+  return {
+    mese: o['mese'] as string, progressivo: str('progressivo'), letto: str('letto') ?? '',
+    esito, naz: str('naz'), area: str('area'), motivo: str('motivo'), progressivi: str('progressivi'),
+  }
+}
+
+/** '2026-10' -> '10/2026' */
+function meseBreve(k: string): string {
+  const [a, m] = k.split('-')
+  return a && m ? `${m}/${a}` : k
+}
+
 /**
  * Una voce della coda di riverifica: qualcosa che il programma NON decide da
  * solo. Due famiglie, entrambe volute:
@@ -346,6 +394,9 @@ type VoceRiverifica =
       mese: string; opzioni: StoricoRuoloApi[]; attuale: string | null; aMano: boolean }
   | { tipo: 'area'; chiave: string; rigaId: number; nominativo: string; matricola: string
       proposta: string | null; nazProposta: string | null; attuale: string | null; aMano: boolean }
+  | { tipo: 'csa'; chiave: string; rigaId: number; nominativo: string; matricola: string
+      proposta: string; nazProposta: string; attuale: string | null; attualeNaz: string | null
+      aMano: boolean; meseCsa: string }
 
 /** L'area del conto che vale davvero. Stessa precedenza. */
 function areaDi(r: RigaLavoro): string | null {
@@ -393,6 +444,7 @@ function deserializzaRighe(v: unknown): RigaLavoro[] {
       importi:             (o['importi'] as Record<string, string>) ?? {},
       areaConto:           (o['areaConto'] as string | null) ?? null,
       nazIban:             (o['nazIban'] as string | null) ?? null,
+      contoCsa:            leggiContoCsa(o['contoCsa']),
       // Salvataggi anteriori alle scelte manuali: assenti = nessuna scelta,
       // e la riga si comporta esattamente come prima.
       //
@@ -491,6 +543,8 @@ export default function EmolumentiPage() {
   /** Coda delle cose da confermare dopo una riverifica. Vuota = niente da chiedere. */
   const [daConfermare, setDaConfermare] = useState<VoceRiverifica[]>([])
   const [riverificando, setRiverificando] = useState(false)
+  const [contiCsaAperto, setContiCsaAperto] = useState(false)
+  const [leggendoConti,  setLeggendoConti]  = useState(false)
   const [risolvendo, setRisolvendo] = useState(false)
 
   /** Storia dei ruoli per matricola, caricata in blocco. Non entra nel payload
@@ -649,7 +703,9 @@ export default function EmolumentiPage() {
             })
           }
         } else if (proposta && proposta !== r.areaConto) {
-          if (areaNota(r.areaConto) && !areaNota(proposta)) {
+          // Un conto CONFERMATO da CSA vale piu' della stima dall'anagrafica:
+          // se l'anagrafica ora dice altro, si chiede, non si sovrascrive.
+          if ((areaNota(r.areaConto) && !areaNota(proposta)) || r.contoCsa?.esito === 'confermato') {
             // Una riga che aveva un conto e ora lo perderebbe: si chiede.
             // E' anche la rete per l'intervallo fra il rilascio e il primo
             // import con NAZ_IBAN, quando le nazioni sono ancora vuote.
@@ -682,6 +738,88 @@ export default function EmolumentiPage() {
       setRiverificando(false)
     }
   }
+
+  /**
+   * "Verifica conti da CSA": legge le testate della liquidazione indicata e
+   * confronta, riga per riga, il conto su cui CSA ha pagato con quello che
+   * la riga ha (dall'anagrafica o scelto a mano).
+   *
+   * Regola decisa dall'autore: OGNI differenza si conferma. Si applica da
+   * se' solo l'esito, mai un cambio: dove CSA coincide la riga viene marcata
+   * "confermato", dove non c'e' testata "non in liquidazione", dove le
+   * testate non bastano "da chiarire" con il motivo. Area e nazione della
+   * riga cambiano solo con un si' nella coda.
+   */
+  async function verificaContiDaCsa(p: ParametriContiCsa) {
+    const conMatricola = (righe ?? []).filter(r => r.matricola)
+    const mats = [...new Set(conMatricola.map(r => r.matricola as string))]
+    if (mats.length === 0) { showToast('Nessuna matricola da verificare.', 'warning'); return }
+
+    setLeggendoConti(true)
+    try {
+      const esito = await emolumentiApi.contiDaCsa({
+        anno: p.anno, mese: p.mese, ruoli: p.ruoli, matricole: mats,
+        ...(p.progrLiquidazione ? { progrLiquidazione: p.progrLiquidazione } : {}),
+      })
+      const meseCsa = `${p.anno}-${String(p.mese).padStart(2, '0')}`
+      const letto   = new Date().toISOString()
+      const perMat  = new Map(esito.conti.map(c => [c.matricola, c]))
+      const base    = { mese: meseCsa, progressivo: p.progrLiquidazione ?? null, letto }
+
+      const coda: VoceRiverifica[] = []
+      let confermati = 0, assenti = 0, daChiarire = 0
+      for (const r of conMatricola) {
+        const c = perMat.get(r.matricola as string)
+        if (!c) {
+          assenti++
+          aggiorna(r.id, { contoCsa: { ...base, esito: 'non-in-liquidazione', naz: null, area: null, motivo: null, progressivi: null } })
+          continue
+        }
+        if (!c.area || !c.nazIban) {
+          daChiarire++
+          aggiorna(r.id, { contoCsa: { ...base, esito: 'da-chiarire', naz: null, area: null, motivo: c.motivo, progressivi: c.progressivi } })
+          continue
+        }
+        const conto = { ...base, naz: c.nazIban, area: c.area, motivo: null, progressivi: c.progressivi }
+        if (areaDi(r) === c.area && r.nazIban === c.nazIban) {
+          confermati++
+          aggiorna(r.id, { contoCsa: { ...conto, esito: 'confermato' } })
+          continue
+        }
+        aggiorna(r.id, { contoCsa: { ...conto, esito: 'diverso' } })
+        coda.push({
+          tipo: 'csa', chiave: `${r.id}|csa`, rigaId: r.id,
+          nominativo: r.nominativo, matricola: r.matricola as string,
+          proposta: c.area, nazProposta: c.nazIban,
+          attuale: areaDi(r), attualeNaz: r.nazIban,
+          aMano: Boolean(r.areaContoScelta), meseCsa,
+        })
+      }
+
+      setContiCsaAperto(false)
+      setDaConfermare(coda)
+      showToast(
+        `CSA ${meseBreve(meseCsa)}: ${esito.testateLiquide} testate liquidate su ${esito.testateLette}. ` +
+        `${confermati} confermati, ${coda.length} diversi da confermare, ` +
+        `${daChiarire} da chiarire, ${assenti} non in liquidazione.`,
+        coda.length + daChiarire > 0 ? 'warning' : 'success',
+      )
+    } catch (err) {
+      showToast(messaggioErrore(err), 'error')
+    } finally {
+      setLeggendoConti(false)
+    }
+  }
+
+  /** I ruoli presenti nelle righe: quelli dell'anagrafica e quelli scelti a mano. */
+  const ruoliRighe = useMemo(() => {
+    const s = new Set<string>()
+    for (const r of righe ?? []) {
+      if (r.ruolo) s.add(r.ruolo)
+      for (const v of Object.values(r.ruoliScelti)) if (v) s.add(v)
+    }
+    return [...s].filter(x => /^[A-Z0-9]{2}$/.test(x)).sort()
+  }, [righe])
 
   const incollate = useMemo(() => parseIncollato(raw), [raw])
   const troppe    = incollate.length > MAX_RIGHE
@@ -767,6 +905,7 @@ export default function EmolumentiPage() {
       importi:             {},
       areaConto:           null,
       nazIban:             null,
+      contoCsa:            null,
       ruoliScelti:         {},
       areaContoScelta:     null,
       ...base,
@@ -1902,7 +2041,27 @@ export default function EmolumentiPage() {
             >
               {riverificando ? 'Riverifica in corso…' : 'Aggiorna ruoli e conti'}
             </button>
+            <button
+              onClick={() => setContiCsaAperto(true)}
+              disabled={leggendoConti || risolte === 0}
+              title="Legge le testate di una liquidazione CSA e confronta il conto su cui CSA ha pagato"
+              className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
+                         bg-slate-800 text-slate-200 border border-slate-700
+                         hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {leggendoConti ? 'Lettura da CSA…' : 'Verifica conti da CSA'}
+            </button>
           </div>
+
+          {contiCsaAperto && (
+            <ModaleContiCsa
+              ruoli={ruoliRighe}
+              dataLiquidazione={dataLiquidazione}
+              leggendo={leggendoConti}
+              onConferma={verificaContiDaCsa}
+              onChiudi={() => setContiCsaAperto(false)}
+            />
+          )}
 
           {daConfermare.length > 0 && (
             <ModaleRiverifica
@@ -1918,7 +2077,16 @@ export default function EmolumentiPage() {
                   // si prende la sua area CON la sua nazione. Prima si
                   // toglieva solo la scelta e la riga ricadeva sull'area
                   // salvata a suo tempo, non su quella proposta.
-                  aggiorna(r.id, { areaContoScelta: null, areaConto: v.proposta, nazIban: v.nazProposta })
+                  // Il segno lasciato da CSA segue: confermato se si e' presa
+                  // la sua proposta, "diverso" se si e' presa quella
+                  // dell'anagrafica sopra un conto che CSA aveva confermato.
+                  const esitoCsa = v.tipo === 'csa' ? 'confermato' as const
+                    : r.contoCsa?.esito === 'confermato' && r.contoCsa.area !== v.proposta ? 'diverso' as const
+                    : null
+                  aggiorna(r.id, {
+                    areaContoScelta: null, areaConto: v.proposta, nazIban: v.nazProposta,
+                    ...(esitoCsa && r.contoCsa ? { contoCsa: { ...r.contoCsa, esito: esitoCsa } } : {}),
+                  })
                 }
               }}
               onChiudi={() => setDaConfermare([])}
@@ -2174,6 +2342,26 @@ function gg(iso: string | null): string {
  */
 
 /**
+ * Il segno lasciato da "Verifica conti da CSA" sulla riga. Piccolo, perche'
+ * sta nell'intestazione; il dettaglio (progressivi, motivo) e' nel title e
+ * nel pannello dei dettagli anagrafici.
+ */
+function SegnoCsa({ c }: { c: ContoCsaRiga }) {
+  const m = meseBreve(c.mese)
+  const [testo, colore, spiega] =
+      c.esito === 'confermato'          ? [`CSA ✓ ${m}`, 'text-emerald-400', `Conto confermato dalla liquidazione CSA di ${m}${c.progressivi ? ` (progressivi ${c.progressivi})` : ''}`]
+    : c.esito === 'diverso'             ? [`CSA ≠ ${m}`, 'text-amber-300',   `CSA ha pagato su ${c.area ?? '?'} · ${c.naz ?? '?'} nella liquidazione di ${m}: la riga ha un altro conto`]
+    : c.esito === 'da-chiarire'         ? [`CSA ? ${m}`, 'text-amber-300',   `Liquidazione CSA di ${m}: da chiarire (${c.motivo ?? 'motivo non indicato'})`]
+    :                                     [`non in liq. ${m}`, 'text-slate-500', `Nessuna testata per questa matricola nella liquidazione CSA di ${m}`]
+  return (
+    <>
+      <span className="text-slate-700">|</span>
+      <span className={`font-mono ${colore}`} title={spiega}>{testo}</span>
+    </>
+  )
+}
+
+/**
  * La coda delle cose da confermare dopo "Aggiorna ruoli e conti".
  *
  * Una alla volta, come la modale dei ruoli in Liquidazioni: una domanda per
@@ -2208,7 +2396,8 @@ function ModaleRiverifica({ voci, dateCompetenza, onApplica, onChiudi }: {
         <div className="flex items-start justify-between px-5 py-4 border-b border-slate-800">
           <div>
             <h2 className="text-white font-semibold">
-              {v.tipo === 'ruolo' ? 'Quale ruolo per questo mese?' : 'Area del conto cambiata'}
+              {v.tipo === 'ruolo' ? 'Quale ruolo per questo mese?'
+                : v.tipo === 'csa' ? 'Conto su cui CSA ha pagato' : 'Area del conto cambiata'}
             </h2>
             <p className="text-slate-500 text-xs mt-0.5">{i + 1} di {voci.length}</p>
           </div>
@@ -2261,22 +2450,37 @@ function ModaleRiverifica({ voci, dateCompetenza, onApplica, onChiudi }: {
             </>
           ) : (
             <>
-              <p className="text-slate-400 text-xs mb-3">
-                {v.aMano
-                  ? <>Avevi assegnato <span className="font-mono text-amber-300">{v.attuale}</span> a mano.</>
-                  : <>In questa lavorazione la riga ha <span className="font-mono text-amber-300">{v.attuale}</span>.</>}
-                {' '}L’anagrafica ora dice <span className="font-mono text-slate-200">{v.proposta}</span>
-                {v.nazProposta && <> (nazione <span className="font-mono">{v.nazProposta}</span>)</>}.
-              </p>
+              {v.tipo === 'csa' ? (
+                <p className="text-slate-400 text-xs mb-3">
+                  In questa lavorazione:{' '}
+                  {v.attuale
+                    ? <span className="font-mono text-amber-300">{v.attuale}{v.attualeNaz ? ` · ${v.attualeNaz}` : ''}</span>
+                    : <span className="text-amber-300">nessuna area</span>}
+                  {v.aMano && <span className="text-amber-500/70"> (a mano)</span>}.
+                  {' '}Nella liquidazione CSA di {meseBreve(v.meseCsa)} ha pagato su{' '}
+                  <span className="font-mono text-slate-200">{v.proposta} · {v.nazProposta}</span>.
+                </p>
+              ) : (
+                <p className="text-slate-400 text-xs mb-3">
+                  {v.aMano
+                    ? <>Avevi assegnato <span className="font-mono text-amber-300">{v.attuale}</span> a mano.</>
+                    : <>In questa lavorazione la riga ha <span className="font-mono text-amber-300">{v.attuale}</span>.</>}
+                  {' '}L’anagrafica ora dice <span className="font-mono text-slate-200">{v.proposta}</span>
+                  {v.nazProposta && <> (nazione <span className="font-mono">{v.nazProposta}</span>)</>}.
+                </p>
+              )}
               <button onClick={() => scegli(null)}
                       className="w-full px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700
                                  border border-slate-700 hover:border-indigo-600 text-left text-sm
                                  text-slate-200 transition">
-                Usa <span className="font-mono">{v.proposta}</span> dall’anagrafica
+                Usa <span className="font-mono">{v.proposta}</span>{' '}
+                {v.tipo === 'csa' ? 'da CSA' : 'dall’anagrafica'}
                 <span className="block text-slate-500 text-xs mt-0.5">
-                  {v.aMano
-                    ? 'toglie la scelta manuale: da qui in poi segue l’anagrafica'
-                    : 'la riga perde l’area che aveva: “Lascia com’è” la conserva'}
+                  {v.tipo === 'csa'
+                    ? `area e nazione della riga diventano quelle pagate da CSA${v.aMano ? ', e la scelta a mano si toglie' : ''}`
+                    : v.aMano
+                      ? 'toglie la scelta manuale: da qui in poi segue l’anagrafica'
+                      : 'la riga perde l’area che aveva: “Lascia com’è” la conserva'}
                 </span>
               </button>
             </>
@@ -2479,11 +2683,27 @@ function DettagliAnagrafici({ r, storico, ambigui, scoperti, dateCompetenza, onP
         <p className="text-xs font-medium text-slate-400 mb-1">Area del conto (per i TXT)</p>
         <p className="text-xs text-slate-500 mb-2">
           {r.areaConto
-            ? <>Dall’anagrafica: <span className="font-mono text-slate-300">{r.areaConto}</span>
+            ? <>Sulla riga: <span className="font-mono text-slate-300">{r.areaConto}</span>
                 {r.nazIban && <> (nazione <span className="font-mono text-slate-300">{r.nazIban}</span>)</>}
                 {r.areaConto === 'NON_NOTO' && ' — nessuna nazione del conto: nessuna coordinata CSA attiva, oppure la persona non era nell’ultimo import con NAZ_IBAN.'}</>
-            : <>In anagrafica non c’è: questa persona non è stata trovata.</>}
+            : <>Nessuna area su questa riga: quando la riga è stata caricata l’anagrafica non la dava.</>}
         </p>
+        {r.contoCsa && (
+          <p className="text-xs text-slate-500 mb-2">
+            Liquidazione CSA di {meseBreve(r.contoCsa.mese)}
+            {r.contoCsa.progressivo ? ` (progressivo ${r.contoCsa.progressivo})` : ''}:{' '}
+            {r.contoCsa.esito === 'non-in-liquidazione'
+              ? 'nessuna testata per questa matricola.'
+              : r.contoCsa.esito === 'da-chiarire'
+                ? <span className="text-amber-300">da chiarire — {r.contoCsa.motivo}.</span>
+                : <>
+                    pagata su <span className="font-mono text-slate-300">{r.contoCsa.area} · {r.contoCsa.naz}</span>
+                    {r.contoCsa.esito === 'confermato'
+                      ? <span className="text-emerald-400"> — confermato</span>
+                      : <span className="text-amber-300"> — diverso da quello della riga, non applicato</span>}.
+                  </>}
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           {AREE_TXT.map(a => {
             const attiva = areaDi(r) === a.chiave
@@ -2640,6 +2860,7 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
                 <span className="text-red-300/70 underline decoration-dotted">assegna</span>
               </span>
             )}
+            {r.contoCsa && <SegnoCsa c={r.contoCsa} />}
             {daDecidere && (
               <>
                 <span className="text-amber-700">|</span>
