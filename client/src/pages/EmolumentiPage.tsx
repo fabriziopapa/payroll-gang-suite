@@ -371,6 +371,18 @@ function leggiContoCsa(x: unknown): ContoCsaRiga | null {
   }
 }
 
+const MESI_LIQUIDAZIONE = [
+  'gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno',
+  'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre',
+] as const
+
+/** Testata di una lavorazione senza il mese di liquidazione (per la duplica). */
+function senzaMeseLiquidazione(testata: unknown): unknown {
+  if (!testata || typeof testata !== 'object' || Array.isArray(testata)) return testata
+  const { meseLiquidazione: _via, ...resto } = testata as Record<string, unknown>
+  return resto
+}
+
 /** '2026-10' -> '10/2026' */
 function meseBreve(k: string): string {
   const [a, m] = k.split('-')
@@ -540,6 +552,21 @@ export default function EmolumentiPage() {
   /** Mese "AAAA-MM" -> data di competenza ISO, solo per i mesi spostati a mano.
    *  Mese assente = ultimo giorno del mese, che e' il default di sempre. */
   const [dateCompetenza, setDateCompetenza] = useState<Record<string, string>>({})
+  /**
+   * Il mese della liquidazione a cui la lavorazione si riferisce, 'AAAA-MM'
+   * ('' = non ancora indicato). NON e' una data di competenza: quelle sono
+   * per mese aggiunto e vanno nel CSV. Questo e' il mese in cui si paga:
+   * propone anno e mese a "Verifica conti da CSA" e al nome della
+   * lavorazione. La data esatta si scrive all'archiviazione.
+   */
+  const [meseLiq, setMeseLiq] = useState('')   // '01'..'12' o ''
+  const [annoLiq, setAnnoLiq] = useState('')   // 'AAAA' o in scrittura
+  const meseLiquidazione = meseLiq && /^\d{4}$/.test(annoLiq) ? `${annoLiq}-${meseLiq}` : ''
+  function setMeseLiquidazione(v: string) {
+    const ok = /^\d{4}-(0[1-9]|1[0-2])$/.test(v)
+    setAnnoLiq(ok ? v.slice(0, 4) : '')
+    setMeseLiq(ok ? v.slice(5, 7) : '')
+  }
   /** Coda delle cose da confermare dopo una riverifica. Vuota = niente da chiedere. */
   const [daConfermare, setDaConfermare] = useState<VoceRiverifica[]>([])
   const [riverificando, setRiverificando] = useState(false)
@@ -849,11 +876,11 @@ export default function EmolumentiPage() {
     if (!nomeLavorazione.trim()) setNomeLavorazione(nomeProposto(ab.tipo))
   }
 
-  /** "BS settembre 2026": tipo, mese corrente per esteso, anno. */
+  /** "BS ottobre 2026": tipo, mese della liquidazione (o corrente) per esteso, anno. */
   function nomeProposto(t: string): string {
-    const oggi = new Date()
-    const mese = oggi.toLocaleDateString('it-IT', { month: 'long' })
-    return `${t || 'Emolumenti'} ${mese} ${oggi.getFullYear()}`
+    const rif  = meseLiquidazione ? new Date(`${meseLiquidazione}-01T12:00:00`) : new Date()
+    const mese = rif.toLocaleDateString('it-IT', { month: 'long' })
+    return `${t || 'Emolumenti'} ${mese} ${rif.getFullYear()}`
   }
 
   /**
@@ -1098,6 +1125,7 @@ export default function EmolumentiPage() {
         // e non sulla riga perche' e' la competenza della VOCE, non della
         // persona: al 31 ottobre ci sono tutti.
         dateCompetenza,
+        meseLiquidazione,
       },
       righe: serializzaRighe(righe ?? []),
     }
@@ -1167,6 +1195,11 @@ export default function EmolumentiPage() {
           : {},
       )
 
+      setMeseLiquidazione(
+        typeof t['meseLiquidazione'] === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(t['meseLiquidazione'])
+          ? t['meseLiquidazione'] : '',
+      )
+
       setRighe(deserializzaRighe(dati['righe']))
       setLavorazioneId(row.id)
       setNomeLavorazione(row.nome)
@@ -1221,6 +1254,7 @@ export default function EmolumentiPage() {
     setNomeLavorazione('')
     setStatoLavorazione('bozza')
     setDataLiquidazione(null)
+    setMeseLiquidazione('')
     setRighe(null)
     setRaw('')
     setTipoEmol('')
@@ -1259,7 +1293,9 @@ export default function EmolumentiPage() {
       const row   = await emolumentiApi.creaLavorazione({
         nome: `${l.nome} (copia)`,
         ...(l.tipo ? { tipo: l.tipo } : {}),
-        dati: { ...dati, righe: [] },
+        // Il mese di liquidazione NON si copia: la copia serve per il mese
+        // dopo, e un mese riportato da quello prima sembra giusto e non lo e'.
+        dati: { ...dati, righe: [], testata: senzaMeseLiquidazione(dati['testata']) },
       })
       await caricaElenco()
       showToast(`Creata "${row.nome}" — testata copiata, nominativi da incollare.`, 'success')
@@ -1783,6 +1819,36 @@ export default function EmolumentiPage() {
               </div>
             </div>
 
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-slate-400">Liquidazione di</span>
+              <select
+                value={meseLiq}
+                onChange={e => {
+                  setMeseLiq(e.target.value)
+                  if (e.target.value && !annoLiq) setAnnoLiq(String(new Date().getFullYear()))
+                }}
+                disabled={statoLavorazione === 'archiviata'}
+                className={inputCls + ' w-40'}
+              >
+                <option value="">— mese —</option>
+                {MESI_LIQUIDAZIONE.map((nome, i) => (
+                  <option key={nome} value={String(i + 1).padStart(2, '0')}>{nome}</option>
+                ))}
+              </select>
+              <input
+                value={annoLiq}
+                onChange={e => setAnnoLiq(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                disabled={statoLavorazione === 'archiviata'}
+                inputMode="numeric"
+                placeholder="anno"
+                className={inputCls + ' w-24 font-mono'}
+              />
+              <span className="text-xs text-slate-500">
+                Il mese in cui si paga: lo usano «Verifica conti da CSA» e «Genera nome». La data
+                esatta si scrive all’archiviazione. Le date di competenza dei mesi aggiunti restano
+                quelle di «Data di competenza», una per mese.
+              </span>
+            </div>
 
             <p className="text-xs text-slate-500">
               Il salvataggio conserva anche ciò che CSA mostrava in questo momento: riaprendo si
@@ -2056,7 +2122,7 @@ export default function EmolumentiPage() {
           {contiCsaAperto && (
             <ModaleContiCsa
               ruoli={ruoliRighe}
-              dataLiquidazione={dataLiquidazione}
+              dataLiquidazione={meseLiquidazione ? `${meseLiquidazione}-01` : dataLiquidazione}
               leggendo={leggendoConti}
               onConferma={verificaContiDaCsa}
               onChiudi={() => setContiCsaAperto(false)}
