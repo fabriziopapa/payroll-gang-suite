@@ -144,6 +144,75 @@ export interface IPaesiContoRepository {
 }
 
 // ------------------------------------------------------------
+// Emolumenti — Tipi conto (migrazione 0020)
+// ------------------------------------------------------------
+
+export type TipoConto = 'IT' | 'SEPA' | 'EXTRA_UE' | 'DA_CHIARIRE'
+
+export interface TipoContoRiga {
+  matricola:   string
+  nazIban:     string | null
+  tipoConto:   TipoConto
+  motivo:      string | null
+  progressivi: string
+  fonte:       'CSA' | 'manuale'
+  nota:        string | null
+}
+
+export interface TipoContoElab {
+  id:                string
+  anno:              number
+  mese:              number
+  ruolo:             string
+  comparto:          string
+  progrLiquidazione: string | null
+  stato:             'anteprima' | 'confermata'
+  testateLette:      number
+  testateLiquid:     number
+  elencoPaesi:       string
+  recuperataIl:      Date
+  createdBy:         string | null
+  updatedBy:         string | null
+  createdAt:         Date
+  updatedAt:         Date
+  /** Conteggi per tipo conto, calcolati dalle righe. */
+  conteggi:          Record<TipoConto, number>
+}
+
+export interface NuoveRigheTipoConto {
+  testateLette:  number
+  testateLiquid: number
+  elencoPaesi:   string
+  righe:         Array<Omit<TipoContoRiga, 'fonte' | 'nota'>>
+}
+
+export interface ITipiContoRepository {
+  /** Elaborazioni non archiviate, dalla piu' recente, con i conteggi. */
+  elenco(): Promise<TipoContoElab[]>
+  leggi(id: string): Promise<{ elab: TipoContoElab; righe: TipoContoRiga[] } | null>
+  /** Nuova elaborazione in anteprima. */
+  crea(p: {
+    anno: number; mese: number; ruolo: string; comparto: string; progrLiquidazione: string | null
+    userId: string | null
+  } & NuoveRigheTipoConto): Promise<string>
+  /** Rilegge da CSA: sostituisce le righe e riporta l'elaborazione in anteprima. */
+  riclassifica(id: string, dati: NuoveRigheTipoConto, userId: string | null): Promise<boolean>
+  /** 'conflitto' = esiste gia' una confermata per lo stesso mese/ruolo/comparto. */
+  conferma(id: string, userId: string | null): Promise<'fatto' | 'conflitto' | 'non-trovata'>
+  /**
+   * Nazione inserita a mano su una riga DA CHIARIRE (o gia' manuale):
+   * tipo calcolato dal chiamante con la regola. 'non-ammessa' se la riga
+   * viene da CSA con una nazione: quella non si corregge qui.
+   */
+  nazioneManuale(p: {
+    id: string; matricola: string; nazIban: string; tipoConto: Exclude<TipoConto, 'DA_CHIARIRE'>
+    nota: string; userId: string | null
+  }): Promise<'fatto' | 'non-trovata' | 'non-ammessa'>
+  /** Cancellazione logica. */
+  archivia(id: string, userId: string | null): Promise<boolean>
+}
+
+// ------------------------------------------------------------
 // Voci Repository
 // ------------------------------------------------------------
 

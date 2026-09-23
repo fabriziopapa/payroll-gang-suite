@@ -5,6 +5,8 @@
 import { sql } from 'drizzle-orm'
 import {
   pgTable,
+  smallint,
+  primaryKey,
   varchar,
   char,
   boolean,
@@ -526,4 +528,46 @@ export const paesiConto = pgTable('paesi_conto', {
 }, (t) => [
   uniqueIndex('paesi_conto_in_vigore').on(t.codice).where(sql`valido_al IS NULL`),
   index('paesi_conto_codice').on(t.codice, t.validoDal),
+])
+
+// ------------------------------------------------------------
+// EMOLUMENTI — TIPI CONTO (migrazione 0020)
+// Elaborazioni mensili dalle testate CSA: chi e' pagato su conto IT, SEPA,
+// EXTRA_UE. Nessun IBAN: della testata restano matricola, progressivi e
+// due lettere di nazione.
+// ------------------------------------------------------------
+export const tipiContoElab = pgTable('emolumenti_tipiconto_elab', {
+  id:                uuid('id').primaryKey().defaultRandom(),
+  anno:              smallint('anno').notNull(),
+  mese:              smallint('mese').notNull(),
+  ruolo:             varchar('ruolo', { length: 4 }).notNull(),
+  comparto:          varchar('comparto', { length: 2 }).notNull(),
+  progrLiquidazione: varchar('progr_liquidazione', { length: 3 }),
+  stato:             varchar('stato', { length: 12 }).notNull(),   // 'anteprima' | 'confermata'
+  testateLette:      integer('testate_lette').notNull(),
+  testateLiquid:     integer('testate_liquid').notNull(),
+  elencoPaesi:       varchar('elenco_paesi', { length: 40 }).notNull(),
+  recuperataIl:      timestamp('recuperata_il', { withTimezone: true }).notNull(),
+  createdBy:         uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedBy:         uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:         timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:         timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  archiviataIl:      timestamp('archiviata_il', { withTimezone: true }),
+}, (t) => [
+  uniqueIndex('emolumenti_tipiconto_una_confermata').on(t.anno, t.mese, t.ruolo, t.comparto)
+    .where(sql`stato = 'confermata' AND archiviata_il IS NULL`),
+  index('emolumenti_tipiconto_periodo').on(t.anno, t.mese),
+])
+
+export const tipiContoRighe = pgTable('emolumenti_tipiconto_righe', {
+  elabId:      uuid('elab_id').notNull().references(() => tipiContoElab.id, { onDelete: 'cascade' }),
+  matricola:   varchar('matricola', { length: 6 }).notNull(),
+  nazIban:     char('naz_iban', { length: 2 }),
+  tipoConto:   varchar('tipo_conto', { length: 12 }).notNull(),  // 'IT' | 'SEPA' | 'EXTRA_UE' | 'DA_CHIARIRE'
+  motivo:      varchar('motivo', { length: 40 }),
+  progressivi: varchar('progressivi', { length: 40 }).notNull(),
+  fonte:       varchar('fonte', { length: 10 }).notNull().default('CSA'),  // 'CSA' | 'manuale'
+  nota:        varchar('nota', { length: 300 }),
+}, (t) => [
+  primaryKey({ columns: [t.elabId, t.matricola] }),
 ])

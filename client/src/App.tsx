@@ -35,7 +35,7 @@ import CertificatiPage    from './pages/CertificatiPage'
 import CertificatiTemplatePage from './pages/CertificatiTemplatePage'
 import VerificaLiquidatoPage from './pages/VerificaLiquidatoPage'
 import PdfRegionTemplatesPage from './pages/PdfRegionTemplatesPage'
-import EmolumentiPage     from './pages/EmolumentiPage'
+import EmolumentiArea     from './pages/EmolumentiArea'
 
 // Lazy: unica pagina che porta pdfjs-dist (canvas rendering, Step 7/usePdfDocument)
 // — code-split dedicato, niente nel bundle principale finché un admin non apre
@@ -275,7 +275,7 @@ export default function App() {
       {currentPage === 'certificati-template' && <CertificatiTemplatePage />}
       {currentPage === 'verifica-liquidato' && user?.isAdmin && <VerificaLiquidatoPage />}
       {currentPage === 'pdf-region-templates' && <PdfRegionTemplatesPage />}
-      {currentPage === 'emolumenti'   && user?.isAdmin && <EmolumentiPage />}
+      {currentPage === 'emolumenti'   && user?.isAdmin && <EmolumentiArea />}
       {currentPage === 'pdf-region-editor' && user?.isAdmin && (
         <Suspense fallback={<PdfEditorLoadingFallback />}>
           <PdfRegionEditorPage />

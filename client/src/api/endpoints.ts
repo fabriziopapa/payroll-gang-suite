@@ -1134,3 +1134,70 @@ export const emolumentiApi = {
   eliminaLavorazione: (id: string) =>
     apiFetch<void>(`/emolumenti/lavorazioni/${id}`, { method: 'DELETE' }),
 }
+
+// ── Emolumenti · Tipi conto ─────────────────────────────────
+export type TipoContoApi = 'IT' | 'SEPA' | 'EXTRA_UE' | 'DA_CHIARIRE'
+
+export interface TipoContoElabApi {
+  id: string; anno: number; mese: number; ruolo: string; comparto: string
+  progrLiquidazione: string | null
+  stato: 'anteprima' | 'confermata'
+  testateLette: number; testateLiquid: number
+  elencoPaesi: string; recuperataIl: string
+  createdBy: string | null; updatedBy: string | null
+  createdAt: string; updatedAt: string
+  conteggi: Record<TipoContoApi, number>
+}
+
+export interface TipoContoRigaApi {
+  matricola: string
+  nominativo: string | null
+  nazIban: string | null
+  tipoConto: TipoContoApi
+  motivo: string | null
+  progressivi: string
+  fonte: 'CSA' | 'manuale'
+  nota: string | null
+  /** Solo sulle DA CHIARIRE: la nazione dell'anagrafica, mai applicata da sola. */
+  suggerimento: { nazIban: string; tipoConto: string } | null
+}
+
+/** La lettura CSA puo' durare: tre minuti invece dei trenta secondi di default. */
+const TIMEOUT_CSA = 180_000
+
+export const tipiContoApi = {
+  elenco: () =>
+    apiFetch<{ elaborazioni: TipoContoElabApi[] }>('/emolumenti/tipi-conto'),
+
+  recupera: (body: { anno: number; mese: number; progrLiquidazione?: string }) =>
+    apiFetch<{ id: string }>('/emolumenti/tipi-conto/recupera', {
+      method: 'POST', body: JSON.stringify(body),
+    }, TIMEOUT_CSA),
+
+  leggi: (id: string) =>
+    apiFetch<{ elaborazione: TipoContoElabApi; righe: TipoContoRigaApi[] }>(
+      `/emolumenti/tipi-conto/${encodeURIComponent(id)}`),
+
+  riclassifica: (id: string) =>
+    apiFetch<{ ok: true }>(`/emolumenti/tipi-conto/${encodeURIComponent(id)}/riclassifica`, {
+      method: 'POST', body: JSON.stringify({}),
+    }, TIMEOUT_CSA),
+
+  conferma: (id: string) =>
+    apiFetch<{ ok: true }>(`/emolumenti/tipi-conto/${encodeURIComponent(id)}/conferma`, {
+      method: 'POST', body: JSON.stringify({}),
+    }),
+
+  nazioneManuale: (id: string, matricola: string, body: { nazIban: string; nota: string }) =>
+    apiFetch<{ ok: true; tipoConto: TipoContoApi }>(
+      `/emolumenti/tipi-conto/${encodeURIComponent(id)}/righe/${encodeURIComponent(matricola)}`, {
+        method: 'PATCH', body: JSON.stringify(body),
+      }),
+
+  txt: (id: string, tipo: 'IT' | 'SEPA' | 'EXTRA_UE') =>
+    apiFetch<{ nomeFile: string; contenuto: string }>(
+      `/emolumenti/tipi-conto/${encodeURIComponent(id)}/txt/${tipo}`),
+
+  archivia: (id: string) =>
+    apiFetch<void>(`/emolumenti/tipi-conto/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+}

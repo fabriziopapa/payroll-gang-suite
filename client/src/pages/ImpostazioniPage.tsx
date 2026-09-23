@@ -23,7 +23,7 @@ export default function ImpostazioniPage() {
   const { settings, setSettings, user } = useStore()
 
   // ── Tab attiva ────────────────────────────────────────────
-  type Tab = 'generali' | 'rubrica' | 'modelli' | 'bollo'
+  type Tab = 'generali' | 'rubrica' | 'modelli' | 'bollo' | 'paesi'
   const [tab, setTab] = useState<Tab>('generali')
 
   // ── Stato locale — sezione Generali ───────────────────────
@@ -283,6 +283,7 @@ export default function ImpostazioniPage() {
     { id: 'rubrica',  label: `Rubrica (${rubrica.length})` },
     { id: 'modelli',  label: `Modelli comunicazione (${modelli.length})` },
     { id: 'bollo',    label: `Marca da bollo (${bolli.length})` },
+    { id: 'paesi',    label: 'Paesi e area del conto' },
   ]
 
   return (
@@ -290,7 +291,7 @@ export default function ImpostazioniPage() {
       <h2 className="text-xl font-bold text-white mb-4">Impostazioni</h2>
 
       {/* Tabs */}
-      <div className="flex gap-0.5 mb-6">
+      <div className="flex flex-wrap gap-0.5 mb-6">
         {TABS.map(t => (
           <button key={t.id} type="button" onClick={() => setTab(t.id)}
             className={`px-4 py-2 rounded-t-lg text-sm font-medium transition border-b-2
@@ -495,9 +496,6 @@ export default function ImpostazioniPage() {
               </div>
             </section>
           )}
-
-          {/* Paesi e area del conto — tutti vedono, solo admin cambia */}
-          <PaesiContoCard admin={Boolean(user?.isAdmin)} />
 
           {/* Stato aggiornamenti — sola lettura, solo admin */}
           {user?.isAdmin && <AggiornamentiCard />}
@@ -772,6 +770,9 @@ export default function ImpostazioniPage() {
       )}
 
       {/* ── TAB MARCA DA BOLLO ────────────────────────────────── */}
+      {/* ── TAB PAESI E AREA DEL CONTO — tutti vedono, solo admin cambia ── */}
+      {tab === 'paesi' && <PaesiContoCard admin={Boolean(user?.isAdmin)} />}
+
       {tab === 'bollo' && (
         <>
           <section className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden mb-4">

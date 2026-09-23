@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.09.24.5-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.09.24.6-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -45,13 +45,13 @@ payroll-gang-suite/
 │   └── src/
 │       ├── api/                 # Client API tipizzati (endpoints.ts, client.ts — JWT + auto-refresh)
 │       ├── components/          # Componenti React (ConfirmDialog, ToastManager, Layout,
-│       │                        #   ModaleContiCsa, PaesiContoCard, …)
+│       │                        #   ModaleContiCsa, PaesiContoCard, TipiContoPage, …)
 │       │   ├── editor/          #   DettaglioCard, DettaglioFormModal, ComunicazioneModal
 │       │   └── certificatoTemplate/  # Editor template certificato
 │       ├── constants/           # csvDefaults, scorporoCoefficients, palette gruppi
 │       ├── hooks/               # useDebounce, usePdfDocument, …
 │       ├── pages/               # Dashboard, Editor, Viewer, Ricerca, Anagrafiche, Voci,
-│       │                        # Capitoli, Certificati, Emolumenti, PdfRegionEditor,
+│       │                        # Capitoli, Certificati, Emolumenti (EmolumentiArea: due schede), PdfRegionEditor,
 │       │                        # Impostazioni, Utenti
 │       ├── store/               # Stato globale Zustand (useStore.ts)
 │       ├── types/               # Interfacce TypeScript + APP_VERSION
@@ -75,12 +75,12 @@ payroll-gang-suite/
 │       │                        #   unica fonte dell'area del conto, anche per GET /area-conto)
 │       ├── middleware/          # authenticate.ts (JWT preHandler)
 │       ├── routes/              # /api/v1: auth, bozze, anagrafiche, voci, capitoli,
-│       │                        # settings, users, certificati, emolumenti,
+│       │                        # settings, users, certificati, emolumenti, emolumenti/tipi-conto (tipiConto.ts),
 │       │                        # pdf-region, cineca, area-conto (areaConto.ts)
 │       ├── schemas/             # Zod validazione (BozzaDatiSchema, …)
 │       └── services/            # cryptoService, importService, mailerService, cinecaService
 │           ├── emolumenti/      #   risoluzione nominativi → matricole, testate CSA → conto
-│           │                    #   per matricola (logica pura + test)
+│           │                    #   per matricola, tipi conto → TXT (logica pura + test)
 │           ├── cedolino/        #   parser PDF cedolino + calculator
 │           ├── certificato/     #   stampa unione DOCX (+ assets)
 │           └── pdfRegion/       #   estrazione via template regioni
@@ -201,7 +201,7 @@ Un file con `AREA_CONTO` e senza `NAZ_IBAN` (la vecchia estrazione) si importa, 
 
 **Mese della liquidazione** (sotto il nome della lavorazione: *Liquidazione di* mese e anno). E' il mese in cui si paga, non una data di competenza: propone anno e mese a *Verifica conti da CSA* e al nome generato; si salva con la lavorazione e non si copia duplicandola. La data esatta di liquidazione si scrive all'archiviazione. Le **date di competenza** restano una per ogni mese aggiunto, perche' sono quelle che vanno nel CSV (`dataCompetenzaVoce`) e a cui si legge il ruolo.
 
-**Paesi e area del conto** (tabella `paesi_conto`, migrazione `0019`; card in *Impostazioni*). L'elenco dei paesi SEPA / EXTRA_UE non sta piu' solo nel codice: lo tiene PGS, una riga per paese e per periodo. Un paese ha **una sola riga in vigore** (indice unico parziale), quindi non puo' essere insieme SEPA ed EXTRA_UE; un cambio **chiude** la riga in vigore al giorno prima e ne apre una nuova, e la storia resta. Si parte dai 42 prefissi EPC409-09 v8.0; un paese che l'elenco non conosce vale EXTRA_UE, come prima; IT fa gruppo a se' e non si modifica. Tutti vedono l'elenco, solo un amministratore lo cambia (`POST /api/v1/area-conto/paesi`, motivo obbligatorio, audit `PAESI_CONTO_CAMBIO`). `GET /api/v1/area-conto?naz=…&data=AAAA-MM-GG` risponde con l'elenco in vigore quel giorno. L'elenco si carica in memoria all'avvio e si ricarica a ogni cambio; se la tabella non e' leggibile vale quello scritto in `lib/areaConto.ts`, e lo dice il log. **Aggiornamento automatico: non ancora.** Misurato il 2026-09-24: la pagina dell'EPC e' dietro Cloudflare (403 agli script), il PDF si scarica solo conoscendone l'indirizzo, e l'elenco "SEPA" delle Pubblicazioni UE (SPARQL) non ha AL MD ME MK RS. La card porta il link alla fonte primaria, da consultare a mano.
+**Paesi e area del conto** (tabella `paesi_conto`, migrazione `0019`; scheda *Impostazioni → Paesi e area del conto*). L'elenco dei paesi SEPA / EXTRA_UE non sta piu' solo nel codice: lo tiene PGS, una riga per paese e per periodo. Un paese ha **una sola riga in vigore** (indice unico parziale), quindi non puo' essere insieme SEPA ed EXTRA_UE; un cambio **chiude** la riga in vigore al giorno prima e ne apre una nuova, e la storia resta. Si parte dai 42 prefissi EPC409-09 v8.0; un paese che l'elenco non conosce vale EXTRA_UE, come prima; IT fa gruppo a se' e non si modifica. Tutti vedono l'elenco, solo un amministratore lo cambia (`POST /api/v1/area-conto/paesi`, motivo obbligatorio, audit `PAESI_CONTO_CAMBIO`). `GET /api/v1/area-conto?naz=…&data=AAAA-MM-GG` risponde con l'elenco in vigore quel giorno. L'elenco si carica in memoria all'avvio e si ricarica a ogni cambio; se la tabella non e' leggibile vale quello scritto in `lib/areaConto.ts`, e lo dice il log. **Aggiornamento automatico: non ancora.** Misurato il 2026-09-24: la pagina dell'EPC e' dietro Cloudflare (403 agli script), il PDF si scarica solo conoscendone l'indirizzo, e l'elenco "SEPA" delle Pubblicazioni UE (SPARQL) non ha AL MD ME MK RS. La card porta il link alla fonte primaria, da consultare a mano.
 
 **Verifica conti da CSA** (pulsante nella lavorazione, accanto a *Aggiorna ruoli e conti*). La nazione dell'anagrafica e' una stima; il conto su cui CSA ha **pagato** e' un fatto. Il pulsante chiede anno e mese della liquidazione (proposti dalla data di liquidazione, se la lavorazione ce l'ha), i ruoli (quelli presenti nelle righe, comparto 1) e, facoltativo, il progressivo di una liquidazione precisa; legge `GET /v1/liquidazioni/liquidato/testate` (`POST /api/v1/emolumenti/conti-da-csa`, admin + audit) e confronta riga per riga. Regole: le testate con progressivo `000` (non liquidate) non classificano; chi ha solo quelle, chi ha una testata liquidata senza nazione, nazioni diverse o un progressivo malformato e' **da chiarire**, con il motivo. **Ogni differenza con la riga si conferma una per una**; dove CSA coincide la riga e' marcata *CSA ✓ MM/AAAA*. Il risultato si salva sulla riga (`contoCsa`) e resta anche quando la liquidazione in CSA viene cancellata — e' il flusso della liquidazione "a mazza secca" fatta apposta per sapere su quale conto CSA paga ciascuno. Della risposta CSA restano tre campi per testata (matricola, progressivo, nazione): IBAN, intestazioni e ABI/CAB si scartano in `normalizzaTestate` e non escono dal server.
 
@@ -213,9 +213,21 @@ Un file con `AREA_CONTO` e senza `NAZ_IBAN` (la vecchia estrazione) si importa, 
 psql -d <database> -X -c "SELECT (naz_iban IS NOT NULL) AS con_nazione, count(*) FROM anagrafiche GROUP BY 1;"
 ```
 
-**Schema DB**: `emolumenti_lavorazioni` e `anagrafiche.naz_iban` sono in `server/sql/setup.sql` (consolidato); `anagrafiche.area_conto` non c'e' piu'. La chiave `(matricola, decor_inq, ruolo)` e' gia' nella `CREATE TABLE`. `paesi_conto` (0019) e' nella stessa `setup.sql`, con l'elenco iniziale. Le migrazioni `0011`…`0019` restano come riferimento del DB di produzione esistente.
+**Schema DB**: `emolumenti_lavorazioni` e `anagrafiche.naz_iban` sono in `server/sql/setup.sql` (consolidato); `anagrafiche.area_conto` non c'e' piu'. La chiave `(matricola, decor_inq, ruolo)` e' gia' nella `CREATE TABLE`. `paesi_conto` (0019) e' nella stessa `setup.sql`, con l'elenco iniziale. `emolumenti_tipiconto_*` (0020) pure. Le migrazioni `0011`…`0020` restano come riferimento del DB di produzione esistente.
 
 ---
+
+## Sezione Tipi conto (area Emolumenti)
+
+*(admin)* Seconda scheda dell'area Emolumenti (*Dottorandi e borse* | *Emolumenti · Tipi conto*); la prima resta montata quando si passa all'altra, cosi' una lavorazione a meta' non si perde. Rotte: `/api/v1/emolumenti/tipi-conto` (`routes/tipiConto.ts`), admin + audit **awaited**; tabelle `emolumenti_tipiconto_elab` e `emolumenti_tipiconto_righe` (migrazione `0020`).
+
+**Il flusso.** In CSA si fa la liquidazione "a mazza secca" del mese; qui *Nuova elaborazione* chiede mese, anno e (facoltativo) il progressivo, e legge le testate del liquidato **DR, comparto 1** (fissi). Ogni matricola finisce in **ITA**, **SEPA**, **EXTRA UE** o **DA CHIARIRE** con le stesse regole di *Verifica conti da CSA* (`contiDaTestate` + `lib/areaConto.ts`, elenco dei paesi in vigore; l'elaborazione registra quale elenco ha usato). Si salva in **anteprima**; dopo *Conferma* si scaricano i TXT. In CSA la liquidazione si puo' poi cancellare: l'elaborazione resta.
+
+- **Una sola confermata per mese** (e ruolo/comparto): la seconda conferma risponde 409 (indice unico parziale). Per rifarla si elimina la vecchia (eliminazione logica, `archiviata_il`).
+- **TXT**: un file per tipo non vuoto, `DR_MM_AA_ITA.txt` / `_SEPA` / `_EXTRA_UE`; una matricola per riga, in ordine crescente, CRLF, UTF-8 senza BOM, nient'altro. Si rigenerano ogni volta dalle righe salvate, solo da un'elaborazione confermata. Le DA CHIARIRE non finiscono in nessun file.
+- **Riclassifica da CSA** rilegge lo stesso mese e sostituisce le righe (l'elaborazione torna in anteprima). Se CSA non restituisce piu' nulla, le righe salvate non si toccano.
+- **DA CHIARIRE**: accanto alla riga si vede, **solo come suggerimento**, la nazione dell'anagrafica PGS in vigore l'ultimo giorno del mese. La nazione si inserisce a mano con una nota obbligatoria: la riga prende il badge *manuale*, il tipo si calcola con la regola, e l'elaborazione torna in anteprima. Una nazione manuale sopravvive alla riclassifica finche' CSA continua a non darla. Le righe classificate da CSA non si correggono a mano.
+- **Privacy**: delle testate restano matricola, progressivi e due lettere di nazione; nessun IBAN arriva al database o al client.
 
 ## Sezione PDF Region Editor
 
@@ -364,6 +376,13 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.09.24.6
+**Emolumenti · Tipi conto (migrazione `0020`)**
+
+- Nuova scheda *Emolumenti · Tipi conto* accanto a *Dottorandi e borse*: elaborazioni mensili dalle testate CSA DR, classificazione ITA / SEPA / EXTRA UE / DA CHIARIRE, conferma, TXT `DR_MM_AA_TIPO.txt`, riclassifica da CSA, nazione a mano con nota sulle righe da chiarire.
+- Tabelle `emolumenti_tipiconto_elab` / `emolumenti_tipiconto_righe`; una sola elaborazione confermata per mese (409).
+- *Impostazioni*: la card **Paesi e area del conto** passa in una scheda sua.
 
 ### 26.09.24.5
 **Paesi e area del conto: l'elenco SEPA / EXTRA_UE lo tiene PGS (migrazione `0019`)**

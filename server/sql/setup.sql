@@ -174,6 +174,46 @@ END $$;
 DROP INDEX IF EXISTS anagrafiche_matricola_decor_inq_key;
 
 -- ------------------------------------------------------------
+-- EMOLUMENTI — TIPI CONTO (migrazione 0020)
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS emolumenti_tipiconto_elab (
+  id                  UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  anno                SMALLINT     NOT NULL CHECK (anno BETWEEN 1990 AND 2100),
+  mese                SMALLINT     NOT NULL CHECK (mese BETWEEN 1 AND 12),
+  ruolo               VARCHAR(4)   NOT NULL,
+  comparto            VARCHAR(2)   NOT NULL,
+  progr_liquidazione  VARCHAR(3),
+  stato               VARCHAR(12)  NOT NULL CHECK (stato IN ('anteprima', 'confermata')),
+  testate_lette       INTEGER      NOT NULL,
+  testate_liquid      INTEGER      NOT NULL,
+  elenco_paesi        VARCHAR(40)  NOT NULL,
+  recuperata_il       TIMESTAMPTZ  NOT NULL,
+  created_by          UUID         REFERENCES users(id) ON DELETE SET NULL,
+  updated_by          UUID         REFERENCES users(id) ON DELETE SET NULL,
+  created_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  archiviata_il       TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS emolumenti_tipiconto_una_confermata
+  ON emolumenti_tipiconto_elab (anno, mese, ruolo, comparto)
+  WHERE stato = 'confermata' AND archiviata_il IS NULL;
+CREATE INDEX IF NOT EXISTS emolumenti_tipiconto_periodo
+  ON emolumenti_tipiconto_elab (anno DESC, mese DESC);
+
+CREATE TABLE IF NOT EXISTS emolumenti_tipiconto_righe (
+  elab_id      UUID         NOT NULL REFERENCES emolumenti_tipiconto_elab(id) ON DELETE CASCADE,
+  matricola    VARCHAR(6)   NOT NULL,
+  naz_iban     CHAR(2),
+  tipo_conto   VARCHAR(12)  NOT NULL CHECK (tipo_conto IN ('IT', 'SEPA', 'EXTRA_UE', 'DA_CHIARIRE')),
+  motivo       VARCHAR(40),
+  progressivi  VARCHAR(40)  NOT NULL,
+  fonte        VARCHAR(10)  NOT NULL DEFAULT 'CSA' CHECK (fonte IN ('CSA', 'manuale')),
+  nota         VARCHAR(300),
+  PRIMARY KEY (elab_id, matricola)
+);
+
+-- ------------------------------------------------------------
 -- PAESI E AREA DEL CONTO (migrazione 0019)
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS paesi_conto (
