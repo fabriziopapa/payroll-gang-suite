@@ -75,6 +75,13 @@ export interface IAnagraficheRepository {
   /** Codice fiscale locale (da SGE) per N matricole. Mappa matricola → CF. */
   getCodFisByMatricole(matricole: string[]): Promise<Record<string, string>>
   upsertMany(items: AnagraficaInput[]): Promise<ImportResult>
+  /**
+   * Scrive la nazione del conto su TUTTE le righe di ciascuna matricola
+   * (la nazione e' della persona, non del rapporto). Mappa matricola ->
+   * nazione (null = nessuna coordinata). Non tocca updated_at.
+   * Restituisce quante righe sono cambiate.
+   */
+  allineaNazioni(nazioni: Record<string, string | null>): Promise<number>
   getLastImportDate(): Promise<Date | null>
 }
 

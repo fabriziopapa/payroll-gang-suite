@@ -137,7 +137,9 @@ export const anagrafiche = pgTable('anagrafiche', {
   // Il FATTO: paese dell'IBAN su cui CSA paga, due lettere, mai un IBAN (0016).
   nazIban:           char('naz_iban', { length: 2 }),
 }, (t) => [
-  uniqueIndex('anagrafiche_matricola_decor_inq_key').on(t.matricola, t.decorInq),
+  // Il ruolo e' nella chiave (0017): due rapporti veri possono iniziare lo
+  // stesso giorno con ruoli diversi, e devono poter convivere.
+  uniqueIndex('anagrafiche_matricola_decor_inq_ruolo_key').on(t.matricola, t.decorInq, t.ruolo),
   index('idx_anag_matricola').on(t.matricola),
   index('idx_anag_storico').on(t.matricola, t.decorInq, t.finRap),
   index('idx_anagrafiche_ruolo').on(t.ruolo),

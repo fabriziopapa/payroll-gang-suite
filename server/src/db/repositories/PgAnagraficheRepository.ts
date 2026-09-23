@@ -21,6 +21,17 @@ type DB = PostgresJsDatabase<typeof schema>
 // Dimensione batch per gli upsert — evita query troppo grandi
 const BATCH_SIZE = 500
 
+/**
+ * L'ordine di una storia anagrafica: dalla decorrenza piu' recente, e a
+ * parita' di decorrenza (possibile dalla 0017, ruolo nella chiave) prima il
+ * rapporto che dura di piu', poi il ruolo. Sempre lo stesso, ovunque.
+ */
+const ORDINE_STORICO = [
+  desc(schema.anagrafiche.decorInq),
+  sql`${schema.anagrafiche.finRap} DESC NULLS FIRST`,
+  schema.anagrafiche.ruolo,
+]
+
 export class PgAnagraficheRepository implements IAnagraficheRepository {
   constructor(private readonly db: DB) {}
 
@@ -46,7 +57,11 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
       FROM anagrafiche
       WHERE fin_rap IS NULL
          OR fin_rap >= (CURRENT_DATE - INTERVAL '3 years')
-      ORDER BY matricola, decor_inq DESC
+      -- Spareggio esplicito (0017): con il ruolo nella chiave due rapporti
+      -- possono iniziare lo stesso giorno. A parita' di decorrenza vince
+      -- quello che dura di piu' (aperto prima di tutti), poi il ruolo in
+      -- ordine alfabetico: una regola fissa, non l'ordine fisico delle righe.
+      ORDER BY matricola, decor_inq DESC, fin_rap DESC NULLS FIRST, ruolo
     `)
 
     // Sort finale per cognNome in JS: PostgreSQL non consente ORDER BY su colonne
@@ -62,7 +77,7 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
       .select()
       .from(schema.anagrafiche)
       .where(eq(schema.anagrafiche.matricola, matricola))
-      .orderBy(desc(schema.anagrafiche.decorInq))
+      .orderBy(...ORDINE_STORICO)
 
     return rows.map(toRow)
   }
@@ -111,7 +126,7 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
             isNull(schema.anagrafiche.finRap),
           ),
         )
-        .orderBy(desc(schema.anagrafiche.decorInq))
+        .orderBy(...ORDINE_STORICO)
     } else {
       // CASO B — ruolo alla data indicata
       // SQL: decor_inq <= $data AND (fin_rap IS NULL OR fin_rap >= $data)
@@ -128,7 +143,7 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
             ),
           ),
         )
-        .orderBy(desc(schema.anagrafiche.decorInq))
+        .orderBy(...ORDINE_STORICO)
     }
 
     // Se più periodi sovrapposti ma stesso ruolo → prendi il più recente (overlap tecnico SGE)
@@ -160,13 +175,13 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
               sql`${schema.anagrafiche.finRap} >= ${data}`,
             ),
           ),
-        ).orderBy(schema.anagrafiche.matricola, desc(schema.anagrafiche.decorInq))
+        ).orderBy(schema.anagrafiche.matricola, ...ORDINE_STORICO)
       : this.db.select().from(schema.anagrafiche).where(
           and(
             inArray(schema.anagrafiche.matricola, uniq),
             isNull(schema.anagrafiche.finRap),
           ),
-        ).orderBy(schema.anagrafiche.matricola, desc(schema.anagrafiche.decorInq))
+        ).orderBy(schema.anagrafiche.matricola, ...ORDINE_STORICO)
     )
 
     // Raggruppa per matricola (già ordinata per decorInq desc → [0] = più recente)
@@ -218,11 +233,13 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
 
     if (items.length === 0) return result
 
-    // Deduplicazione per chiave naturale (matricola, decorInq)
-    // Necessario per evitare conflitti nello stesso batch INSERT...ON CONFLICT
+    // Deduplicazione per chiave naturale (matricola, decorInq, ruolo) — 0017.
+    // Necessario per evitare conflitti nello stesso batch INSERT...ON CONFLICT.
+    // Un doppione vero (stessa persona, stesso giorno, STESSO ruolo) l'import
+    // lo ha gia' segnalato nel referto.
     const dedupMap = new Map<string, AnagraficaInput>()
     for (const item of items) {
-      dedupMap.set(`${item.matricola}|${item.decorInq}`, item)
+      dedupMap.set(`${item.matricola}|${item.decorInq}|${item.ruolo}`, item)
     }
     const uniqueItems = Array.from(dedupMap.values())
 
@@ -269,7 +286,7 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
           .insert(schema.anagrafiche)
           .values(values)
           .onConflictDoUpdate({
-            target: [schema.anagrafiche.matricola, schema.anagrafiche.decorInq],
+            target: [schema.anagrafiche.matricola, schema.anagrafiche.decorInq, schema.anagrafiche.ruolo],
             set: {
               cognNome:          sql`EXCLUDED.cogn_nome`,
               ruolo:             sql`EXCLUDED.ruolo`,
@@ -328,6 +345,45 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
     return result
   }
 
+  /**
+   * La nazione del conto e' della PERSONA, non del singolo rapporto:
+   * l'estrazione la calcola per id_ab e la ripete uguale su tutte le righe
+   * della stessa matricola. Ma le righe che il file non porta (ruoli fuori
+   * lista, periodi usciti dalla finestra dei BE, avanzi di import vecchi)
+   * restavano con la nazione di allora o vuota, e se una di loro era la
+   * piu' recente l'area della persona risultava NON_NOTO.
+   *
+   * Qui la nazione del file si scrive su TUTTE le righe della matricola.
+   *
+   * NON tocca `updated_at`, di proposito: la bonifica dopo l'import usa
+   * "non scritta dall'import di oggi" per trovare le righe che il file non
+   * contiene. Allineare un fatto della persona non e' riscrivere il
+   * rapporto, e non deve confondere quel conteggio.
+   *
+   * @returns quante righe sono cambiate davvero
+   */
+  async allineaNazioni(nazioni: Record<string, string | null>): Promise<number> {
+    const voci = Object.entries(nazioni)
+    let cambiate = 0
+    for (let i = 0; i < voci.length; i += BATCH_SIZE) {
+      const lotto = voci.slice(i, i + BATCH_SIZE)
+      const valori = sql.join(
+        lotto.map(([matricola, naz]) => sql`(${matricola}::text, ${naz}::text)`),
+        sql`, `,
+      )
+      const rows = await this.db.execute(sql`
+        UPDATE anagrafiche AS a
+           SET naz_iban = v.naz
+          FROM (VALUES ${valori}) AS v(matricola, naz)
+         WHERE a.matricola = v.matricola
+           AND a.naz_iban IS DISTINCT FROM v.naz
+        RETURNING a.id
+      `)
+      cambiate += (rows as unknown[]).length
+    }
+    return cambiate
+  }
+
   async getLastImportDate(): Promise<Date | null> {
     const [row] = await this.db
       .select({ valore: schema.appSettings.valore })
@@ -349,7 +405,8 @@ export class PgAnagraficheRepository implements IAnagraficheRepository {
       FROM anagrafiche
       WHERE decor_inq <= ${data}
         AND (fin_rap IS NULL OR fin_rap >= ${data})
-      ORDER BY matricola, decor_inq DESC
+      -- Stesso spareggio di findAll (0017).
+      ORDER BY matricola, decor_inq DESC, fin_rap DESC NULLS FIRST, ruolo
     `)
     return (rows as unknown[]).map(toRowRaw)
   }

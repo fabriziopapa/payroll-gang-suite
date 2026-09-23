@@ -435,10 +435,10 @@ export async function importAnagraficheXlsx(
     })
   }
 
-  // La chiave univoca a DB è (matricola, decor_inq): due righe dello stesso
-  // file con la stessa coppia si sovrascrivono a vicenda e una delle due
-  // sparisce senza traccia. Non la scartiamo (il comportamento resta quello
-  // di prima) ma la segnaliamo nel report di import.
+  // La chiave univoca a DB è (matricola, decor_inq, ruolo) — migrazione 0017.
+  // Due rapporti con ruoli diversi che iniziano lo stesso giorno convivono;
+  // due righe con la STESSA terna si sovrascrivono e una sparisce: quelle si
+  // segnalano nel report di import.
   const chiaviViste = new Map<string, number>()
 
   rows.forEach((row, index) => {
@@ -468,14 +468,14 @@ export async function importAnagraficheXlsx(
     const { nazIban, errore: erroreNaz } = leggiNazIban(row['NAZ_IBAN'], haNazIban)
     if (erroreNaz) errors.push({ row: index + 1, message: `${erroreNaz} (matricola ${matricola})` })
 
-    // La chiave a DB e' (matricola, decor_inq): due righe dello stesso file con
-    // la stessa coppia si sovrascrivono e una sparisce senza traccia.
-    const chiave   = `${matricola}|${decorInq}`
+    // La chiave a DB e' (matricola, decor_inq, ruolo): due righe dello stesso
+    // file con la stessa terna si sovrascrivono e una sparisce senza traccia.
+    const chiave   = `${matricola}|${decorInq}|${ruolo}`
     const rigaPrec = chiaviViste.get(chiave)
     if (rigaPrec !== undefined) {
       errors.push({
         row:     index + 1,
-        message: `Chiave duplicata (matricola ${matricola}, DT_INIZIO ${decorInq}) - gia' alla riga ${rigaPrec}: ne verra' conservata una sola`,
+        message: `Chiave duplicata (matricola ${matricola}, DT_INIZIO ${decorInq}, RUOLO ${ruolo}) - gia' alla riga ${rigaPrec}: ne verra' conservata una sola`,
       })
     } else {
       chiaviViste.set(chiave, index + 1)
@@ -514,5 +514,48 @@ export async function importAnagraficheXlsx(
   }
 
   const result = await repo.upsertMany(items)
+
+  // La nazione e' della persona: la si porta su tutte le sue righe, anche
+  // quelle che il file non contiene (vedi allineaNazioni). Solo se il file
+  // ha la colonna, e solo per le matricole con UNA nazione nel file.
+  if (haNazIban) {
+    const { nazioni, discordanti } = nazioniPerMatricola(items)
+    for (const m of discordanti) {
+      errors.push({ row: 0, message: `Matricola ${m}: nazioni del conto diverse fra le sue righe del file, nazione non estesa alle altre righe` })
+    }
+    await repo.allineaNazioni(nazioni)
+  }
+
   return { ...result, errors: [...result.errors, ...errors] }
+}
+
+/**
+ * Una nazione per matricola, dalle righe del file che la portano.
+ *
+ * L'estrazione ripete la stessa nazione su tutte le righe di una persona:
+ * se il file ne porta due diverse per la stessa matricola, qualcosa non
+ * torna alla fonte, e scegliere la prima sarebbe decidere a caso. Quella
+ * matricola si esclude e si segnala.
+ *
+ * Le righe con un valore illeggibile (nazIban undefined) non votano: la
+ * nazione della persona la danno le sue righe leggibili.
+ */
+export function nazioniPerMatricola(items: ReadonlyArray<Pick<AnagraficaInput, 'matricola' | 'nazIban'>>): {
+  nazioni: Record<string, string | null>
+  discordanti: string[]
+} {
+  const viste = new Map<string, Set<string | null>>()
+  for (const it of items) {
+    if (it.nazIban === undefined) continue
+    const s = viste.get(it.matricola) ?? new Set<string | null>()
+    s.add(it.nazIban)
+    viste.set(it.matricola, s)
+  }
+  const nazioni: Record<string, string | null> = {}
+  const discordanti: string[] = []
+  for (const [m, s] of viste) {
+    if (s.size === 1) nazioni[m] = [...s][0] ?? null
+    else discordanti.push(m)
+  }
+  return { nazioni, discordanti: discordanti.sort() }
 }

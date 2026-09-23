@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.09.24-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.09.24.1-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -66,7 +66,7 @@ payroll-gang-suite/
 │       ├── auth/                # TOTP (RFC 6238) + JWT ES256 + refresh rotante Argon2id
 │       ├── db/
 │       │   ├── schema.ts        # ★ Schema Drizzle — fonte di verità del DB
-│       │   ├── migrations/      # 0001…0016 — applicate da ./pgs-migra.sh, registrate in schema_migrations
+│       │   ├── migrations/      # 0001…0017 — applicate da ./pgs-migra.sh, registrate in schema_migrations
 │       │   │                    #   (già incluse in setup.sql: NON eseguire su install nuova)
 │       │   └── repositories/    # Repository pattern (PgBozze, PgUsers, PgCertificati, …)
 │       ├── lib/                 # clientIp.ts (IP reale dietro Cloudflare) ·
@@ -186,6 +186,15 @@ CEDOLINO_SAMPLE="/percorso/Cedolino_....pdf" npm run test --workspace=server
 
 Un file con `AREA_CONTO` e senza `NAZ_IBAN` (la vecchia estrazione) si importa, ma quella colonna si ignora e il referto lo dice. Le altre colonne dell'estrazione (`COORD_ATTIVE`, `COORD_NON_CSA`, …) si ignorano.
 
+**La nazione e' della persona, non del rapporto.** Dopo l'upsert, la nazione del file si scrive su **tutte** le righe della matricola, anche quelle che il file non porta (ruoli fuori lista, BE usciti dalla finestra dei 3 anni, avanzi di import vecchi): altrimenti la riga piu' recente di una persona poteva risultare `NON_NOTO`. Questo allineamento **non tocca `updated_at`**, cosi' "non scritta dall'import di oggi" continua a identificare le righe che il file non contiene. Se il file porta due nazioni diverse per la stessa matricola, non si estende nulla e il referto lo segnala.
+
+**La chiave di `anagrafiche` e' `(matricola, decor_inq, ruolo)`** (migrazione `0017`). Due rapporti veri che iniziano lo stesso giorno con ruoli diversi (ND e NM, DR e BE) ora convivono: dove si sovrappongono, *Aggiorna Ruolo* e il pannello Emolumenti li mostrano entrambi e sceglie l'operatore. Prima ne entrava uno a caso. Resta "chiave duplicata" solo lo stesso ruolo nello stesso giorno.
+
+**Bonifica dopo l'import: cosa NON togliere.** L'import non cancella. Fra le righe non scritte dall'import:
+- i **ruoli fuori lista** restano (sono l'unica traccia di quelle persone);
+- i **BE finiti prima di oggi − 36 mesi** restano: l'estrazione li esclude per la finestra mobile, non perche' siano sbagliati;
+- una riga si toglie solo se l'estrazione **dovrebbe** contenerla e non la contiene, e dopo aver controllato che non sia l'unica a rispondere per qualche data.
+
 **Il primo import dopo il rilascio riscrive tutte le righe del file, una volta.** L'impronta di ogni riga contiene ora la nazione con un'etichetta (`naz:IT`): senza, per i conti italiani sarebbe rimasta identica a quella vecchia (che finiva con l'area `IT`), l'import avrebbe saltato quelle righe e `naz_iban` non sarebbe mai stata scritta. Il referto del primo import mostra quindi quasi tutto come *aggiornato*: e' atteso. Dal secondo torna differenziale.
 
 **Nelle lavorazioni l'area si fotografa.** Ogni riga salva area **e nazione** quando nasce, e non si ricalcola da sola. *Aggiorna ruoli e conti* aggiorna l'area in automatico solo se non si perde nulla: se una riga passerebbe da un'area nota a `NON_NOTO`, lo chiede.
@@ -196,7 +205,7 @@ Un file con `AREA_CONTO` e senza `NAZ_IBAN` (la vecchia estrazione) si importa, 
 psql -d <database> -X -c "SELECT (naz_iban IS NOT NULL) AS con_nazione, count(*) FROM anagrafiche GROUP BY 1;"
 ```
 
-**Schema DB**: `emolumenti_lavorazioni` e `anagrafiche.naz_iban` sono in `server/sql/setup.sql` (consolidato); `anagrafiche.area_conto` c'e' ancora, inutilizzata. Le migrazioni `0011`…`0016` restano come riferimento del DB di produzione esistente.
+**Schema DB**: `emolumenti_lavorazioni` e `anagrafiche.naz_iban` sono in `server/sql/setup.sql` (consolidato); `anagrafiche.area_conto` c'e' ancora, inutilizzata. La chiave `(matricola, decor_inq, ruolo)` e' gia' nella `CREATE TABLE`. Le migrazioni `0011`…`0017` restano come riferimento del DB di produzione esistente.
 
 ---
 
@@ -347,6 +356,16 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.09.24.1
+**Anagrafiche: il ruolo nella chiave, la nazione estesa alla persona**
+
+*Una migrazione (`0017`). Nessuna riga salvata di Liquidazioni o Emolumenti cambia.*
+
+- **Chiave `(matricola, decor_inq, ruolo)`** (migrazione `0017`). L'import del 23/09 ha segnalato 16 "chiavi duplicate": rapporti veri con ruoli diversi che iniziano lo stesso giorno, di cui entrava uno solo, l'ultimo nell'ordine del file. Misurato su una persona tornata ND dopo un incarico NM: risultava senza ruolo dalla fine dell'incarico, e l'unica riga giusta era un avanzo di un import precedente. Ora i due rapporti convivono.
+- **Effetto su Liquidazioni.** Il ruolo gia' salvato nelle bozze non cambia. *Aggiorna Ruolo*, alle sole date in cui i due rapporti dello stesso giorno sono entrambi validi, propone la scelta invece di un ruolo preso a caso. Sui 16 casi del 23/09 quelle finestre sono quasi tutte vecchie; le attuali riguardano dottorandi e borsisti.
+- **Spareggio fisso** quando due rapporti hanno la stessa decorrenza (elenco anagrafiche, storia di una matricola): prima quello che dura di piu', poi il ruolo. Non piu' l'ordine fisico delle righe.
+- **La nazione del conto si estende a tutte le righe della matricola**, senza toccare `updated_at`. Le righe che il file non porta non risultano piu' `NON_NOTO` per una persona pagata su un conto noto.
 
 ### 26.09.24
 **Area del conto: in anagrafica solo la nazione, l'area si calcola**

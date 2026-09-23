@@ -140,7 +140,9 @@ CREATE TABLE IF NOT EXISTS anagrafiche (
   naz_iban           CHAR(2),
   created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   updated_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-  CONSTRAINT anagrafiche_matricola_decor_inq_key UNIQUE (matricola, decor_inq)
+  -- Il ruolo e' nella chiave: due rapporti veri possono iniziare lo stesso
+  -- giorno con ruoli diversi (migrazione 0017).
+  CONSTRAINT anagrafiche_matricola_decor_inq_ruolo_key UNIQUE (matricola, decor_inq, ruolo)
 );
 CREATE INDEX IF NOT EXISTS idx_anag_matricola    ON anagrafiche (matricola);
 CREATE INDEX IF NOT EXISTS idx_anag_storico      ON anagrafiche (matricola, decor_inq, fin_rap);
@@ -155,6 +157,23 @@ ALTER TABLE anagrafiche ALTER COLUMN cod_fis TYPE VARCHAR(255);
 ALTER TABLE anagrafiche ADD COLUMN IF NOT EXISTS area_conto VARCHAR(10);
 -- Migrazione 0016: idem.
 ALTER TABLE anagrafiche ADD COLUMN IF NOT EXISTS naz_iban CHAR(2);
+-- Migrazione 0017 sui DB pre-esistenti: la chiave comprende il ruolo.
+-- Prima il vincolo nuovo, poi via il vecchio. No-op su DB nuovi.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conname = 'anagrafiche_matricola_decor_inq_ruolo_key'
+                   AND conrelid = 'anagrafiche'::regclass) THEN
+    ALTER TABLE anagrafiche ADD CONSTRAINT anagrafiche_matricola_decor_inq_ruolo_key
+      UNIQUE (matricola, decor_inq, ruolo);
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint
+             WHERE conname = 'anagrafiche_matricola_decor_inq_key'
+               AND conrelid = 'anagrafiche'::regclass) THEN
+    ALTER TABLE anagrafiche DROP CONSTRAINT anagrafiche_matricola_decor_inq_key;
+  END IF;
+END $$;
+DROP INDEX IF EXISTS anagrafiche_matricola_decor_inq_key;
 
 -- ------------------------------------------------------------
 -- IMPORT LOG ANAGRAFICHE SGE

@@ -14,20 +14,25 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import * as XLSX from 'xlsx'
 import {
-  importAnagraficheXlsx, leggiNazIban, segmentoHashNazione,
+  importAnagraficheXlsx, leggiNazIban, segmentoHashNazione, nazioniPerMatricola,
 } from './importService.js'
 import type { AnagraficaInput, IAnagraficheRepository, ImportResult } from '../db/IRepository.js'
 
 /** Repository finto: raccoglie cio' che l'import gli passa. */
 function repoFinto() {
   const ricevuti: AnagraficaInput[] = []
+  const allineate: Array<Record<string, string | null>> = []
   const repo = {
     async upsertMany(items: AnagraficaInput[]): Promise<ImportResult> {
       ricevuti.push(...items)
       return { inserted: items.length, updated: 0, skipped: 0, errors: [], processedAt: new Date() }
     },
+    async allineaNazioni(nazioni: Record<string, string | null>): Promise<number> {
+      allineate.push(nazioni)
+      return Object.keys(nazioni).length
+    },
   } as unknown as IAnagraficheRepository
-  return { repo, ricevuti }
+  return { repo, ricevuti, allineate }
 }
 
 /** Un XLSX in memoria con le colonne date. */
@@ -38,8 +43,8 @@ function xlsx(righe: unknown[][]): Buffer {
 }
 
 const BASE = ['ID_AB', 'MATRICOLA', 'COGNOME', 'NOME', 'DT_NASCITA', 'GENERE', 'COD_FIS', 'RUOLO', 'DT_INIZIO', 'DT_FINE']
-const riga = (mat: string, cognome: string) =>
-  [99001, mat, cognome, 'ANNA', '01/01/1990', 'F', '', 'DR', '01/11/2025', '']
+const riga = (mat: string, cognome: string, ruolo = 'DR', inizio = '01/11/2025', fine = '') =>
+  [99001, mat, cognome, 'ANNA', '01/01/1990', 'F', '', ruolo, inizio, fine]
 
 // ── leggiNazIban: le quattro risposte ────────────────────────
 test('leggiNazIban: colonna assente -> undefined (non si tocca)', () => {
@@ -133,4 +138,70 @@ test("valore sporco: la riga si importa, la nazione no, e c'e' un errore di riga
   assert.deepEqual(ricevuti.map(r => r.nazIban), [undefined, 'BE'])
   assert.equal(res.errors.length, 1)
   assert.equal(res.errors[0]!.row, 1)
+})
+
+// ── Chiave con il ruolo (migrazione 0017) ────────────────────
+// Il caso reale: una persona con due rapporti veri che iniziano lo stesso
+// giorno, ND e NM. Con la chiave vecchia uno dei due spariva a caso.
+test('stesso giorno, ruoli diversi: entrano entrambi, nessun errore', async () => {
+  const { repo, ricevuti } = repoFinto()
+  const res = await importAnagraficheXlsx(xlsx([
+    [...BASE, 'NAZ_IBAN'],
+    [...riga('090010', 'VERDI', 'ND', '02/09/2024', ''),           'IT'],
+    [...riga('090010', 'VERDI', 'NM', '02/09/2024', '15/05/2025'), 'IT'],
+  ]), repo)
+  assert.equal(res.errors.length, 0)
+  assert.deepEqual(ricevuti.map(r => r.ruolo), ['ND', 'NM'])
+})
+
+test('stesso giorno e STESSO ruolo: resta un doppione, segnalato', async () => {
+  const { repo } = repoFinto()
+  const res = await importAnagraficheXlsx(xlsx([
+    [...BASE, 'NAZ_IBAN'],
+    [...riga('090011', 'BIANCHI', 'BE', '01/07/2026', '31/12/2027'), 'IT'],
+    [...riga('090011', 'BIANCHI', 'BE', '01/07/2026', '30/09/2026'), 'IT'],
+  ]), repo)
+  assert.equal(res.errors.length, 1)
+  assert.match(res.errors[0]!.message, /Chiave duplicata .*RUOLO BE/)
+})
+
+// ── La nazione e' della persona ──────────────────────────────
+test('la nazione si estende a tutte le righe della matricola', async () => {
+  const { repo, allineate } = repoFinto()
+  await importAnagraficheXlsx(xlsx([
+    [...BASE, 'NAZ_IBAN'],
+    [...riga('090012', 'ROSSI', 'DR', '01/11/2022', '31/10/2025'), 'BE'],
+    [...riga('090012', 'ROSSI', 'BS', '01/11/2025', ''),           'BE'],
+    [...riga('090013', 'VERDI'), ''],
+  ]), repo)
+  assert.equal(allineate.length, 1)
+  assert.deepEqual(allineate[0], { '090012': 'BE', '090013': null })
+})
+
+test('file senza NAZ_IBAN: nessun allineamento delle nazioni', async () => {
+  const { repo, allineate } = repoFinto()
+  await importAnagraficheXlsx(xlsx([BASE, riga('090014', 'FERRARI')]), repo)
+  assert.equal(allineate.length, 0)
+})
+
+test("due nazioni diverse sulla stessa matricola: non si estende, e si dice", async () => {
+  const { repo, allineate } = repoFinto()
+  const res = await importAnagraficheXlsx(xlsx([
+    [...BASE, 'NAZ_IBAN'],
+    [...riga('090015', 'COLOMBO', 'DR', '01/11/2022', '31/10/2025'), 'IT'],
+    [...riga('090015', 'COLOMBO', 'BS', '01/11/2025', ''),           'LT'],
+  ]), repo)
+  assert.deepEqual(allineate[0], {})
+  assert.equal(res.errors.length, 1)
+  assert.match(res.errors[0]!.message, /nazioni del conto diverse/)
+})
+
+test('nazioniPerMatricola: le righe illeggibili non votano', () => {
+  assert.deepEqual(
+    nazioniPerMatricola([
+      { matricola: '090016', nazIban: undefined },
+      { matricola: '090016', nazIban: 'IT' },
+    ]),
+    { nazioni: { '090016': 'IT' }, discordanti: [] },
+  )
 })
