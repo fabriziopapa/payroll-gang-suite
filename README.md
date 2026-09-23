@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.09.20-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.09.23-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -321,7 +321,21 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 ## Changelog
 
+
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.09.23
+- Emolumenti: la data di competenza e' modificabile mese per mese e il ruolo viene
+  letto a quella data. Prima il ruolo veniva dall'ultimo rapporto per decorrenza,
+  senza guardare nessuna data, e finiva uguale su tutti i mesi esportati.
+- Emolumenti: la scelta manuale del ruolo e' per mese; nuovo pulsante "Aggiorna ruoli
+  e conti" che rilegge l'anagrafica e chiede conferma dove la scelta non e' ovvia.
+- Emolumenti: l'esportazione si ferma se un mese resta senza ruolo. Prima quella
+  colonna usciva vuota in silenzio.
+- Emolumenti: duplicando una lavorazione si copia solo la testata. I nominativi non
+  vengono piu' copiati: un elenco riportato dal mese prima sembra verificato e non lo e'.
+- Estrazione SGE: tre colonne nuove distinguono "nessun conto" da "conto presente ma
+  non abilitato agli stipendi". Aggiunta la colonna anagrafiche.naz_iban (migrazione 0016).
 
 ### 26.09.20
 **Tre correzioni emerse dal primo controllo statico sul progetto**
