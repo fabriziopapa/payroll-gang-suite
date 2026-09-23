@@ -107,9 +107,8 @@ export interface AnagraficaRow {
   nazIban:    string | null
   /**
    * Area del conto CALCOLATA da nazIban con lib/areaConto.ts nel momento in
-   * cui la riga si legge. Non e' piu' una colonna: la colonna area_conto
-   * resta nel database solo finche' la migrazione successiva non la toglie,
-   * e nessuno la legge ne' la scrive.
+   * cui la riga si legge. Non e' una colonna: area_conto e' stata tolta
+   * dal database con la migrazione 0018.
    */
   areaConto:  AreaConto
 }

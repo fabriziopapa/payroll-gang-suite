@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.09.24.3-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.09.24.4-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -67,7 +67,7 @@ payroll-gang-suite/
 │       ├── auth/                # TOTP (RFC 6238) + JWT ES256 + refresh rotante Argon2id
 │       ├── db/
 │       │   ├── schema.ts        # ★ Schema Drizzle — fonte di verità del DB
-│       │   ├── migrations/      # 0001…0017 — applicate da ./pgs-migra.sh, registrate in schema_migrations
+│       │   ├── migrations/      # 0001…0018 — applicate da ./pgs-migra.sh, registrate in schema_migrations
 │       │   │                    #   (già incluse in setup.sql: NON eseguire su install nuova)
 │       │   └── repositories/    # Repository pattern (PgBozze, PgUsers, PgCertificati, …)
 │       ├── lib/                 # clientIp.ts (IP reale dietro Cloudflare) ·
@@ -109,7 +109,7 @@ payroll-gang-suite/
 - **Viewer** — visualizzazione read-only delle liquidazioni archiviate con export CSV/TXT attivi
 - **Ricerca** — ricerca fulltext cross-bozza (per nome o testo libero), report aggregati per matricola / voce / periodo con export CSV; caricamento dati in singola query (no N+1)
 - **Import XML** — anagrafiche e voci da file DATAPACKET HR (max 5 MB, max 5.000 righe)
-- **Import XLSX** — anagrafiche SGE (max 10 MB, max 10.000 righe, import differenziale con hash SHA-256); include `area_conto` (IT / SEPA / EXTRA_UE / NON_NOTO), che entra nell'hash: senza, un cambio di conto non verrebbe mai aggiornato
+- **Import XLSX** — anagrafiche SGE (max 10 MB, max 10.000 righe, import differenziale con hash SHA-256); include `NAZ_IBAN`, la nazione del conto, che entra nell'hash: senza, un cambio di conto non verrebbe mai aggiornato. L'area del conto (IT / SEPA / EXTRA_UE / NON_NOTO) non si importa: si calcola dalla nazione
 - **Export CSV** — tracciato HR ufficiale (header camelCase, `codiceStatoVoce=E`), calcolo scorporo automatico, CSV injection prevention
 - **Export TXT Ruoli** — file per ruolo con deduplicazione matricole
 - **Comunicazioni** — generazione email con allegato PDF nominale
@@ -175,7 +175,7 @@ CEDOLINO_SAMPLE="/percorso/Cedolino_....pdf" npm run test --workspace=server
 
 **Sicurezza**: tutte le rotte `/api/v1/emolumenti` sono admin + audit **awaited**, letture comprese — il payload contiene nominativi, matricole e importi.
 
-**Area del conto: in anagrafica c'e' solo la nazione.** L'estrazione SGE porta `NAZ_IBAN` (due lettere, mai un IBAN), l'import la salva in `anagrafiche.naz_iban`, e l'area — `IT` / `SEPA` / `EXTRA_UE`, oppure `NON_NOTO` se la nazione manca o non si riconosce — si **calcola** ogni volta con `server/src/lib/areaConto.ts`. La stessa funzione risponde a `GET /api/v1/area-conto?naz=IT,LT,BE` (utente autenticato; restituisce anche la versione dell'elenco EPC). La colonna `area_conto` e' ancora nel database ma nessuno la legge ne' la scrive: verra' tolta con una migrazione successiva. Le **Liquidazioni** non usano l'area del conto: queste modifiche non le toccano.
+**Area del conto: in anagrafica c'e' solo la nazione.** L'estrazione SGE porta `NAZ_IBAN` (due lettere, mai un IBAN), l'import la salva in `anagrafiche.naz_iban`, e l'area — `IT` / `SEPA` / `EXTRA_UE`, oppure `NON_NOTO` se la nazione manca o non si riconosce — si **calcola** ogni volta con `server/src/lib/areaConto.ts`. La stessa funzione risponde a `GET /api/v1/area-conto?naz=IT,LT,BE` (utente autenticato; restituisce anche la versione dell'elenco EPC). La colonna `area_conto` non esiste piu' (migrazione `0018`). Le **Liquidazioni** non usano l'area del conto: queste modifiche non le toccano.
 
 **Import dell'anagrafica e nazione.** La colonna `NAZ_IBAN` e' facoltativa, e i tre casi sono distinti di proposito:
 
@@ -211,7 +211,7 @@ Un file con `AREA_CONTO` e senza `NAZ_IBAN` (la vecchia estrazione) si importa, 
 psql -d <database> -X -c "SELECT (naz_iban IS NOT NULL) AS con_nazione, count(*) FROM anagrafiche GROUP BY 1;"
 ```
 
-**Schema DB**: `emolumenti_lavorazioni` e `anagrafiche.naz_iban` sono in `server/sql/setup.sql` (consolidato); `anagrafiche.area_conto` c'e' ancora, inutilizzata. La chiave `(matricola, decor_inq, ruolo)` e' gia' nella `CREATE TABLE`. Le migrazioni `0011`…`0017` restano come riferimento del DB di produzione esistente.
+**Schema DB**: `emolumenti_lavorazioni` e `anagrafiche.naz_iban` sono in `server/sql/setup.sql` (consolidato); `anagrafiche.area_conto` non c'e' piu'. La chiave `(matricola, decor_inq, ruolo)` e' gia' nella `CREATE TABLE`. Le migrazioni `0011`…`0018` restano come riferimento del DB di produzione esistente.
 
 ---
 
@@ -362,6 +362,13 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.09.24.4
+**Anagrafiche: via la colonna `area_conto` (migrazione `0018`)**
+
+- In anagrafica resta solo la nazione del conto; l'area si calcola. La colonna era gia' ignorata dal codice dalla 26.09.24 ed era stata tolta da `schema.ts`: il `DROP` non rompe l'applicazione in esecuzione.
+- **Cosa si perde**: il giudizio vecchio (elenco a 36 prefissi, ripiego sul BIC) sulle righe senza nazione, cioe' persone mai presenti in un'estrazione con `NAZ_IBAN`. Per loro l'area diventa `NON_NOTO`. Non si ricostruisce la nazione da `area_conto = 'IT'`: dopo l'estensione della nazione a tutte le righe della persona, una riga vuota puo' voler dire "oggi nessuna coordinata". Il backup prima del rilascio conserva la colonna.
+- Nessun effetto su Liquidazioni; nelle lavorazioni Emolumenti l'area e' salvata riga per riga e non cambia.
 
 ### 26.09.24.3
 - **Emolumenti: "Liquidazione di" mese e anno** sotto il nome della lavorazione. Propone il mese a *Verifica conti da CSA* e a *Genera nome*, si salva con la lavorazione, non si copia con *Duplica*. La data esatta resta quella dell'archiviazione; le date di competenza per mese restano dove sono, perche' vanno nel CSV.

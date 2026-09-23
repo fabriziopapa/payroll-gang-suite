@@ -128,12 +128,9 @@ CREATE TABLE IF NOT EXISTS anagrafiche (
   cod_fis            VARCHAR(255),
   -- SHA-256 sui campi funzionali — confronto O(1) import differenziale
   hash_record        VARCHAR(64),
-  -- Area del conto su cui CSA paga: IT | SEPA | EXTRA_UE | NON_NOTO.
-  -- NULL = non estratto. PRIVACY: qui non finisce mai un IBAN, nemmeno
-  -- parziale — solo la classificazione (migrazione 0011).
-  area_conto         VARCHAR(10),
-  -- Paese dell'IBAN su cui CSA paga, ISO 3166-1 alpha-2: il FATTO da cui
-  -- si deriva area_conto (migrazione 0016). La regola di classificazione
+  -- Paese dell'IBAN su cui CSA paga, ISO 3166-1 alpha-2 (migrazione 0016).
+  -- L'area del conto non si salva: si calcola da qui (la colonna
+  -- area_conto e' stata tolta con la 0018). La regola di classificazione
   -- sta in server/src/lib/areaConto.ts, non qui: una colonna generata
   -- pretenderebbe l'elenco dei prefissi dentro SQL, che e' il problema da
   -- cui si esce. PRIVACY: due lettere, mai un IBAN e mai un BIC.
@@ -153,8 +150,9 @@ CREATE INDEX IF NOT EXISTS idx_anag_hash         ON anagrafiche (hash_record);
 -- riscrittura tabella). DEVE essere applicata PRIMA del deploy del codice che
 -- cifra in scrittura, altrimenti l'import fallisce (valore > 16 char).
 ALTER TABLE anagrafiche ALTER COLUMN cod_fis TYPE VARCHAR(255);
--- Migrazione 0011 sui DB pre-esistenti: idempotente, no-op su DB nuovi.
-ALTER TABLE anagrafiche ADD COLUMN IF NOT EXISTS area_conto VARCHAR(10);
+-- Migrazioni 0011 + 0018 sui DB pre-esistenti: area_conto e' stata aggiunta
+-- (0011) e poi tolta (0018). Qui resta solo l'esito. No-op su DB nuovi.
+ALTER TABLE anagrafiche DROP COLUMN IF EXISTS area_conto;
 -- Migrazione 0016: idem.
 ALTER TABLE anagrafiche ADD COLUMN IF NOT EXISTS naz_iban CHAR(2);
 -- Migrazione 0017 sui DB pre-esistenti: la chiave comprende il ruolo.

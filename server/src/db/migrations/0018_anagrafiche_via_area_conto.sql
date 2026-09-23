@@ -1,0 +1,34 @@
+-- ============================================================
+-- Migration 0018 — via la colonna anagrafiche.area_conto
+--
+-- COSA. Si elimina `area_conto`. In anagrafica resta solo il FATTO, la
+-- nazione del conto (`naz_iban`, migrazione 0016); l'area IT / SEPA /
+-- EXTRA_UE / NON_NOTO si calcola ogni volta da li' con
+-- server/src/lib/areaConto.ts (decisione dell'autore del 2026-09-23).
+--
+-- PERCHE' ADESSO E NON PRIMA. Dalla 26.09.24 il codice non legge e non
+-- scrive piu' la colonna, e dalla stessa versione non e' piu' dichiarata in
+-- schema.ts: Drizzle non la seleziona. Toglierla ora non rompe il codice in
+-- esecuzione nell'intervallo fra questa migrazione e il deploy.
+--
+-- CHE COSA SI PERDE, detto per intero. La colonna conteneva il GIUDIZIO
+-- dell'estrazione precedente, fatto con un elenco SEPA di 36 prefissi
+-- (mancavano AL GI MD ME MK RS) e con il ripiego sul BIC. Per le righe che
+-- hanno `naz_iban` quel giudizio e' ricalcolato meglio. Per le righe senza
+-- nazione (persone mai presenti in un'estrazione con NAZ_IBAN: ruoli fuori
+-- lista, rapporti vecchi) l'area passa da quella vecchia a NON_NOTO.
+-- NON si ricostruisce la nazione da `area_conto = 'IT'`: dopo l'estensione
+-- della nazione a tutte le righe della persona (26.09.24.1), una riga
+-- vuota puo' voler dire "oggi nessuna coordinata", e rimetterci IT
+-- contraddirebbe un fatto con un giudizio vecchio.
+-- Il backup prima del rilascio conserva comunque la colonna.
+--
+-- Se una vista o un oggetto dipendesse dalla colonna, il DROP fallisce (non
+-- si usa CASCADE di proposito): la migrazione si annulla da sola e il
+-- deploy si ferma prima di compilare.
+--
+-- NON si applica a mano:   ./pgs-migra.sh applica
+-- Gira come superutente. Idempotente (IF EXISTS).
+-- ============================================================
+
+ALTER TABLE anagrafiche DROP COLUMN IF EXISTS area_conto;

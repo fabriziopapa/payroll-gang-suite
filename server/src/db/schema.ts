@@ -127,12 +127,9 @@ export const anagrafiche = pgTable('anagrafiche', {
   // SHA-256 sui campi funzionali (calcolato sul PLAINTEXT lato import) —
   // confronto O(1) per import differenziale. Invariato dalla cifratura.
   hashRecord:        varchar('hash_record', { length: 64 }),
-  // area_conto NON e' piu' dichiarata qui, di proposito. La colonna esiste
-  // ancora nel database (0011) ma l'applicazione non la legge ne' la scrive:
-  // l'area si calcola da naz_iban con lib/areaConto.ts. Toglierla da schema.ts
-  // PRIMA della migrazione che la elimina e' cio' che rende quella migrazione
-  // sicura: Drizzle non la seleziona piu', quindi il DROP non rompe il codice
-  // in esecuzione nell'intervallo fra migrazione e deploy.
+  // area_conto non esiste piu' (tolta con la 0018): l'area si calcola da
+  // naz_iban con lib/areaConto.ts. Era stata tolta da qui una versione prima
+  // della migrazione, ed e' questo che ha reso il DROP sicuro.
   //
   // Il FATTO: paese dell'IBAN su cui CSA paga, due lettere, mai un IBAN (0016).
   nazIban:           char('naz_iban', { length: 2 }),

@@ -52,8 +52,9 @@ export const PREFISSI_SEPA: ReadonlySet<string> = new Set([
 ])
 
 /**
- * I valori di dominio, quelli gia' in uso in `anagrafiche.area_conto`
- * (migrazione 0011) e mostrati da AnagrafichePage ed EmolumentiPage.
+ * I valori di dominio, mostrati da AnagrafichePage ed EmolumentiPage e
+ * salvati nelle righe delle lavorazioni. (La colonna anagrafiche.area_conto,
+ * che li conteneva, e' stata tolta con la 0018: l'area si calcola da qui.)
  *
  * NB: 'ITA' non e' un valore di dominio — e' come si chiama il FILE
  * (DR_09_26_ITA.txt). Presentazione, non dominio: la conversione sta
