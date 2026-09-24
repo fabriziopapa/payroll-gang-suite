@@ -2645,6 +2645,10 @@ function DettagliAnagrafici({ r, storico, ambigui, scoperti, dateCompetenza, onP
             Il CSV porterebbe un ruolo che l’anagrafica non conferma: controlla in CSA
             prima di esportare.
           </p>
+          <p className="text-xs text-red-300/70 mt-1">
+            Se il ruolo è certo, cliccalo qui sotto: vale per quei mesi ed è segnato «a mano».
+            In alternativa sposta la «Data di competenza» del mese dentro un rapporto.
+          </p>
         </div>
       )}
 
@@ -2679,21 +2683,29 @@ function DettagliAnagrafici({ r, storico, ambigui, scoperti, dateCompetenza, onP
               // di mesi su cui il clic ha effetto: si sceglie un rapporto, e
               // vale dove quel rapporto c'e'. Mai sui mesi che non copre.
               const coperti = [...r.mesiScelti].sort().filter(k => copreMese(s, k, dateCompetenza))
-              const attivo  = coperti.length > 0
-                && coperti.every(k => ruoloDi(r, k, dateCompetenza, storico) === s.ruolo)
+              // I mesi che NESSUN rapporto copre (per esempio un DR finito il
+              // 18 con competenza al 30): li' il ruolo non si ricava, e deve
+              // poterlo decidere l'operatore. Il clic vale anche su quelli;
+              // l'avviso rosso resta, e il ruolo e' marcato "a mano".
+              const applicabili = [...new Set([...coperti, ...scoperti])].sort()
+              const attivo  = applicabili.length > 0
+                && applicabili.every(k => ruoloDi(r, k, dateCompetenza, storico) === s.ruolo)
               return (
                 <button
                   key={`${s.ruolo}-${s.decorInq}-${i}`}
                   onClick={() => onPatch({
                     ruoliScelti: {
                       ...r.ruoliScelti,
-                      ...Object.fromEntries(coperti.map(k => [k, s.ruolo])),
+                      ...Object.fromEntries(applicabili.map(k => [k, s.ruolo])),
                     },
                   })}
-                  disabled={coperti.length === 0}
-                  title={coperti.length === 0
-                    ? 'Questo rapporto non copre nessuno dei mesi selezionati'
-                    : `Usa ${s.ruolo} per ${coperti.map(etichettaMese).join(', ')}`}
+                  disabled={applicabili.length === 0}
+                  title={r.mesiScelti.size === 0
+                    ? 'Seleziona prima i mesi da aggiungere: il ruolo si sceglie mese per mese'
+                    : applicabili.length === 0
+                      ? 'Questo rapporto non copre nessuno dei mesi selezionati'
+                      : `Usa ${s.ruolo} per ${applicabili.map(etichettaMese).join(', ')}`
+                        + (applicabili.length > coperti.length ? ' (anche dove nessun rapporto copre la data)' : '')}
                   className={`w-full text-left px-3 py-2 text-xs flex items-baseline gap-3 transition-colors ${
                     attivo ? 'bg-slate-800/70' : 'hover:bg-slate-800/40'
                   }`}
@@ -2850,6 +2862,11 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
    * agosto e non settembre, e la riga va segnalata lo stesso.
    */
   const daDecidere = ruoliPerMese.some(x => x.ruolo === null)
+  /** Mesi scoperti su cui l'operatore non ha ancora scelto a mano. */
+  const scopertiSenzaScelta = useMemo(
+    () => scoperti.filter(k => !r.ruoliScelti[k]),
+    [scoperti, r.ruoliScelti],
+  )
   /** I ruoli distinti fra i mesi scelti: se sono due, il badge lo dice. */
   const ruoliDistinti = useMemo(
     () => [...new Set(ruoliPerMese.map(x => x.ruolo).filter(Boolean) as string[])],
@@ -2891,7 +2908,7 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
           <button
             onClick={() => setDettagli(d => !d)}
             title={daDecidere
-              ? 'Su questi mesi la persona risulta avere più di un ruolo: apri e scegli'
+              ? 'Su qualche mese il ruolo non si ricava da solo (più rapporti, o nessuno alla data): apri e scegli'
               : !AREE_TXT_CHIAVI.includes(areaDi(r) ?? '')
                 ? 'Senza area del conto resta fuori da tutti i TXT: apri e assegnala'
                 : 'Ruoli di questa matricola, e area del conto per i TXT'}
@@ -2906,8 +2923,10 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
             {/* Un ruolo solo -> si mostra. Due o piu' -> si dice quanti, perche'
                 "PA" da solo mentre meta' dei mesi sono DR e' una bugia. */}
             <span className={qualcheScelta ? 'text-amber-300' : ''}>
-              {ruoliDistinti.length === 0
-                ? 'ruolo ignoto'
+              {r.mesiScelti.size === 0
+                ? 'scegli i mesi'
+                : ruoliDistinti.length === 0
+                ? 'ruolo da scegliere'
                 : ruoliDistinti.length === 1
                   ? ruoliDistinti[0]
                   : `${ruoliDistinti.join('/')} per mese`}
@@ -2931,9 +2950,19 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
               <>
                 <span className="text-amber-700">|</span>
                 <span className="font-medium">
-                  {ambigui.length === 1
-                    ? 'ruolo ambiguo su 1 mese'
-                    : `ruolo ambiguo su ${ambigui.length} mesi`}
+                  {/* Due cause diverse per un mese senza ruolo: piu' rapporti
+                      (ambiguo) o nessun rapporto alla data (scoperto). Si dice
+                      quale, e quanti: "ambiguo su 0 mesi" non vuol dire nulla. */}
+                  {[
+                    ambigui.length > 0
+                      ? (ambigui.length === 1 ? 'ruolo ambiguo su 1 mese' : `ruolo ambiguo su ${ambigui.length} mesi`)
+                      : null,
+                    scopertiSenzaScelta.length > 0
+                      ? (scopertiSenzaScelta.length === 1
+                          ? '1 mese senza rapporto'
+                          : `${scopertiSenzaScelta.length} mesi senza rapporto`)
+                      : null,
+                  ].filter(Boolean).join(' · ') || 'ruolo da scegliere'}
                 </span>
               </>
             )}

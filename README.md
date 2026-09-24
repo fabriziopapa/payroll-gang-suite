@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.09.24.6-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.09.24.7-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -376,6 +376,12 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.09.24.7
+**Emolumenti: ruolo scelto a mano anche sui mesi senza rapporto**
+
+- Correzione di un difetto nato con la 26.09.23 (ruolo per mese): se nessun rapporto in anagrafica copriva la data di competenza del mese (es. DR finito il 18, competenza al 30), i rapporti nei *Dettagli anagrafici* non erano cliccabili e il ruolo non si poteva scegliere in nessun modo. Ora il clic assegna il ruolo anche a quei mesi, marcato *a mano*; l'avviso rosso resta.
+- Il badge non dice piu' «ruolo ignoto» quando la riga non ha mesi selezionati: dice «scegli i mesi». Con mesi senza ruolo dice il perche' (ambiguo su N mesi / N mesi senza rapporto), non piu' «ruolo ambiguo su 0 mesi».
 
 ### 26.09.24.6
 **Emolumenti · Tipi conto (migrazione `0020`)**
