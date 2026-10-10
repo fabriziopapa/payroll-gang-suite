@@ -47,6 +47,7 @@ import {
   potaConferme, leggiConferme,
   type DateConfermate, dateAnomale, potaDate, leggiDateConfermate, problemiDate,
 } from '../utils/provvedimentiRiga'
+import { conMeseNelNome, etichettaMeseLiq, meseNomeDiverso } from '../utils/meseNome'
 import type { CsvExportRow } from '../types'
 
 const VOCE_DEFAULT     = '09834'
@@ -602,6 +603,8 @@ export default function EmolumentiPage() {
   const [meseLiq, setMeseLiq] = useState('')   // '01'..'12' o ''
   const [annoLiq, setAnnoLiq] = useState('')   // 'AAAA' o in scrittura
   const meseLiquidazione = meseLiq && /^\d{4}$/.test(annoLiq) ? `${annoLiq}-${meseLiq}` : ''
+  /** L'anno mostrato fra le frecce: quello scritto, o il corrente se manca. */
+  const annoLiqVisto = /^\d{4}$/.test(annoLiq) ? Number(annoLiq) : annoCorrente
   function setMeseLiquidazione(v: string) {
     const ok = /^\d{4}-(0[1-9]|1[0-2])$/.test(v)
     setAnnoLiq(ok ? v.slice(0, 4) : '')
@@ -636,6 +639,8 @@ export default function EmolumentiPage() {
   // ── Lavorazione salvata ────────────────────────────────────────────────
   const [lavorazioneId, setLavorazioneId]   = useState<string | null>(null)
   const [nomeLavorazione, setNomeLavorazione] = useState('')
+  /** Il mese scritto nel nome, se e' diverso da «Liquidazione di» (altrimenti null). */
+  const meseNomeLavorazione = meseNomeDiverso(nomeLavorazione, meseLiquidazione)
   const [statoLavorazione, setStatoLavorazione] = useState<'bozza' | 'archiviata'>('bozza')
   const [dataLiquidazione, setDataLiquidazione] = useState<string | null>(null)
   const [elenco, setElenco]         = useState<LavorazioneApi[]>([])
@@ -914,6 +919,19 @@ export default function EmolumentiPage() {
     // Nome proposto solo se il campo e' ancora vuoto: quello scritto a mano
     // non si sovrascrive da solo. Per rigenerarlo c'e' il pulsante apposta.
     if (!nomeLavorazione.trim()) setNomeLavorazione(nomeProposto(ab.tipo))
+  }
+
+  /**
+   * «Genera nome». Se il nome contiene gia' un mese con l'anno, cambia SOLO
+   * quella parte ("… Maggiorazioni Settembre 2026" -> "… Ottobre 2026") e
+   * lascia il resto com'e' stato scritto. Altrimenti genera il nome da zero,
+   * come prima. Il mese e' quello di «Liquidazione di», o il corrente.
+   */
+  function generaNome() {
+    const oggi = new Date()
+    const rif  = meseLiquidazione ||
+      `${oggi.getFullYear()}-${String(oggi.getMonth() + 1).padStart(2, '0')}`
+    setNomeLavorazione(conMeseNelNome(nomeLavorazione, rif) ?? nomeProposto(tipoEmol))
   }
 
   /** "BS ottobre 2026": tipo, mese della liquidazione (o corrente) per esteso, anno. */
@@ -1782,7 +1800,23 @@ export default function EmolumentiPage() {
                   )}
                 </div>
 
-                <span className={`ml-auto text-xs px-2.5 py-0.5 rounded-full border ${
+                {/* Mese di liquidazione, dal payload (solo quel campo). Ambra se
+                    manca o se il nome dice un altro mese. */}
+                {(() => {
+                  const ml = etichettaMeseLiq(l.meseLiquidazione ?? '')
+                  const diverso = meseNomeDiverso(l.nome, l.meseLiquidazione ?? '')
+                  return (
+                    <span
+                      title={diverso ? `Il nome dice ${etichettaMeseLiq(diverso)}` : 'Mese in cui si paga'}
+                      className={`ml-auto text-xs px-2.5 py-0.5 rounded-full border shrink-0 ${
+                        !ml || diverso ? 'border-amber-700/70 text-amber-300' : 'border-slate-700 text-slate-400'
+                      }`}
+                    >
+                      {ml || 'liquidazione da indicare'}
+                    </span>
+                  )
+                })()}
+                <span className={`text-xs px-2.5 py-0.5 rounded-full border ${
                   l.stato === 'archiviata'
                     ? 'border-slate-700 text-slate-400'
                     : 'border-indigo-700 text-indigo-300'
@@ -1881,6 +1915,21 @@ export default function EmolumentiPage() {
                   : 'Bozza'}
               </span>
             )}
+            {/* Il mese di liquidazione accanto al nome: un refuso fra i due si
+                vede senza scorrere la pagina. Ambra se manca o se il nome dice
+                un altro mese. */}
+            <span
+              title={meseNomeLavorazione
+                ? `Il nome dice ${etichettaMeseLiq(meseNomeLavorazione)}`
+                : 'Mese in cui si paga (Liquidazione di)'}
+              className={`text-xs px-2.5 py-0.5 rounded-full border shrink-0 ${
+                !meseLiquidazione || meseNomeLavorazione
+                  ? 'border-amber-700/70 text-amber-300'
+                  : 'border-slate-700 text-slate-400'
+              }`}
+            >
+              liquidazione {meseLiquidazione ? etichettaMeseLiq(meseLiquidazione) : 'da indicare'}
+            </span>
           </nav>
 
           {/* ── Barra della lavorazione aperta ───────────── */}
@@ -1893,9 +1942,14 @@ export default function EmolumentiPage() {
                 className={inputCls + ' flex-1 min-w-[16rem]'}
               />
               <button
-                onClick={() => setNomeLavorazione(nomeProposto(tipoEmol))}
-                title="Tipo di caricamento, mese corrente per esteso e anno"
-                className={btnSecondario + ' shrink-0'}
+                onClick={generaNome}
+                title={meseNomeLavorazione
+                  ? `Il nome dice ${etichettaMeseLiq(meseNomeLavorazione)}: lo porta a ${etichettaMeseLiq(meseLiquidazione)}, il resto del nome non cambia`
+                  : 'Se il nome contiene un mese, cambia solo quello; altrimenti: tipo, mese di liquidazione (o corrente) e anno'}
+                className={(meseNomeLavorazione
+                  ? 'px-4 py-2 rounded-lg bg-amber-950/40 text-amber-200 border border-amber-700/70 ' +
+                    'text-sm hover:bg-amber-900/40 transition-colors'
+                  : btnSecondario) + ' shrink-0'}
               >
                 Genera nome
               </button>
@@ -1932,35 +1986,65 @@ export default function EmolumentiPage() {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="text-slate-400">Liquidazione di</span>
-              <select
-                value={meseLiq}
-                onChange={e => {
-                  setMeseLiq(e.target.value)
-                  if (e.target.value && !annoLiq) setAnnoLiq(String(new Date().getFullYear()))
-                }}
-                disabled={statoLavorazione === 'archiviata'}
-                className={inputCls + ' w-40'}
-              >
-                <option value="">— mese —</option>
-                {MESI_LIQUIDAZIONE.map((nome, i) => (
-                  <option key={nome} value={String(i + 1).padStart(2, '0')}>{nome}</option>
-                ))}
-              </select>
-              <input
-                value={annoLiq}
-                onChange={e => setAnnoLiq(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                disabled={statoLavorazione === 'archiviata'}
-                inputMode="numeric"
-                placeholder="anno"
-                className={inputCls + ' w-24 font-mono'}
-              />
-              <span className="text-xs text-slate-500">
-                Il mese in cui si paga: lo usano «Verifica conti da CSA» e «Genera nome». La data
-                esatta si scrive all’archiviazione. Le date di competenza dei mesi aggiunti restano
-                quelle di «Data di competenza», una per mese.
-              </span>
+            {/* Liquidazione di: anno con le frecce, mese con un clic. Stessi chip di
+                «Mesi da aggiungere». Il mese di oggi ha il bordo; ricliccare il mese
+                scelto lo toglie. */}
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-1.5 text-sm">
+                <span className="text-slate-400 mr-2">Liquidazione di</span>
+                <button
+                  onClick={() => setAnnoLiq(String(annoLiqVisto - 1))}
+                  disabled={statoLavorazione === 'archiviata'}
+                  title="Anno precedente"
+                  className="px-1.5 py-1 rounded text-slate-500 hover:text-white hover:bg-slate-800
+                             transition-colors disabled:opacity-40"
+                >‹</button>
+                <span className="w-12 text-center font-mono text-xs text-slate-300">{annoLiqVisto}</span>
+                <button
+                  onClick={() => setAnnoLiq(String(annoLiqVisto + 1))}
+                  disabled={statoLavorazione === 'archiviata'}
+                  title="Anno successivo"
+                  className="px-1.5 py-1 rounded text-slate-500 hover:text-white hover:bg-slate-800
+                             transition-colors disabled:opacity-40"
+                >›</button>
+                <span className="w-2" />
+                {MESI_LIQUIDAZIONE.map((nome, i) => {
+                  const mm     = String(i + 1).padStart(2, '0')
+                  const scelto = meseLiq === mm
+                  const oggi   = annoLiqVisto === annoCorrente && i === new Date().getMonth()
+                  return (
+                    <button
+                      key={nome}
+                      onClick={() => {
+                        if (scelto) { setMeseLiq(''); return }
+                        setMeseLiq(mm)
+                        setAnnoLiq(String(annoLiqVisto))
+                      }}
+                      disabled={statoLavorazione === 'archiviata'}
+                      title={scelto ? `${nome} ${annoLiqVisto} — clicca per togliere` : `${nome} ${annoLiqVisto}`}
+                      className={`px-2 py-1 rounded text-xs font-medium transition-colors disabled:cursor-not-allowed ${
+                        scelto
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
+                      } ${oggi && !scelto ? 'ring-1 ring-slate-500' : ''}`}
+                    >
+                      {MESI_BREVI[i + 1]}
+                    </button>
+                  )
+                })}
+              </div>
+              {meseNomeLavorazione && (
+                <p className="text-xs text-amber-300/90">
+                  Il nome dice <strong>{etichettaMeseLiq(meseNomeLavorazione)}</strong>, la liquidazione
+                  è <strong>{etichettaMeseLiq(meseLiquidazione)}</strong>. Se è sbagliato il mese, scegli il
+                  mese giusto qui sopra; se è sbagliato il nome, premi «Genera nome».
+                </p>
+              )}
+              <p className="text-xs text-slate-500">
+                Il mese in cui si paga: lo usano «Verifica conti da CSA», «Genera nome» e la data proposta
+                all’archiviazione. Le date di competenza dei mesi aggiunti restano quelle di «Data di
+                competenza», una per mese.
+              </p>
             </div>
 
             <p className="text-xs text-slate-500">

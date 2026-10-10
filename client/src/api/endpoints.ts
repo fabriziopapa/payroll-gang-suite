@@ -1014,6 +1014,9 @@ export interface LavorazioneApi {
    *  riga come sta in tabella e non li portano. Da qui il `?`. */
   createdByUsername?: string | null
   updatedByUsername?: string | null
+  /** 'AAAA-MM' letto dal payload, solo nell'elenco. Puo' mancare o essere
+   *  sporco: va validato prima di mostrarlo. */
+  meseLiquidazione?: string | null
 }
 
 /** Lavorazione completa: `dati` e' il payload serializzato dalla pagina. */

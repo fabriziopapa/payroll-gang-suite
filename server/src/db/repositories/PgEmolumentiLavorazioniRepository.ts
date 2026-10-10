@@ -6,7 +6,9 @@
 //
 // La lista NON restituisce `dati`: e' un JSONB che con 200 nominativi e lo
 // snapshot CSA pesa parecchio, e nell'elenco non serve. Si carica solo
-// aprendo la singola lavorazione.
+// aprendo la singola lavorazione. Ne esce UN solo campo scalare, il mese di
+// liquidazione (dati.testata.meseLiquidazione), che l'elenco mostra accanto
+// allo stato: Postgres lo estrae senza spedire il resto del payload.
 // ============================================================
 
 import { and, desc, eq, sql } from 'drizzle-orm'
@@ -39,6 +41,9 @@ export interface LavorazioneRow {
   updatedAt:        Date
   createdByUsername?: string | null
   updatedByUsername?: string | null
+  /** 'AAAA-MM' dal payload, solo nell'elenco. Testo libero lato database:
+   *  il client lo usa solo se ha la forma giusta. */
+  meseLiquidazione?: string | null
 }
 
 /** Lavorazione completa — con il payload. */
@@ -64,6 +69,7 @@ const COLONNE_ELENCO = {
   updatedAt:        schema.emolumentiLavorazioni.updatedAt,
   createdByUsername: autore.username,
   updatedByUsername: modificatore.username,
+  meseLiquidazione: sql<string | null>`${schema.emolumentiLavorazioni.dati} -> 'testata' ->> 'meseLiquidazione'`,
 }
 
 export class PgEmolumentiLavorazioniRepository {

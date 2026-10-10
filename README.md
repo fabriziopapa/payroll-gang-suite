@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.10.10.1-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.10.10.2-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -57,6 +57,7 @@ payroll-gang-suite/
 │       ├── types/               # Interfacce TypeScript + APP_VERSION
 │       └── utils/               # CSV / PDF / EML builder, calcoli scorporo (biz.ts),
 │                                # provvedimentiRiga.ts (+ test): piu' provvedimenti per persona in Emolumenti
+│                                # meseNome.ts (+ test): mese di liquidazione nel nome della lavorazione
 ├── server/                      # API REST Fastify
 │   ├── sql/
 │   │   ├── proprieta_postgres.sql  # Proprieta' oggetti al superutente (serve dopo un restore da pannello)
@@ -180,6 +181,7 @@ npm run test --workspace=client
 - **Export CSV per HR Suite** — stesso tracciato a 24 colonne delle liquidazioni; `dataProvvedimento` in ISO, `dataCompetenzaVoce` in `GG/MM/AAAA`; la colonna inattiva (parti o importo) va a **0**, non vuota.
 - **Export TXT matricole per area del conto** — un file per `ITALIA` / `SEPA` / `EXTRA_UE`, oppure Italia + estero, oppure uno solo. Ci finisce **solo chi ha mesi selezionati**; chi non ha una coordinata CSA nota resta fuori, e' segnalato con un pallino rosso sulla riga ed elencato per nome sotto il pulsante — e da li' si puo' assegnargli l'area a mano (vedi *Dettagli anagrafici per riga*).
 - **Dettagli anagrafici per riga** — il pulsante con ruolo e area del conto, in testa a ogni persona, apre l'elenco **di tutti i rapporti** che PGS conosce per quella matricola (`GET /emolumenti/storico-ruoli/:matricola`, letto solo quando si apre il pannello). Serve perche' l'elenco ne mostra **uno solo**, quello con la decorrenza piu' alta: per i docenti basta, per dottorandi e borsisti no — sono contratti brevi in catena, e la stessa persona puo' essere stata `DR` fino all'anno scorso ed essere `BS` adesso. Da li' si sceglie il ruolo giusto per il mese liquidato, e si assegna a mano l'area del conto a chi in anagrafica non ce l'ha. Le due scelte restano **nella lavorazione** (`ruoloScelto`, `areaContoScelta`), sono marcate *a mano* in interfaccia e **non tornano in anagrafica**: quella si corregge solo re-importando da SGE. Il ruolo scelto e' quello che finisce nel CSV.
+- **Liquidazione di** (dalla 26.10.10.2) — il mese in cui si paga si sceglie con i chip (`‹ anno ›` + `gen … dic`, il mese di oggi bordato, ricliccando si toglie) e compare come etichetta accanto a *Bozza* nell'intestazione e nell'elenco delle lavorazioni (ambra se manca o se il nome dice un altro mese; l'elenco legge dal payload il solo `meseLiquidazione`). Se il nome contiene un mese diverso compare una riga ambra e *Genera nome* si colora: il pulsante cambia **solo mese e anno** nel nome (`utils/meseNome.ts`), il resto resta com'e'. Nessun blocco.
 - **Lavorazioni salvate** (`emolumenti_lavorazioni`) — nome, stato bozza/archiviata, data di liquidazione e ID liquidazione CSA all'archiviazione (**stesso modale delle liquidazioni**). Il payload JSONB conserva l'input **e lo snapshot di cio' che CSA mostrava**: riaprendo si rivede lo stesso quadro senza rileggere, e premendo di nuovo *Leggi da CSA* si vede cosa e' cambiato. Ciclo di vita (apri, duplica, archivia, riapri, elimina) governato **solo dall'elenco**; l'eliminazione e' ammessa sulle sole bozze, e il vincolo sta nel repository, non nell'interfaccia.
 
 **Sicurezza**: tutte le rotte `/api/v1/emolumenti` sono admin + audit **awaited**, letture comprese — il payload contiene nominativi, matricole e importi.
@@ -385,6 +387,15 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.10.10.2
+**Emolumenti: «Liquidazione di» a chip, sempre visibile, e «Genera nome» che cambia solo il mese**
+
+- Nato da un caso reale: lavorazione «… Maggiorazioni Ottobre 2026» rimasta con *Liquidazione di* settembre 2026, che e' anche la data proposta all'archiviazione.
+- *Liquidazione di*: menu + campo anno sostituiti dai chip dei mesi (stile di *Mesi da aggiungere*) con l'anno fra frecce; il mese corrente ha il bordo, ricliccare toglie.
+- Etichetta `liquidazione <mese anno>` accanto a *Bozza* nell'intestazione e nell'elenco; ambra se manca o se il nome dice un altro mese. L'elenco legge dal payload il solo `dati.testata.meseLiquidazione` (nessuna migrazione).
+- Nome e mese diversi: una riga ambra sotto i chip e *Genera nome* in ambra. *Genera nome* ora, se il nome contiene gia' un mese con l'anno, cambia solo quella parte conservando il resto e le maiuscole; altrimenti genera il nome come prima.
+- Nessun controllo bloccante. Logica in `client/src/utils/meseNome.ts` con 5 test (30 in tutto, `npm run test --workspace=client`).
 
 ### 26.10.10.1
 **Emolumenti: stesso provvedimento su piu' persone e date anomale, sbloccabili con conferma esplicita**
