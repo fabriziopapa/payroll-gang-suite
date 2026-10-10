@@ -7,16 +7,35 @@
 // IDEMPOTENTE: le righe già cifrate (cf con 3 segmenti iv:tag:cipher,
 // dati_json già in envelope { v, enc }) vengono saltate. Ri-eseguibile.
 //
+// NB: postgres.js è configurato con transform:postgres.camel (connection.ts)
+// → un alias con underscore (es. "dati_text") verrebbe riconvertito in
+// camelCase ("datiText"), e la proprietà letta in snake_case risulterebbe
+// SEMPRE undefined. Per questo l'alias qui sotto è SENZA underscore
+// ("datitext"), come in encrypt-bozze-cf-backfill.ts /
+// encrypt-anagrafiche-cf-backfill.ts.
+//
+// DEFAULT = DRY-RUN: senza --apply lo script legge e verifica soltanto,
+// stampa quante righe cifrerebbe, NON scrive nulla.
+//
+// PRIMA DEL PRIMO --apply REALE: backup della tabella (superuser, come da
+// convenzione migrazioni):
+//   pg_dump -h <HOST> -U <SUPERUSER> -d <DB> -t certificati -F c \
+//     -f certificati_backup_$(date +%Y%m%d_%H%M%S).dump
+//
 // Uso (VPS, dopo aver allargato la colonna con encrypt_certificati.sql):
 //   npm run build:server
-//   node --env-file=../.env dist/db/encrypt-certificati-backfill.js
+//   node --env-file=../.env dist/db/encrypt-certificati-backfill.js            # dry-run
+//   node --env-file=../.env dist/db/encrypt-certificati-backfill.js --apply    # scrive
 // ============================================================
 
 import { sql } from 'drizzle-orm'
 import { db, closeDb } from './connection.js'
 import { encrypt } from '../services/cryptoService.js'
 
-type Row = { id: string; cf: string | null; dati_text: string | null }
+type Row = { id: string; cf: string | null; datitext: string | null }
+type Update = { id: string; cf?: string; dati?: string }
+
+const APPLY = process.argv.includes('--apply')
 
 /** true se il CF è già cifrato (formato iv:tag:cipher base64). */
 function cfEncrypted(cf: string): boolean {
@@ -30,51 +49,71 @@ function datiEncrypted(parsed: unknown): boolean {
 }
 
 async function main(): Promise<void> {
-  console.log('\n🔒 PGS-04 — Backfill cifratura certificati\n')
+  console.log(`\n🔒 PGS-04 — Backfill cifratura certificati${APPLY ? '' : ' [DRY-RUN]'}\n`)
 
-  // Legge dati_json come TEXT: preserva le chiavi snake_case senza camelize.
+  // Alias SENZA underscore (vedi nota in testa al file).
   const rows = await db.execute<Row>(sql`
-    SELECT id, cf, dati_json::text AS dati_text
+    SELECT id, cf, dati_json::text AS datitext
     FROM certificati
   `)
 
-  let cifrati = 0, giaCifrati = 0, errori = 0
+  const updates: Update[] = []
+  let giaCifrati = 0
 
   for (const r of rows as unknown as Row[]) {
-    try {
-      const setParts: string[] = []
-
-      // ── cf ────────────────────────────────────────────────
-      let nextCf: string | null | undefined
-      if (r.cf && r.cf !== '' && !cfEncrypted(r.cf)) {
-        nextCf = encrypt(r.cf)
-      }
-
-      // ── dati_json ─────────────────────────────────────────
-      let nextDati: string | undefined
-      const parsed = r.dati_text ? JSON.parse(r.dati_text) : null
-      if (!datiEncrypted(parsed)) {
-        const envelope = { v: 1, enc: encrypt(JSON.stringify(parsed)) }
-        nextDati = JSON.stringify(envelope)
-      }
-
-      if (nextCf === undefined && nextDati === undefined) { giaCifrati++; continue }
-
-      // UPDATE mirato — solo i campi effettivamente cambiati
-      if (nextCf !== undefined && nextDati !== undefined) {
-        await db.execute(sql`
-          UPDATE certificati SET cf = ${nextCf}, dati_json = ${nextDati}::jsonb WHERE id = ${r.id}
-        `)
-      } else if (nextCf !== undefined) {
-        await db.execute(sql`UPDATE certificati SET cf = ${nextCf} WHERE id = ${r.id}`)
-      } else {
-        await db.execute(sql`UPDATE certificati SET dati_json = ${nextDati}::jsonb WHERE id = ${r.id}`)
-      }
-      cifrati++
-    } catch (err) {
-      errori++
-      console.error(`  ⚠️  Riga ${r.id} — errore:`, (err as Error).message)
+    // dati_json è NOT NULL in schema: undefined/null/'' qui è un'anomalia
+    // di query, non un dato legittimo — niente skip silenzioso.
+    if (r.datitext === undefined || r.datitext === null || r.datitext === '') {
+      throw new Error(
+        `Riga ${r.id}: dati_json letto come ${JSON.stringify(r.datitext)} ` +
+        `(colonna NOT NULL in schema — verificare l'alias della query prima di procedere)`
+      )
     }
+
+    const update: Update = { id: r.id }
+
+    if (r.cf && r.cf !== '' && !cfEncrypted(r.cf)) {
+      update.cf = encrypt(r.cf)
+    }
+
+    const parsed = JSON.parse(r.datitext)
+    if (!datiEncrypted(parsed)) {
+      update.dati = JSON.stringify({ v: 1, enc: encrypt(JSON.stringify(parsed)) })
+    }
+
+    if (update.cf !== undefined || update.dati !== undefined) {
+      updates.push(update)
+    } else {
+      giaCifrati++
+    }
+  }
+
+  console.log(`Righe da cifrare: ${updates.length} · già cifrate: ${giaCifrati}`)
+
+  if (!APPLY) {
+    console.log('\nDRY-RUN: nessuna riga modificata. Rilanciare con --apply per scrivere.\n')
+    await closeDb()
+    process.exit(0)
+  }
+
+  let cifrati = 0, errori = 0
+  try {
+    await db.transaction(async (tx) => {
+      for (const u of updates) {
+        if (u.cf !== undefined && u.dati !== undefined) {
+          await tx.execute(sql`UPDATE certificati SET cf = ${u.cf}, dati_json = ${u.dati}::jsonb WHERE id = ${u.id}`)
+        } else if (u.cf !== undefined) {
+          await tx.execute(sql`UPDATE certificati SET cf = ${u.cf} WHERE id = ${u.id}`)
+        } else {
+          await tx.execute(sql`UPDATE certificati SET dati_json = ${u.dati}::jsonb WHERE id = ${u.id}`)
+        }
+        cifrati++
+      }
+    })
+  } catch (err) {
+    errori = 1
+    cifrati = 0
+    console.error('❌ Transazione annullata (rollback completo, nessuna riga modificata):', (err as Error).message)
   }
 
   console.log(`\n✅ Fatto. Cifrate: ${cifrati} · già cifrate: ${giaCifrati} · errori: ${errori}\n`)
