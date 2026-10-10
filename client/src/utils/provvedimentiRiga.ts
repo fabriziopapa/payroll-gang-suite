@@ -36,6 +36,12 @@ export interface StatoProvv {
 const MESI = ['', 'gen', 'feb', 'mar', 'apr', 'mag', 'giu',
   'lug', 'ago', 'set', 'ott', 'nov', 'dic']
 
+/** "2026-10-05" -> "05/10/2026". */
+function ggmmaaaa(iso: string): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso
+}
+
 /** "2026-08" -> "ago 2026". */
 function meseBreve(k: string): string {
   return `${MESI[Number(k.slice(5, 7))] ?? k} ${k.slice(0, 4)}`
@@ -280,6 +286,241 @@ function elenco(xs: string[], max = 6): string {
   return xs.slice(0, max).join(', ') + (xs.length > max ? '…' : '')
 }
 
+// ── Stesso numero su piu' persone ─────────────────────────────────────
+//
+// Di norma e' un refuso (il precedente: 000025996 su due matricole e
+// 000025998 mai usato), ma un atto puo' anche coprire piu' dottorandi. Quindi
+// e' BLOCCANTE finche' qualcuno non conferma, per QUEL numero e QUELLE
+// matricole, che si tratta dello stesso atto. La conferma si salva nella
+// lavorazione e resta visibile; decade da sola se cambia l'insieme delle
+// matricole o la data. Stesso numero con date diverse non e' confermabile:
+// un atto non ha due date.
+
+/** Una conferma "stesso atto": per quali matricole, con quale data, quando. */
+export interface ConfermaCondiviso {
+  /** Ordinate: e' l'insieme esatto che e' stato confermato. */
+  matricole: string[]
+  /** Data dell'atto al momento della conferma (ISO, '' se mancava). */
+  data:      string
+  /** Quando e' stata data, ISO. Solo per mostrarla. */
+  il:        string
+}
+
+/** Numero di provvedimento -> conferma. Sta nel payload della lavorazione. */
+export type ProvvCondivisi = Record<string, ConfermaCondiviso>
+
+/** Un numero che compare su piu' matricole, fra i provvedimenti che concedono mesi. */
+export interface NumeroCondiviso {
+  numero:    string
+  /** Ordinate. */
+  matricole: string[]
+  persone:   Array<{ matricola: string; nominativo: string }>
+  /** Date distinte non vuote, ordinate. Piu' di una = non confermabile. */
+  date:      string[]
+}
+
+export function numeriCondivisi(righe: RigaControllo[]): NumeroCondiviso[] {
+  const per = new Map<string, { persone: Map<string, string>; date: Set<string> }>()
+  for (const r of righe) {
+    if (r.mesiScelti.size === 0 || !r.matricola) continue
+    for (const p of r.provvedimenti) {
+      const n = p.numero.trim()
+      if (!n || mesiDelProvv(r, p.id).length === 0) continue
+      if (!per.has(n)) per.set(n, { persone: new Map(), date: new Set() })
+      const x = per.get(n)!
+      if (!x.persone.has(r.matricola)) x.persone.set(r.matricola, r.nominativo)
+      if (p.data) x.date.add(p.data)
+    }
+  }
+  return [...per.entries()]
+    .filter(([, x]) => x.persone.size > 1)
+    .map(([numero, x]) => {
+      const matricole = [...x.persone.keys()].sort()
+      return {
+        numero,
+        matricole,
+        persone: matricole.map(m => ({ matricola: m, nominativo: x.persone.get(m)! })),
+        date:    [...x.date].sort(),
+      }
+    })
+    .sort((a, b) => a.numero.localeCompare(b.numero))
+}
+
+/** Si puo' confermare solo un atto con una data sola (o nessuna, che blocca comunque). */
+export function confermabile(c: NumeroCondiviso): boolean {
+  return c.date.length <= 1
+}
+
+/** La conferma vale se riguarda ESATTAMENTE queste matricole e questa data. */
+export function confermaVale(c: NumeroCondiviso, conf: ConfermaCondiviso | undefined): boolean {
+  if (!conf || !confermabile(c)) return false
+  if ((c.date[0] ?? '') !== conf.data) return false
+  if (conf.matricole.length !== c.matricole.length) return false
+  const a = [...conf.matricole].sort()
+  return a.every((m, i) => m === c.matricole[i])
+}
+
+export function nuovaConferma(c: NumeroCondiviso, il = new Date().toISOString()): ConfermaCondiviso {
+  return { matricole: [...c.matricole], data: c.date[0] ?? '', il }
+}
+
+/**
+ * Tiene solo le conferme ancora valide. Una conferma che non combacia piu'
+ * (terza persona aggiunta, data cambiata, refuso corretto) si butta: se
+ * l'insieme tornasse com'era, deve essere di nuovo una persona a dirlo.
+ * Ritorna lo STESSO oggetto se non c'e' niente da togliere.
+ */
+export function potaConferme(conferme: ProvvCondivisi, condivisi: NumeroCondiviso[]): ProvvCondivisi {
+  const perNumero = new Map(condivisi.map(c => [c.numero, c]))
+  const tenute = Object.entries(conferme).filter(([n, conf]) => {
+    const c = perNumero.get(n)
+    return c !== undefined && confermaVale(c, conf)
+  })
+  return tenute.length === Object.keys(conferme).length ? conferme : Object.fromEntries(tenute)
+}
+
+/** Conferme lette da un salvataggio. Difensiva: il JSON arriva dal database. */
+export function leggiConferme(x: unknown): ProvvCondivisi {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return {}
+  const out: ProvvCondivisi = {}
+  for (const [n, v] of Object.entries(x as Record<string, unknown>)) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) continue
+    const o = v as Record<string, unknown>
+    if (!Array.isArray(o['matricole'])) continue
+    out[n] = {
+      matricole: (o['matricole'] as unknown[]).map(String),
+      data:      typeof o['data'] === 'string' ? o['data'] : '',
+      il:        typeof o['il'] === 'string' ? o['il'] : '',
+    }
+  }
+  return out
+}
+
+// ── Date dei provvedimenti da verificare ─────────────────────────────────
+//
+// Una data incollata nel formato mese/giorno (Excel all'americana) passa
+// tutti i controlli: e' una data valida, solo sbagliata. "10/05/2026" letto
+// come 10 maggio in mezzo a provvedimenti di ottobre e' il caso che ha fatto
+// nascere questo controllo. Due segnali, entrambi BLOCCANTI finche' la data
+// non si corregge o qualcuno non conferma che e' giusta:
+//   - data futura: un provvedimento non puo' essere di domani;
+//   - data lontana: piu' di `soglia` giorni dalla mediana delle date della
+//     lavorazione (servono almeno tre date per avere un riferimento).
+// Se scambiando giorno e mese la data torna vicina alle altre, la si propone.
+
+const GIORNO = 86_400_000
+
+function giorni(iso: string): number | null {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return null
+  const t = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  const d = new Date(t)
+  // 2026-02-31 non e' una data: Date.UTC la sposterebbe a marzo.
+  if (d.getUTCMonth() !== Number(m[2]) - 1 || d.getUTCDate() !== Number(m[3])) return null
+  return Math.round(t / GIORNO)
+}
+
+export interface DataAnomala {
+  /** matricola|numero|data: la conferma vale per QUESTA data di QUESTO atto. */
+  chiave:     string
+  matricola:  string
+  nominativo: string
+  numero:     string
+  /** Lettera del provvedimento se la riga ne ha piu' d'uno. */
+  lettera:    string | null
+  provvId:    number
+  data:       string
+  motivo:     'futura' | 'lontana'
+  /** Distanza in giorni dal riferimento (dalla data di oggi se futura). */
+  distanza:   number
+  /** Mediana delle date della lavorazione, ISO ('' se non calcolabile). */
+  riferimento: string
+  /** Giorno e mese scambiati, se cosi' la data torna plausibile. */
+  proposta:   string | null
+}
+
+/** Chiave di conferma di una data -> quando e' stata confermata (ISO). */
+export type DateConfermate = Record<string, string>
+
+export function dateAnomale(righe: RigaControllo[], oggi: string, soglia = 60): DataAnomala[] {
+  const gOggi = giorni(oggi)
+  const candidati: Array<{ r: RigaControllo; p: ProvvRiga; i: number; g: number }> = []
+  for (const r of righe) {
+    if (r.mesiScelti.size === 0 || !r.matricola) continue
+    r.provvedimenti.forEach((p, i) => {
+      if (mesiDelProvv(r, p.id).length === 0) return
+      const g = giorni(p.data)
+      if (g !== null) candidati.push({ r, p, i, g })
+    })
+  }
+
+  const ord = candidati.map(c => c.g).sort((a, b) => a - b)
+  const mediana = ord.length >= 3 ? ord[Math.floor((ord.length - 1) / 2)]! : null
+  const iso = (g: number) => new Date(g * GIORNO).toISOString().slice(0, 10)
+
+  const out: DataAnomala[] = []
+  for (const { r, p, i, g } of candidati) {
+    let motivo: DataAnomala['motivo'] | null = null
+    let distanza = 0
+    if (gOggi !== null && g > gOggi) { motivo = 'futura'; distanza = g - gOggi }
+    else if (mediana !== null && Math.abs(g - mediana) > soglia) { motivo = 'lontana'; distanza = Math.abs(g - mediana) }
+    if (!motivo) continue
+
+    // Giorno e mese scambiati: proposta solo se la data scambiata e' valida,
+    // non futura e vicina alle altre.
+    let proposta: string | null = null
+    const [y, m, d] = p.data.split('-') as [string, string, string]
+    if (m !== d) {
+      const sc = `${y}-${d}-${m}`
+      const gs = giorni(sc)
+      const vicina = mediana === null || Math.abs(gs! - mediana) <= soglia
+      if (gs !== null && (gOggi === null || gs <= gOggi) && vicina) proposta = sc
+    }
+
+    out.push({
+      chiave:      `${r.matricola}|${p.numero.trim()}|${p.data}`,
+      matricola:   r.matricola!,
+      nominativo:  r.nominativo,
+      numero:      p.numero.trim(),
+      lettera:     r.provvedimenti.length > 1 ? letteraProvv(i) : null,
+      provvId:     p.id,
+      data:        p.data,
+      motivo,
+      distanza,
+      riferimento: mediana !== null ? iso(mediana) : '',
+      proposta,
+    })
+  }
+  return out
+}
+
+/** Tiene solo le conferme di date ancora anomale. Stesso oggetto se niente cambia. */
+export function potaDate(conf: DateConfermate, anomale: DataAnomala[]): DateConfermate {
+  const chiavi = new Set(anomale.map(a => a.chiave))
+  const tenute = Object.entries(conf).filter(([k]) => chiavi.has(k))
+  return tenute.length === Object.keys(conf).length ? conf : Object.fromEntries(tenute)
+}
+
+export function leggiDateConfermate(x: unknown): DateConfermate {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return {}
+  return Object.fromEntries(
+    Object.entries(x as Record<string, unknown>).filter(([, v]) => typeof v === 'string') as Array<[string, string]>,
+  )
+}
+
+/** Il problema bloccante per le date anomale non ancora confermate. */
+export function problemiDate(anomale: DataAnomala[], conf: DateConfermate): string[] {
+  const aperte = anomale.filter(a => !conf[a.chiave])
+  if (aperte.length === 0) return []
+  const descr = aperte.slice(0, 6).map(a => {
+    const chi = `${a.nominativo}${a.lettera ? ` (${a.lettera})` : ''} ${a.numero || 'senza numero'} del ${ggmmaaaa(a.data)}`
+    const perche = a.motivo === 'futura' ? 'data futura' : `${a.distanza} giorni dalle altre`
+    return `${chi} (${perche}${a.proposta ? `, forse ${ggmmaaaa(a.proposta)}?` : ''})`
+  })
+  return [`Data provvedimento da verificare su ${aperte.length} provvedimento/i: ${descr.join('; ')}` +
+    `${aperte.length > 6 ? '…' : ''}. Correggila, o conferma qui sotto che è giusta.`]
+}
+
 /**
  * Controlli BLOCCANTI sui provvedimenti, solo sulle righe con mesi scelti
  * (quelle che finiscono nel CSV). Sostituiscono i tre controlli di prima
@@ -290,13 +531,12 @@ function elenco(xs: string[], max = 6): string {
  *   - lo stesso numero due volte sulla stessa persona;
  *   - un mese scelto senza provvedimento (solo da salvataggi rovinati).
  */
-export function problemiProvv(righe: RigaControllo[]): string[] {
+export function problemiProvv(righe: RigaControllo[], conferme: ProvvCondivisi = {}): string[] {
   const senzaNumero: string[] = []
   const senzaData:   string[] = []
   const senzaMesi:   string[] = []
   const ripetuti:    string[] = []
   const orfani:      string[] = []
-  const perNumero = new Map<string, Set<string>>()
 
   for (const r of righe) {
     if (r.mesiScelti.size === 0) continue
@@ -315,10 +555,6 @@ export function problemiProvv(righe: RigaControllo[]): string[] {
       if (!n) return
       if (visti.has(n)) ripetuti.push(`${r.nominativo} (${n})`)
       visti.add(n)
-      if (r.matricola) {
-        if (!perNumero.has(n)) perNumero.set(n, new Set())
-        perNumero.get(n)!.add(r.matricola)
-      }
     })
 
     const senza = [...r.mesiScelti].sort().filter(k => !provvDelMese(r, k))
@@ -341,10 +577,17 @@ export function problemiProvv(righe: RigaControllo[]): string[] {
   if (ripetuti.length > 0) {
     out.push(`Stesso numero di provvedimento ripetuto sulla stessa persona: ${elenco(ripetuti)}.`)
   }
-  // Stesso numero su matricole diverse: nel CSV di luglio ogni dottorando
-  // aveva il suo. Finche' l'ufficio non dice il contrario (§10.4), e' errore.
-  for (const [n, ms] of perNumero) {
-    if (ms.size > 1) out.push(`Numero provvedimento ${n} usato su più matricole: ${[...ms].join(', ')}.`)
+  // Stesso numero su matricole diverse: errore, salvo conferma esplicita che
+  // e' lo stesso atto (vedi sopra). Con date diverse non c'e' conferma che tenga.
+  for (const c of numeriCondivisi(righe)) {
+    if (!confermabile(c)) {
+      out.push(`Numero provvedimento ${c.numero} usato su più matricole con date diverse ` +
+        `(${c.date.map(ggmmaaaa).join(' / ')}): ${c.matricole.join(', ')}. ` +
+        `Lo stesso atto non può avere due date: correggi il numero o la data.`)
+    } else if (!confermaVale(c, conferme[c.numero])) {
+      out.push(`Numero provvedimento ${c.numero} usato su più matricole: ${c.matricole.join(', ')}. ` +
+        `Se è un refuso correggilo; se è davvero lo stesso atto, confermalo qui sotto.`)
+    }
   }
   return out
 }

@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.10.10-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.10.10.1-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -174,7 +174,9 @@ npm run test --workspace=client
 - **Piu' provvedimenti per persona** (dalla 26.10.10, `utils/provvedimentiRiga.ts`, logica pura con test) — una persona puo' avere un provvedimento per agosto e un altro per settembre e ottobre, ognuno con numero e data suoi. Ogni mese scelto appartiene a **un solo** provvedimento (due sullo stesso mese sarebbero la competenza doppia). Con piu' provvedimenti ognuno ha una lettera e un colore: i mesi cliccati vanno al provvedimento attivo, la lettera sotto un mese lo passa al successivo, *+ provvedimento* ne aggiunge uno, *−* toglie quello che non ha mesi. Nel CSV ogni mese esce con gli estremi del suo provvedimento. *a tutte* della data predefinita compila solo le date vuote.
 - **Risoluzione nominativi** (`services/emolumenti/nominativi.ts`, logica pura con test) — tre grafie per gli apostrofi (`D'Angelo` / `D Angelo` / `DAngelo`), ordine invertito, tier esatto che batte il parziale. **Mai una scelta a indovinare**: con piu' candidati la riga resta ambigua e decide l'operatore, che puo' anche cercare in anagrafica direttamente dalla riga.
 - **Abbinamenti d'ufficio** — scegliendo il tipo (o la voce) si compilano voce e capitolo: DR `09834`/`000601` (maggiorazioni, a **parti** = 30), BS `09947`/`000706` (borse non esenti, IRAP, a **importo**), BE `09766`/`000602` (borse esenti, a **importo**). Restano modificabili a mano; se divergono compare un avviso che dice cosa, senza bloccare.
-- **Controlli bloccanti prima dell'export** — mesi non selezionati, tipo/voce mancanti, numero o data mancanti su un provvedimento che concede mesi, **provvedimento senza mesi** accanto ad altri, mese senza provvedimento, stesso numero due volte sulla stessa persona, **stesso numero di provvedimento su matricole diverse**, stessa matricola su piu' righe, importo assente o non valido sulle voci a importo, righe con mesi ma CSA mai letto.
+- **Controlli bloccanti prima dell'export** — mesi non selezionati, tipo/voce mancanti, numero o data mancanti su un provvedimento che concede mesi, **provvedimento senza mesi** accanto ad altri, mese senza provvedimento, stesso numero due volte sulla stessa persona, **stesso numero di provvedimento su matricole diverse** (sbloccabile solo con una **conferma esplicita** che e' lo stesso atto, vedi sotto), stessa matricola su piu' righe, importo assente o non valido sulle voci a importo, righe con mesi ma CSA mai letto.
+- **Stesso provvedimento su piu' persone** (dalla 26.10.10.1) — di norma e' un refuso, quindi blocca. Se l'atto copre davvero piu' dottorandi, in *Esportazione* si preme **«Confermo: e' lo stesso atto»**: la conferma vale per **quel numero, quelle matricole e quella data**, si salva nella lavorazione (`provvCondivisi`) e resta visibile con data e ora, annullabile. Se cambia l'insieme delle matricole o la data decade da sola e va ridata. Stesso numero con **date diverse** non e' confermabile.
+- **Date dei provvedimenti da verificare** (dalla 26.10.10.1) — una data **futura**, o lontana **piu' di 60 giorni** dalla mediana delle date della lavorazione (con almeno tre date), blocca l'export. Il caso tipico e' giorno e mese invertiti nel copia-incolla da Excel (`10/05` letto come 10 maggio in mezzo a provvedimenti di ottobre): se lo scambio torna plausibile compare **«Correggi in 05/10/2026»**. Altrimenti **«La data e' giusta»**: la conferma vale per quella data di quell'atto (`dateConfermate`), resta visibile e decade se la data cambia.
 - **Export CSV per HR Suite** — stesso tracciato a 24 colonne delle liquidazioni; `dataProvvedimento` in ISO, `dataCompetenzaVoce` in `GG/MM/AAAA`; la colonna inattiva (parti o importo) va a **0**, non vuota.
 - **Export TXT matricole per area del conto** — un file per `ITALIA` / `SEPA` / `EXTRA_UE`, oppure Italia + estero, oppure uno solo. Ci finisce **solo chi ha mesi selezionati**; chi non ha una coordinata CSA nota resta fuori, e' segnalato con un pallino rosso sulla riga ed elencato per nome sotto il pulsante — e da li' si puo' assegnargli l'area a mano (vedi *Dettagli anagrafici per riga*).
 - **Dettagli anagrafici per riga** — il pulsante con ruolo e area del conto, in testa a ogni persona, apre l'elenco **di tutti i rapporti** che PGS conosce per quella matricola (`GET /emolumenti/storico-ruoli/:matricola`, letto solo quando si apre il pannello). Serve perche' l'elenco ne mostra **uno solo**, quello con la decorrenza piu' alta: per i docenti basta, per dottorandi e borsisti no — sono contratti brevi in catena, e la stessa persona puo' essere stata `DR` fino all'anno scorso ed essere `BS` adesso. Da li' si sceglie il ruolo giusto per il mese liquidato, e si assegna a mano l'area del conto a chi in anagrafica non ce l'ha. Le due scelte restano **nella lavorazione** (`ruoloScelto`, `areaContoScelta`), sono marcate *a mano* in interfaccia e **non tornano in anagrafica**: quella si corregge solo re-importando da SGE. Il ruolo scelto e' quello che finisce nel CSV.
@@ -383,6 +385,15 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.10.10.1
+**Emolumenti: stesso provvedimento su piu' persone e date anomale, sbloccabili con conferma esplicita**
+
+- Il controllo «Numero provvedimento usato su piu' matricole» (piano §6.1 punto 3, domanda 10.4) resta bloccante, ma ora si sblocca con **«Confermo: e' lo stesso atto»** nella sezione *Esportazione*. La conferma vale per quel numero, quelle matricole e quella data; resta visibile (✓ con data e ora, *annulla conferma*) e si salva nella lavorazione.
+- La conferma decade da sola se si aggiunge o toglie una persona con quel numero, se cambia la data o se il numero non e' piu' condiviso (refuso corretto). Se l'insieme tornasse com'era va ridata.
+- Stesso numero con date diverse: bloccante e **non** confermabile, con le date nel messaggio.
+- **Date dei provvedimenti da verificare**: data futura, o a piu' di 60 giorni dalla mediana della lavorazione, blocca l'export. Se scambiando giorno e mese la data torna plausibile, «Correggi in …» la sistema con un clic; altrimenti «La data e' giusta» la conferma (visibile, annullabile, decade se la data cambia). Nato dal caso `10/05/2026` letto come 10 maggio in mezzo a provvedimenti di ottobre.
+- *Duplica* non copia le conferme. Salvataggi precedenti: nessuna conferma. Nessuna migrazione del database; 25 test (`npm run test --workspace=client`).
 
 ### 26.10.10
 **Emolumenti: piu' provvedimenti per la stessa persona**

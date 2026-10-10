@@ -1,6 +1,6 @@
 {
   "name": "payroll-gang-suite",
-  "version": "26.10.10",
+  "version": "26.10.10.1",
   "private": true,
   "workspaces": [
     "client",

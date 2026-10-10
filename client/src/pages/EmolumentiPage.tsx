@@ -43,6 +43,9 @@ import {
   type ProvvRiga, provvVuoto, provvDaPayload, normalizzaProvv, provvDelMese,
   mesiDelProvv, assegnaMese, provvSuccessivo, togliMesi, nuovoProvv, rimuoviProvv,
   aggiornaProvv, completaDate, accodaProvv, problemiProvv, letteraProvv,
+  type ProvvCondivisi, numeriCondivisi, confermabile, confermaVale, nuovaConferma,
+  potaConferme, leggiConferme,
+  type DateConfermate, dateAnomale, potaDate, leggiDateConfermate, problemiDate,
 } from '../utils/provvedimentiRiga'
 import type { CsvExportRow } from '../types'
 
@@ -144,6 +147,12 @@ const MESI_LUNGHI = ['', 'gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'gi
 /** Chiave di competenza: "AAAA-MM". */
 function chiaveMese(anno: number, mese: number): string {
   return `${anno}-${String(mese).padStart(2, '0')}`
+}
+
+/** Oggi, ISO, nel fuso del browser (non UTC: alle 00:30 italiane e' gia' domani). */
+function oggiIso(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 function etichettaMese(k: string): string {
@@ -570,6 +579,19 @@ export default function EmolumentiPage() {
   /** Mese "AAAA-MM" -> data di competenza ISO, solo per i mesi spostati a mano.
    *  Mese assente = ultimo giorno del mese, che e' il default di sempre. */
   const [dateCompetenza, setDateCompetenza] = useState<Record<string, string>>({})
+  /**
+   * Numeri di provvedimento confermati come "stesso atto" per piu' persone:
+   * numero -> matricole, data e quando. Si salva con la lavorazione; una
+   * conferma che non combacia piu' con le righe si toglie da sola (vedi
+   * potaConferme), e la riga torna bloccata.
+   */
+  const [provvCondivisi, setProvvCondivisi] = useState<ProvvCondivisi>({})
+  /**
+   * Date di provvedimento anomale (future, o lontane dalle altre) confermate
+   * come giuste: "matricola|numero|data" -> quando. Stessa logica: si salva,
+   * resta visibile, e se la data cambia la conferma non vale piu'.
+   */
+  const [dateConfermate, setDateConfermate] = useState<DateConfermate>({})
   /**
    * Il mese della liquidazione a cui la lavorazione si riferisce, 'AAAA-MM'
    * ('' = non ancora indicato). NON e' una data di competenza: quelle sono
@@ -1187,6 +1209,11 @@ export default function EmolumentiPage() {
         meseLiquidazione,
       },
       righe: serializzaRighe(righe ?? []),
+      // Conferme "stesso atto su piu' persone". Assente nei salvataggi
+      // anteriori alla 26.10.10.1: nessuna conferma, cioe' il blocco di prima.
+      provvCondivisi,
+      // Date anomale confermate come giuste. Assente prima della 26.10.10.1.
+      dateConfermate,
     }
   }
 
@@ -1264,6 +1291,8 @@ export default function EmolumentiPage() {
       )
 
       setRighe(deserializzaRighe(dati['righe']))
+      setProvvCondivisi(leggiConferme(dati['provvCondivisi']))
+      setDateConfermate(leggiDateConfermate(dati['dateConfermate']))
       setLavorazioneId(row.id)
       setNomeLavorazione(row.nome)
       setStatoLavorazione(row.stato === 'archiviata' ? 'archiviata' : 'bozza')
@@ -1319,6 +1348,8 @@ export default function EmolumentiPage() {
     setDataLiquidazione(null)
     setMeseLiquidazione('')
     setRighe(null)
+    setProvvCondivisi({})
+    setDateConfermate({})
     setRaw('')
     setTipoEmol('')
     setArchiviaTarget(null)
@@ -1358,7 +1389,8 @@ export default function EmolumentiPage() {
         ...(l.tipo ? { tipo: l.tipo } : {}),
         // Il mese di liquidazione NON si copia: la copia serve per il mese
         // dopo, e un mese riportato da quello prima sembra giusto e non lo e'.
-        dati: { ...dati, righe: [], testata: senzaMeseLiquidazione(dati['testata']) },
+        // Neanche le conferme "stesso atto": riguardano persone che la copia non ha.
+        dati: { ...dati, righe: [], provvCondivisi: {}, dateConfermate: {}, testata: senzaMeseLiquidazione(dati['testata']) },
       })
       await caricaElenco()
       showToast(`Creata "${row.nome}" — testata copiata, nominativi da incollare.`, 'success')
@@ -1463,6 +1495,22 @@ export default function EmolumentiPage() {
     showToast(`${fileTxt.length} file scaricati · ${nMatricoleTxt} matricole.`, 'success')
   }
 
+  /** Numeri di provvedimento su piu' matricole, fra le righe che vanno nel CSV. */
+  const condivisi = useMemo(() => numeriCondivisi(righe ?? []), [righe])
+
+  // Una conferma vale solo per l'insieme esatto che e' stato confermato. Se
+  // cambia (terza persona, data, refuso corretto) la si toglie: se l'insieme
+  // tornasse com'era, deve essere di nuovo una persona a dirlo.
+  useEffect(() => {
+    setProvvCondivisi(prev => potaConferme(prev, condivisi))
+  }, [condivisi])
+
+  /** Date di provvedimento future o lontane dalle altre: si correggono o si confermano. */
+  const anomale = useMemo(() => dateAnomale(righe ?? [], oggiIso()), [righe])
+  useEffect(() => {
+    setDateConfermate(prev => potaDate(prev, anomale))
+  }, [anomale])
+
   const problemi = useMemo(() => {
     if (!righe) return []
     const out: string[] = []
@@ -1475,7 +1523,8 @@ export default function EmolumentiPage() {
     // Numero e data di ogni provvedimento che concede almeno un mese, mesi
     // senza provvedimento, provvedimenti senza mesi, numeri ripetuti sulla
     // stessa persona o su piu' matricole: utils/provvedimentiRiga.ts.
-    out.push(...problemiProvv(conMesi))
+    out.push(...problemiProvv(conMesi, provvCondivisi))
+    out.push(...problemiDate(anomale, dateConfermate))
 
     // La stessa matricola su due righe (per esempio due nomi ambigui risolti
     // sulla stessa persona): due righe con lo stesso mese sarebbero la
@@ -1534,7 +1583,7 @@ export default function EmolumentiPage() {
       out.push(`Ruolo da scegliere su ${senzaRuolo.length} mese/i: ${senzaRuolo.slice(0, 5).join('; ')}${senzaRuolo.length > 5 ? '…' : ''}.`)
     }
     return out
-  }, [righe, tipoProv, voce, modo, storici, dateCompetenza])
+  }, [righe, tipoProv, voce, modo, storici, dateCompetenza, provvCondivisi, anomale, dateConfermate])
 
   /** I mesi che almeno una riga ha selezionato: quelli che avranno una data. */
   const mesiInUso = useMemo(() => {
@@ -2258,6 +2307,130 @@ export default function EmolumentiPage() {
               <p className="text-sm text-slate-400">
                 Nessun problema rilevato. {nRigheCsv} righe pronte.
               </p>
+            )}
+            {/* Stesso numero su piu' persone: si sblocca solo con una conferma
+                esplicita, che resta visibile qui e nel salvataggio. */}
+            {condivisi.length > 0 && (
+              <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-3 space-y-2">
+                <p className="text-xs font-medium text-slate-400">Stesso provvedimento su più persone</p>
+                <p className="text-xs text-slate-500">
+                  Di solito è un refuso, per questo blocca l’export. Se è davvero lo stesso atto,
+                  confermalo: la conferma vale per queste persone e questa data, e se cambiano decade
+                  e va ridata. Con date diverse non si può confermare.
+                </p>
+                {condivisi.map(c => {
+                  const conf = provvCondivisi[c.numero]
+                  const ok   = confermaVale(c, conf)
+                  const chi  = c.persone.map(x => `${x.nominativo} (${x.matricola})`).join(', ')
+                  return (
+                    <div key={c.numero} className="flex items-center gap-x-3 gap-y-1 flex-wrap text-xs">
+                      <span className={`font-mono ${ok ? 'text-slate-400' : 'text-amber-300'}`}>{c.numero}</span>
+                      <span className={ok ? 'text-slate-500' : 'text-slate-300'}>
+                        {c.date.length > 0 ? `del ${c.date.map(d => gg(d)).join(' / ')}` : 'senza data'} · {chi}
+                      </span>
+                      {!confermabile(c) ? (
+                        <span className="text-red-400">date diverse: non confermabile</span>
+                      ) : ok ? (
+                        <>
+                          <span className="text-slate-400">
+                            ✓ confermato come atto unico
+                            {conf?.il && !Number.isNaN(Date.parse(conf.il))
+                              ? ` il ${new Date(conf.il).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}`
+                              : ''}
+                          </span>
+                          <button
+                            onClick={() => setProvvCondivisi(prev => {
+                              const next = { ...prev }
+                              delete next[c.numero]
+                              return next
+                            })}
+                            className="text-slate-500 hover:text-red-400 underline decoration-dotted"
+                          >annulla conferma</button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => setProvvCondivisi(prev => ({ ...prev, [c.numero]: nuovaConferma(c) }))}
+                          title={`Dichiari che ${c.numero} è un solo atto che copre ${c.persone.length} persone`}
+                          className="px-2 py-1 rounded border border-amber-700/70 text-amber-200
+                                     hover:bg-amber-950/40 transition-colors"
+                        >
+                          Confermo: è lo stesso atto
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            {/* Date anomale: future, o lontane dalle altre (tipico: giorno e mese
+                invertiti da Excel). Si correggono, o si conferma che sono giuste. */}
+            {anomale.length > 0 && (
+              <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-3 space-y-2">
+                <p className="text-xs font-medium text-slate-400">Date dei provvedimenti da verificare</p>
+                <p className="text-xs text-slate-500">
+                  Date future, o lontane più di due mesi dalle altre di questa lavorazione
+                  {anomale[0]?.riferimento ? ` (riferimento: ${gg(anomale[0].riferimento)})` : ''}. Spesso è
+                  giorno e mese invertiti nel copia-incolla: se lo scambio torna plausibile te lo propongo.
+                  La conferma vale per quella data: se la cambi, decade.
+                </p>
+                {anomale.map(a => {
+                  const il = dateConfermate[a.chiave]
+                  return (
+                    <div key={a.chiave} className="flex items-center gap-x-3 gap-y-1 flex-wrap text-xs">
+                      <span className={il ? 'text-slate-500' : 'text-slate-300'}>
+                        {a.nominativo}{a.lettera ? ` (${a.lettera})` : ''} · {a.numero || 'senza numero'}
+                      </span>
+                      <span className={`font-mono ${il ? 'text-slate-400' : 'text-amber-300'}`}>del {gg(a.data)}</span>
+                      <span className="text-slate-500">
+                        {a.motivo === 'futura' ? `futura di ${a.distanza} giorni` : `${a.distanza} giorni dalle altre`}
+                      </span>
+                      {il ? (
+                        <>
+                          <span className="text-slate-400">
+                            ✓ data confermata
+                            {!Number.isNaN(Date.parse(il))
+                              ? ` il ${new Date(il).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}`
+                              : ''}
+                          </span>
+                          <button
+                            onClick={() => setDateConfermate(prev => {
+                              const next = { ...prev }
+                              delete next[a.chiave]
+                              return next
+                            })}
+                            className="text-slate-500 hover:text-red-400 underline decoration-dotted"
+                          >annulla conferma</button>
+                        </>
+                      ) : (
+                        <>
+                          {a.proposta && (
+                            <button
+                              onClick={() => setRighe(prev => prev!.map(r =>
+                                r.matricola === a.matricola &&
+                                r.provvedimenti.some(p => p.id === a.provvId && p.data === a.data)
+                                  ? aggiornaProvv(r, a.provvId, { data: a.proposta! })
+                                  : r))}
+                              title="Scambia giorno e mese di questa data"
+                              className="px-2 py-1 rounded border border-indigo-700/70 text-indigo-200
+                                         hover:bg-indigo-950/40 transition-colors"
+                            >
+                              Correggi in {gg(a.proposta)}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setDateConfermate(prev => ({ ...prev, [a.chiave]: new Date().toISOString() }))}
+                            title="Dichiari che la data di questo provvedimento è giusta così"
+                            className="px-2 py-1 rounded border border-amber-700/70 text-amber-200
+                                       hover:bg-amber-950/40 transition-colors"
+                          >
+                            La data è giusta
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
             )}
             {mesiInUso.length > 0 && (
               <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-3 space-y-2">

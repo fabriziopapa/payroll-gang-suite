@@ -8,6 +8,8 @@ import {
   accodaProvv, assegnaMese, completaDate, letteraProvv, mesiDelProvv,
   normalizzaProvv, nuovoProvv, problemiProvv, provvDaPayload, provvDelMese,
   provvSuccessivo, rimuoviProvv, togliMesi, type RigaControllo,
+  numeriCondivisi, confermaVale, nuovaConferma, potaConferme, leggiConferme,
+  dateAnomale, potaDate, leggiDateConfermate, problemiDate,
 } from './provvedimentiRiga.ts'
 
 function riga(over: Partial<RigaControllo> = {}): RigaControllo {
@@ -185,4 +187,154 @@ test('controlli bloccanti', () => {
   const u = assegnaMese(riga({ provvedimenti: [{ id: 0, numero: '9', data: 'x' }] }), '2026-08', 0).riga
   const v = { ...u, nominativo: 'Bianchi Anna', matricola: '900002' }
   assert.ok(problemiProvv([u, v]).some(m => m.includes('usato su più matricole')))
+})
+
+// ── Stesso numero su piu' persone: blocco con conferma esplicita ─────────
+
+/** Una persona con un provvedimento e un mese scelto. */
+function persona(nominativo: string, matricola: string, numero: string, data: string, mese = '2026-08'): RigaControllo {
+  return assegnaMese(riga({ nominativo, matricola, provvedimenti: [{ id: 0, numero, data }] }), mese, 0).riga
+}
+
+test('stesso numero su due persone: bloccante finche\' non si conferma', () => {
+  const a = persona('Rossi Mario', '900001', '777', '2026-10-05')
+  const b = persona('Bianchi Anna', '900002', '777', '2026-10-05')
+  const [c] = numeriCondivisi([a, b])
+  assert.deepEqual(c?.matricole, ['900001', '900002'])
+  assert.deepEqual(c?.date, ['2026-10-05'])
+
+  assert.ok(problemiProvv([a, b]).some(m => m.includes('usato su più matricole')))
+  const conferme = { '777': nuovaConferma(c!, '2026-10-10T20:00:00Z') }
+  assert.deepEqual(problemiProvv([a, b], conferme), [])
+})
+
+test('la conferma decade se cambia l\'insieme delle matricole o la data', () => {
+  const a = persona('Rossi Mario', '900001', '777', '2026-10-05')
+  const b = persona('Bianchi Anna', '900002', '777', '2026-10-05')
+  const conf = nuovaConferma(numeriCondivisi([a, b])[0]!)
+
+  // Una terza persona con lo stesso numero.
+  const t = persona('Verdi Luca', '900003', '777', '2026-10-05')
+  const c3 = numeriCondivisi([a, b, t])[0]!
+  assert.equal(confermaVale(c3, conf), false)
+  assert.ok(problemiProvv([a, b, t], { '777': conf }).some(m => m.includes('usato su più matricole')))
+
+  // La stessa data cambiata su entrambe: e' un altro atto, si riconferma.
+  const a2 = { ...a, provvedimenti: [{ id: 0, numero: '777', data: '2026-10-06' }] }
+  const b2 = { ...b, provvedimenti: [{ id: 0, numero: '777', data: '2026-10-06' }] }
+  assert.equal(confermaVale(numeriCondivisi([a2, b2])[0]!, conf), false)
+})
+
+test('stesso numero con date diverse: non confermabile', () => {
+  const a = persona('Rossi Mario', '900001', '777', '2026-10-05')
+  const b = persona('Bianchi Anna', '900002', '777', '2026-05-10')
+  const c = numeriCondivisi([a, b])[0]!
+  const finta = { matricole: ['900001', '900002'], data: '2026-10-05', il: '' }
+  assert.equal(confermaVale(c, finta), false)
+  const p = problemiProvv([a, b], { '777': finta })
+  assert.ok(p.some(m => m.includes('con date diverse') && m.includes('05/10/2026') && m.includes('10/05/2026')))
+})
+
+test('righe senza mesi e provvedimenti senza mesi non contano', () => {
+  const a = persona('Rossi Mario', '900001', '777', '2026-10-05')
+  const b = riga({ nominativo: 'Bianchi Anna', matricola: '900002', provvedimenti: [{ id: 0, numero: '777', data: '2026-10-05' }] })
+  assert.deepEqual(numeriCondivisi([a, b]), [])
+  // Stessa persona su due provvedimenti con lo stesso numero: e' un altro controllo.
+  assert.deepEqual(numeriCondivisi([a]), [])
+})
+
+test('pota: via le conferme che non combaciano piu\', stesso oggetto se niente cambia', () => {
+  const a = persona('Rossi Mario', '900001', '777', '2026-10-05')
+  const b = persona('Bianchi Anna', '900002', '777', '2026-10-05')
+  const cond = numeriCondivisi([a, b])
+  const valide = { '777': nuovaConferma(cond[0]!) }
+  assert.equal(potaConferme(valide, cond), valide)
+
+  const conVecchia = { ...valide, '888': { matricole: ['900001', '900009'], data: '', il: '' } }
+  assert.deepEqual(Object.keys(potaConferme(conVecchia, cond)), ['777'])
+  // Refuso corretto: il numero non e' piu' condiviso, la conferma se ne va.
+  assert.deepEqual(potaConferme(valide, []), {})
+})
+
+test('conferme lette da un salvataggio: difensive', () => {
+  assert.deepEqual(leggiConferme(null), {})
+  assert.deepEqual(leggiConferme([1, 2]), {})
+  assert.deepEqual(leggiConferme({ a: 'x', b: { matricole: 'no' } }), {})
+  assert.deepEqual(
+    leggiConferme({ '777': { matricole: ['900002', 900001], data: '2026-10-05', il: 'ieri' } }),
+    { '777': { matricole: ['900002', '900001'], data: '2026-10-05', il: 'ieri' } },
+  )
+})
+
+// ── Date dei provvedimenti da verificare ────────────────────────────────
+
+const OGGI = '2026-10-10'
+
+/** Il caso di ottobre: tante date di inizio ottobre e una "10/05" letta come 10 maggio. */
+function lavorazioneOttobre(): RigaControllo[] {
+  return [
+    persona('A', '900001', '101', '2026-09-14'),
+    persona('B', '900002', '102', '2026-10-02'),
+    persona('C', '900003', '103', '2026-10-05'),
+    persona('D', '900004', '104', '2026-10-06'),
+    persona('E', '900005', '105', '2026-05-10'),
+  ]
+}
+
+test('data lontana dalle altre: bloccante, con la proposta giorno/mese scambiati', () => {
+  const an = dateAnomale(lavorazioneOttobre(), OGGI)
+  assert.equal(an.length, 1)
+  const a = an[0]!
+  assert.equal(a.matricola, '900005')
+  assert.equal(a.motivo, 'lontana')
+  assert.equal(a.proposta, '2026-10-05')
+  assert.equal(a.riferimento, '2026-10-02')
+  assert.equal(a.chiave, '900005|105|2026-05-10')
+  const p = problemiDate(an, {})
+  assert.equal(p.length, 1)
+  assert.ok(p[0]!.includes('10/05/2026') && p[0]!.includes('forse 05/10/2026?'))
+  // 14/09 e' a 18 giorni dalla mediana: normale.
+  assert.ok(!an.some(x => x.matricola === '900001'))
+})
+
+test('data confermata: sblocca solo quella data di quell\'atto', () => {
+  const an = dateAnomale(lavorazioneOttobre(), OGGI)
+  const conf = { [an[0]!.chiave]: '2026-10-10T20:00:00Z' }
+  assert.deepEqual(problemiDate(an, conf), [])
+  // Data corretta: non e' piu' anomala, la conferma si pota.
+  const corrette = lavorazioneOttobre().map(r => r.matricola === '900005'
+    ? { ...r, provvedimenti: [{ id: 0, numero: '105', data: '2026-10-05' }] } : r)
+  const an2 = dateAnomale(corrette, OGGI)
+  assert.deepEqual(an2, [])
+  assert.deepEqual(potaDate(conf, an2), {})
+  assert.equal(potaDate(conf, an), conf)
+})
+
+test('data futura: bloccante anche con poche date', () => {
+  const an = dateAnomale([persona('A', '900001', '101', '2026-12-01')], OGGI)
+  assert.equal(an.length, 1)
+  assert.equal(an[0]!.motivo, 'futura')
+  assert.equal(an[0]!.distanza, 52)
+  // 2026-12-01 scambiata e' 2026-01-12: non futura, nessuna mediana -> proposta.
+  assert.equal(an[0]!.proposta, '2026-01-12')
+})
+
+test('con meno di tre date non c\'e\' riferimento: nessuna data "lontana"', () => {
+  const r = [persona('A', '900001', '101', '2026-01-10'), persona('B', '900002', '102', '2026-10-01')]
+  assert.deepEqual(dateAnomale(r, OGGI), [])
+})
+
+test('niente proposta se lo scambio non e\' una data o resta lontana', () => {
+  const base = lavorazioneOttobre().slice(0, 4)
+  // 25/05 -> mese 25: non esiste.
+  const a = dateAnomale([...base, persona('E', '900005', '105', '2026-05-25')], OGGI)[0]!
+  assert.equal(a.proposta, null)
+  // 03/03: scambiata e' uguale, niente proposta.
+  const b = dateAnomale([...base, persona('E', '900005', '105', '2026-03-03')], OGGI)[0]!
+  assert.equal(b.proposta, null)
+})
+
+test('date confermate lette da un salvataggio: difensive', () => {
+  assert.deepEqual(leggiDateConfermate(null), {})
+  assert.deepEqual(leggiDateConfermate({ a: 1, 'x|1|2026-05-10': 'ieri' }), { 'x|1|2026-05-10': 'ieri' })
 })
