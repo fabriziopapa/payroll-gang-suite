@@ -3,6 +3,8 @@
 //
 // Il ciclo di lavoro dell'ufficio, in un posto solo:
 //   1. si incolla da Excel "Cognome Nome<TAB>numero provvedimento";
+//      la stessa persona con piu' numeri resta UNA riga con piu'
+//      provvedimenti, e ogni mese scelto appartiene a uno di essi;
 //   2. i nomi diventano matricole contro l'anagrafica (mai per indovinare:
 //      se i candidati sono due si chiede);
 //   3. si legge da CSA che cosa c'e' GIA' per quella voce;
@@ -37,6 +39,11 @@ import { serializeCsv, downloadCsv, lastDayOfMonth } from '../utils/biz'
 import { nomeOppureTe } from '../utils/utente'
 import { useStore } from '../store/useStore'
 import { TIPO_PROVVEDIMENTO_DEFAULT } from '../utils/provvedimento'
+import {
+  type ProvvRiga, provvVuoto, provvDaPayload, normalizzaProvv, provvDelMese,
+  mesiDelProvv, assegnaMese, provvSuccessivo, togliMesi, nuovoProvv, rimuoviProvv,
+  aggiornaProvv, completaDate, accodaProvv, problemiProvv, letteraProvv,
+} from '../utils/provvedimentiRiga'
 import type { CsvExportRow } from '../types'
 
 const VOCE_DEFAULT     = '09834'
@@ -152,13 +159,16 @@ function etichettaMese(k: string): string {
  * questo numero permette di riconoscere i salvataggi vecchi e convertirli
  * invece di aprirli sbagliati in silenzio.
  */
-const VERSIONE_PAYLOAD = 2
+const VERSIONE_PAYLOAD = 3
+// v3 (26.10.10): numero e data del provvedimento escono dalla riga ed
+// entrano in `provvedimenti`, con `provvPerMese` che dice di chi e' ogni
+// mese. I salvataggi v1/v2 si convertono da soli: un provvedimento, tutti
+// i mesi suoi (provvDaPayload).
 
 interface RigaLavoro {
   /** Stabile per tutta la sessione: l'ordine dell'incollato non cambia. */
   id:                  number
   nominativo:          string
-  numeroProvvedimento: string
   esito:               RigaRisoltaApi['esito']
   matricola:           string | null
   nomeCompleto:        string | null
@@ -175,8 +185,15 @@ interface RigaLavoro {
   centroDiCosto:       string
   /** Competenze che l'operatore vuole aggiungere. */
   mesiScelti:          Set<string>
-  /** Data del provvedimento — per persona, non per gruppo. ISO AAAA-MM-GG. */
-  dataProvvedimento:   string
+  /**
+   * I provvedimenti di questa persona — per persona, non per gruppo — sempre
+   * almeno uno. Piu' d'uno quando provvedimenti diversi concedono mesi
+   * diversi (CCCCC agosto, VVVVV settembre e ottobre). Logica e regole in
+   * utils/provvedimentiRiga.ts.
+   */
+  provvedimenti:       ProvvRiga[]
+  /** Mese scelto "AAAA-MM" -> id del provvedimento che lo concede. */
+  provvPerMese:        Record<string, number>
   /** Solo per le voci a importo: quanto vale la borsa, mese per mese. */
   importi:             Record<string, string>
   /** Area del conto su cui CSA paga, dall'anagrafica: 'IT' | 'SEPA' |
@@ -437,10 +454,9 @@ function deserializzaRighe(v: unknown): RigaLavoro[] {
   return v.map((x, i) => {
     const o = (x ?? {}) as Record<string, unknown>
     const arr = (k: string) => Array.isArray(o[k]) ? (o[k] as unknown[]).map(String) : []
-    return {
+    return normalizzaProvv({
       id:                  typeof o['id'] === 'number' ? o['id'] : i,
       nominativo:          String(o['nominativo'] ?? ''),
-      numeroProvvedimento: String(o['numeroProvvedimento'] ?? ''),
       esito:               (o['esito'] as RigaLavoro['esito']) ?? 'non-trovato',
       matricola:           (o['matricola'] as string | null) ?? null,
       nomeCompleto:        (o['nomeCompleto'] as string | null) ?? null,
@@ -452,7 +468,9 @@ function deserializzaRighe(v: unknown): RigaLavoro[] {
       csaErrore:           (o['csaErrore'] as string | null) ?? null,
       centroDiCosto:       String(o['centroDiCosto'] ?? ''),
       mesiScelti:          new Set(arr('mesiScelti')),
-      dataProvvedimento:   String(o['dataProvvedimento'] ?? ''),
+      // v1/v2: numeroProvvedimento e dataProvvedimento sulla riga -> un solo
+      // provvedimento con tutti i mesi. v3: l'elenco salvato.
+      ...provvDaPayload(o, arr('mesiScelti')),
       importi:             (o['importi'] as Record<string, string>) ?? {},
       areaConto:           (o['areaConto'] as string | null) ?? null,
       nazIban:             (o['nazIban'] as string | null) ?? null,
@@ -480,7 +498,7 @@ function deserializzaRighe(v: unknown): RigaLavoro[] {
         return {}
       })(),
       areaContoScelta:     (o['areaContoScelta'] as string | null) ?? null,
-    }
+    })
   })
 }
 
@@ -916,7 +934,6 @@ export default function EmolumentiPage() {
     return {
       id,
       nominativo:          '',
-      numeroProvvedimento: '',
       esito:               'non-trovato',
       matricola:           null,
       nomeCompleto:        null,
@@ -928,7 +945,8 @@ export default function EmolumentiPage() {
       csaErrore:           null,
       centroDiCosto:       '',
       mesiScelti:          new Set<string>(),
-      dataProvvedimento:   dataProv,
+      provvedimenti:       [provvVuoto(0, dataProv)],
+      provvPerMese:        {},
       importi:             {},
       areaConto:           null,
       nazIban:             null,
@@ -952,32 +970,65 @@ export default function EmolumentiPage() {
       )
 
       setRighe(prev => {
-        const cur = prev ?? []
-        const gia = new Set(cur.map(r => r.matricola).filter(Boolean) as string[])
+        const cur = [...(prev ?? [])]
         let id = prossimoId(cur)
-        const nuove: RigaLavoro[] = []
+
+        // Una persona = una riga. La chiave e' la matricola; per chi non e'
+        // ancora risolto (ambiguo, non trovato) il nominativo incollato,
+        // cosi' lo stesso nome incollato due volte resta una riga sola.
+        const chiave = (matricola: string | null, nominativo: string) =>
+          matricola ? `m:${matricola}` : `n:${nominativo.toLowerCase().replace(/\s+/g, ' ').trim()}`
+        const indice = new Map<string, number>()
+        cur.forEach((r, i) => indice.set(chiave(r.matricola, r.nominativo), i))
+
+        let nuove = 0
+        const aggiunti: string[] = [], giaPresenti: string[] = [], dateDiverse: string[] = []
 
         risultati.forEach((r, i) => {
-          // Chi c'e' gia' non si duplica: l'area si carica a piu' riprese.
-          if (r.matricola && gia.has(r.matricola)) return
-          if (r.matricola) gia.add(r.matricola)
-          nuove.push(rigaVuota(id++, {
-            nominativo:          r.nominativo,
-            numeroProvvedimento: r.numeroProvvedimento ?? '',
-            esito:               r.esito,
-            matricola:           r.matricola,
-            nomeCompleto:        r.nomeCompleto,
-            ruolo:               r.ruolo,
-            candidati:           r.candidati,
-            dataProvvedimento:   incollate[i]?.dataProvvedimento || dataProv,
-            areaConto:           r.areaConto,
-            nazIban:             r.nazIban,
+          const numero  = r.numeroProvvedimento ?? ''
+          const dataInc = incollate[i]?.dataProvvedimento ?? ''
+          const k = chiave(r.matricola, r.nominativo)
+          const j = indice.get(k)
+
+          if (j !== undefined) {
+            // Persona gia' nell'elenco: un numero NUOVO diventa un suo
+            // provvedimento in piu'. Prima questa riga spariva come "gia'
+            // presente", e con lei il secondo provvedimento.
+            const x   = accodaProvv(cur[j]!, numero, dataInc, dataProv)
+            const chi = cur[j]!.nomeCompleto ?? cur[j]!.nominativo
+            cur[j] = x.riga
+            if (x.esito === 'aggiunto')          aggiunti.push(`${chi} (${numero.trim()})`)
+            else if (x.esito === 'data-diversa') dateDiverse.push(`${chi} (${numero.trim()})`)
+            else if (x.esito !== 'completato')   giaPresenti.push(chi)
+            return
+          }
+
+          indice.set(k, cur.length)
+          nuove++
+          cur.push(rigaVuota(id++, {
+            nominativo:    r.nominativo,
+            esito:         r.esito,
+            matricola:     r.matricola,
+            nomeCompleto:  r.nomeCompleto,
+            ruolo:         r.ruolo,
+            candidati:     r.candidati,
+            provvedimenti: [{ id: 0, numero, data: dataInc || dataProv }],
+            areaConto:     r.areaConto,
+            nazIban:       r.nazIban,
           }))
         })
 
-        const scartate = risultati.length - nuove.length
-        if (scartate > 0) showToast(`${scartate} già presenti: non duplicate.`, 'warning')
-        return [...cur, ...nuove]
+        if (aggiunti.length > 0) {
+          showToast(`Provvedimento aggiunto a chi era già nell'elenco: ${aggiunti.join(', ')}. Assegnagli i suoi mesi.`, 'warning')
+        }
+        if (dateDiverse.length > 0) {
+          showToast(`Stesso numero con un'altra data — tenuta quella già presente: ${dateDiverse.join(', ')}.`, 'warning')
+        }
+        if (giaPresenti.length > 0) showToast(`${giaPresenti.length} già presenti: non duplicate.`, 'warning')
+        if (nuove === 0 && aggiunti.length === 0 && giaPresenti.length === 0 && dateDiverse.length === 0) {
+          showToast('Niente da aggiungere.', 'warning')
+        }
+        return cur
       })
       setRaw('')
     } catch (err) {
@@ -1042,10 +1093,10 @@ export default function EmolumentiPage() {
         annoA:  Number(annoA),
       })
       const perMatricola = new Map(res.risultati.map(r => [r.matricola, r]))
-      setRighe(prev => prev!.map(r => {
-        if (!r.matricola) return r
-        const res1 = perMatricola.get(r.matricola)
-        if (!res1) return r
+      setRighe(prev => prev!.map(r0 => {
+        if (!r0.matricola) return r0
+        const res1 = perMatricola.get(r0.matricola)
+        if (!res1) return r0
         const mesi = new Set<string>()
         const perMese: RigaLavoro['csaPerMese'] = {}
         for (const v of res1.voci) {
@@ -1056,6 +1107,10 @@ export default function EmolumentiPage() {
           // l'errore che l'area previene): se capita, vince l'ultima letta.
           perMese[k] = { parti: v.parti, importo: v.importo, centroDiCosto: v.codiceCentroDiCosto }
         }
+        // Un mese scelto che nel frattempo risulta gia' in CSA va tolto,
+        // altrimenti resterebbe selezionato e finirebbe nel CSV. Con lui se ne
+        // va anche la sua assegnazione al provvedimento.
+        const r = togliMesi(r0, mesi)
         return {
           ...r,
           mesiInCsa:     mesi,
@@ -1063,9 +1118,6 @@ export default function EmolumentiPage() {
           csaLetto:      true,
           csaErrore:     res1.errore ?? (res1.anagrafica ? null : 'idAb assente in anagrafiche'),
           centroDiCosto: r.centroDiCosto || centroDiCostoProposto(res1.voci),
-          // Un mese scelto che nel frattempo risulta gia' in CSA va tolto,
-          // altrimenti resterebbe selezionato e finirebbe nel CSV.
-          mesiScelti:    new Set([...r.mesiScelti].filter(k => !mesi.has(k))),
         }
       }))
     } catch (err) {
@@ -1080,23 +1132,30 @@ export default function EmolumentiPage() {
     setRighe(prev => prev!.map(r => (r.id === id ? { ...r, ...patch } : r)))
   }
 
-  function toggleMese(id: number, k: string) {
+  /** Una modifica della riga calcolata sullo stato piu' recente (provvedimenti). */
+  function aggiornaRiga(id: number, f: (r: RigaLavoro) => RigaLavoro) {
+    setRighe(prev => prev!.map(r => (r.id === id ? f(r) : r)))
+  }
+
+  /**
+   * Clic su un mese con il provvedimento `provvId` attivo: lo sceglie, lo
+   * sposta su quel provvedimento, oppure lo toglie (assegnaMese). Con un
+   * provvedimento solo e' il clic di sempre.
+   */
+  function toggleMese(id: number, k: string, provvId: number) {
     setRighe(prev => prev!.map(r => {
       if (r.id !== id) return r
       if (r.mesiInCsa.has(k)) return r          // gia' in CSA: non selezionabile
 
-      const next = new Set(r.mesiScelti)
-      if (next.has(k)) { next.delete(k); return { ...r, mesiScelti: next } }
-
-      next.add(k)
+      const { riga, esito } = assegnaMese(r, k, provvId)
       // Voce a importo: si propone quello del mese precedente — digitato o gia'
       // in CSA, il primo che si trova andando a ritroso. La borsa e' quasi
       // sempre la stessa, ma il campo resta modificabile.
-      if (modo === 'importo' && !(r.importi[k] ?? '').trim()) {
+      if (esito === 'aggiunto' && modo === 'importo' && !(r.importi[k] ?? '').trim()) {
         const eredita = importoMesePrecedente(r, k)
-        if (eredita) return { ...r, mesiScelti: next, importi: { ...r.importi, [k]: eredita } }
+        if (eredita) return { ...riga, importi: { ...riga.importi, [k]: eredita } }
       }
-      return { ...r, mesiScelti: next }
+      return riga
     }))
   }
 
@@ -1171,7 +1230,11 @@ export default function EmolumentiPage() {
       const dati = (row.dati ?? {}) as Record<string, unknown>
       const t    = (dati['testata'] ?? {}) as Record<string, unknown>
 
-      if (dati['versione'] !== VERSIONE_PAYLOAD) {
+      // v1 e v2 si convertono da sole (deserializzaRighe): l'avviso resta per
+      // cio' che questa versione non sa leggere — un salvataggio piu' nuovo o
+      // senza numero di versione.
+      const ver = dati['versione']
+      if (typeof ver !== 'number' || ver < 1 || ver > VERSIONE_PAYLOAD) {
         showToast('Salvataggio di una versione diversa: controlla i dati prima di esportare.', 'warning')
       }
 
@@ -1409,9 +1472,24 @@ export default function EmolumentiPage() {
     if (!tipoProv.trim()) out.push('Manca il tipo di provvedimento.')
     if (!voce.trim()) out.push('Manca il codice voce.')
 
-    const senzaData = conMesi.filter(r => !r.dataProvvedimento)
-    if (senzaData.length > 0) {
-      out.push(`Data provvedimento mancante su ${senzaData.length} riga/e: ${senzaData.map(r => r.nominativo).join(', ')}.`)
+    // Numero e data di ogni provvedimento che concede almeno un mese, mesi
+    // senza provvedimento, provvedimenti senza mesi, numeri ripetuti sulla
+    // stessa persona o su piu' matricole: utils/provvedimentiRiga.ts.
+    out.push(...problemiProvv(conMesi))
+
+    // La stessa matricola su due righe (per esempio due nomi ambigui risolti
+    // sulla stessa persona): due righe con lo stesso mese sarebbero la
+    // competenza doppia. I provvedimenti in piu' vanno nella riga che resta.
+    const perMatricola = new Map<string, string[]>()
+    for (const r of conMesi) {
+      if (!r.matricola) continue
+      if (!perMatricola.has(r.matricola)) perMatricola.set(r.matricola, [])
+      perMatricola.get(r.matricola)!.push(r.nominativo)
+    }
+    for (const [m, nomi] of perMatricola) {
+      if (nomi.length > 1) {
+        out.push(`Matricola ${m} su ${nomi.length} righe (${nomi.join(', ')}): tienine una e aggiungi lì l'altro provvedimento con «+ provvedimento».`)
+      }
     }
 
     // Voce a importo: ogni mese scelto deve avere il suo valore. Zero o testo
@@ -1429,23 +1507,6 @@ export default function EmolumentiPage() {
       }
     }
 
-    const senzaNumero = conMesi.filter(r => !r.numeroProvvedimento.trim())
-    if (senzaNumero.length > 0) {
-      out.push(`Numero provvedimento mancante su ${senzaNumero.length} riga/e: ${senzaNumero.map(r => r.nominativo).join(', ')}.`)
-    }
-
-    // Stesso numero su matricole diverse: nel CSV di luglio ogni dottorando
-    // aveva il suo. Finche' l'ufficio non dice il contrario (§10.4), e' errore.
-    const perNumero = new Map<string, Set<string>>()
-    for (const r of conMesi) {
-      const n = r.numeroProvvedimento.trim()
-      if (!n || !r.matricola) continue
-      if (!perNumero.has(n)) perNumero.set(n, new Set())
-      perNumero.get(n)!.add(r.matricola)
-    }
-    for (const [n, ms] of perNumero) {
-      if (ms.size > 1) out.push(`Numero provvedimento ${n} usato su più matricole: ${[...ms].join(', ')}.`)
-    }
 
     const nonLetti = conMesi.filter(r => !r.csaLetto)
     if (nonLetti.length > 0) {
@@ -1495,6 +1556,9 @@ export default function EmolumentiPage() {
       if (!r.matricola) continue
       for (const k of [...r.mesiScelti].sort()) {
         const [y, m] = k.split('-') as [string, string]
+        // Gli estremi sono quelli del provvedimento che concede QUESTO mese.
+        // Mai null qui: problemiProvv ferma l'export se un mese ne e' senza.
+        const prov = provvDelMese(r, k)
         // UNA data per questo mese, usata due volte qui sotto: nella colonna
         // dataCompetenzaVoce e per decidere il ruolo. Prima la colonna la
         // calcolava lastDayOfMonth e il ruolo non guardava nessuna data: il
@@ -1511,11 +1575,11 @@ export default function EmolumentiPage() {
           // §6.4: nell'area Emolumenti si usa SOLO la forma per estremi.
           identificativoProvvedimento: '',
           tipoProvvedimento:   tipoProv.trim(),
-          numeroProvvedimento: r.numeroProvvedimento.trim(),
+          numeroProvvedimento: prov?.numero.trim() ?? '',
           // ISO in uscita: la colonna dataProvvedimento vuole AAAA-MM-GG,
           // mentre dataCompetenzaVoce esce GG/MM/AAAA da serializeCsv. Le due
           // colonne hanno formati diversi ed e' corretto cosi' (§6.4 punto 3).
-          dataProvvedimento: r.dataProvvedimento,
+          dataProvvedimento: prov?.data ?? '',
           annoCompetenzaLiquidazione: y,
           meseCompetenzaLiquidazione: m,
           dataCompetenzaVoce: dataComp,
@@ -1916,8 +1980,8 @@ export default function EmolumentiPage() {
             <textarea
               value={raw}
               onChange={e => setRaw(e.target.value)}
-              rows={6}
-              placeholder={'Una riga per persona:\nRossi Mario\t900008\t04/09/2026\n\nLa data è facoltativa. Vanno bene tabulazione, punto e virgola o spazi.'}
+              rows={7}
+              placeholder={'Una riga per provvedimento:\nRossi Mario\t900008\t04/09/2026\nRossi Mario\t900015\t01/10/2026\n\nLa data è facoltativa. Vanno bene tabulazione, punto e virgola o spazi.\nLa stessa persona con due numeri resta una riga sola, con due provvedimenti.'}
               className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700
                          text-slate-100 text-sm font-mono placeholder:font-sans
                          placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
@@ -2008,9 +2072,9 @@ export default function EmolumentiPage() {
                 <div className="flex gap-2">
                   <input type="date" value={dataProv} onChange={e => setDataProv(e.target.value)} className={inputCls} />
                   <button
-                    onClick={() => setRighe(prev => prev!.map(r => ({ ...r, dataProvvedimento: dataProv })))}
+                    onClick={() => setRighe(prev => prev!.map(r => completaDate(r, dataProv)))}
                     disabled={!dataProv}
-                    title="Riporta questa data su tutte le righe"
+                    title="Riporta questa data sui provvedimenti che non ne hanno ancora una. Le date già scritte restano."
                     className="px-2 rounded-lg border border-slate-700 text-slate-400 text-sm
                                hover:text-white hover:border-slate-600 disabled:opacity-40"
                   >a tutte</button>
@@ -2080,7 +2144,10 @@ export default function EmolumentiPage() {
             </div>
             <p className="text-xs text-slate-500">
               Numero e data del provvedimento si impostano <strong className="text-slate-400">per
-              persona</strong>: la data qui sopra è solo il valore predefinito. Il tipo resta
+              persona</strong>: la data qui sopra è solo il valore predefinito, e «a tutte» la
+              scrive solo dove manca. Una persona può avere <strong className="text-slate-400">più
+              provvedimenti</strong> (uno per agosto, un altro per settembre e ottobre): si aggiungono
+              con «+ provvedimento» o incollando lo stesso nome con l’altro numero. Il tipo resta
               modificabile — 029 è la scelta d’ufficio, non una regola del tracciato.
               {' '}Questa voce si liquida {modo === 'parti'
                 ? <strong className="text-slate-400">a parti (30 fisse, mese commerciale)</strong>
@@ -2166,7 +2233,9 @@ export default function EmolumentiPage() {
               modo={modo}
               mesiFinestra={mesiFinestra}
               onPatch={patch => aggiorna(r.id, patch)}
-              onToggleMese={k => toggleMese(r.id, k)}
+              onRiga={f => aggiornaRiga(r.id, f)}
+              onToggleMese={(k, provvId) => toggleMese(r.id, k, provvId)}
+              dataPredefinita={dataProv}
               onElimina={() => eliminaRiga(r.id)}
               anagrafiche={anagrafiche}
               storico={r.matricola ? storici[r.matricola] : undefined}
@@ -2816,13 +2885,42 @@ function DettagliAnagrafici({ r, storico, ambigui, scoperti, dateCompetenza, onP
   )
 }
 
-function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, anagrafiche, storico, dateCompetenza }: {
+/**
+ * Colori dei provvedimenti di una riga, per posizione: A, B, C... La lettera
+ * sotto il mese e l'etichetta del provvedimento hanno lo stesso colore, cosi'
+ * si vede a colpo d'occhio quale provvedimento concede quale mese. Usati solo
+ * con due o piu' provvedimenti: con uno solo la riga resta com'era.
+ */
+const COLORI_PROVV = [
+  { mese: 'bg-emerald-600/30 text-emerald-300 ring-1 ring-emerald-500/40', lettera: 'text-emerald-300', attivo: 'bg-emerald-600 text-white',  spento: 'bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900' },
+  { mese: 'bg-sky-600/30 text-sky-200 ring-1 ring-sky-500/40',             lettera: 'text-sky-300',     attivo: 'bg-sky-600 text-white',      spento: 'bg-sky-950/60 text-sky-300 hover:bg-sky-900' },
+  { mese: 'bg-amber-600/30 text-amber-200 ring-1 ring-amber-500/40',       lettera: 'text-amber-300',   attivo: 'bg-amber-600 text-white',    spento: 'bg-amber-950/60 text-amber-300 hover:bg-amber-900' },
+  { mese: 'bg-fuchsia-600/30 text-fuchsia-200 ring-1 ring-fuchsia-500/40', lettera: 'text-fuchsia-300', attivo: 'bg-fuchsia-600 text-white',  spento: 'bg-fuchsia-950/60 text-fuchsia-300 hover:bg-fuchsia-900' },
+  { mese: 'bg-lime-600/30 text-lime-200 ring-1 ring-lime-500/40',          lettera: 'text-lime-300',    attivo: 'bg-lime-600 text-white',     spento: 'bg-lime-950/60 text-lime-300 hover:bg-lime-900' },
+  { mese: 'bg-rose-600/30 text-rose-200 ring-1 ring-rose-500/40',          lettera: 'text-rose-300',    attivo: 'bg-rose-600 text-white',     spento: 'bg-rose-950/60 text-rose-300 hover:bg-rose-900' },
+] as const
+
+function coloreProvv(i: number) {
+  return COLORI_PROVV[((i % COLORI_PROVV.length) + COLORI_PROVV.length) % COLORI_PROVV.length]!
+}
+
+/** "13xxxx del 01/10/2026", o cosa manca. Per i tooltip. */
+function estremiProvv(p: ProvvRiga): string {
+  return `${p.numero.trim() || 'senza numero'} del ${p.data ? gg(p.data) : 'data mancante'}`
+}
+
+function BloccoRiga({ r, modo, mesiFinestra, onPatch, onRiga, onToggleMese, dataPredefinita, onElimina, anagrafiche, storico, dateCompetenza }: {
   r:            RigaLavoro
   dateCompetenza: Record<string, string>
   modo:         ModoValore
   mesiFinestra: string[]
   onPatch:      (patch: Partial<RigaLavoro>) => void
-  onToggleMese: (k: string) => void
+  /** Modifica calcolata sullo stato piu' recente della riga (provvedimenti). */
+  onRiga:       (f: (r: RigaLavoro) => RigaLavoro) => void
+  /** Clic su un mese: va al provvedimento `provvId` (vedi assegnaMese). */
+  onToggleMese: (k: string, provvId: number) => void
+  /** Data predefinita della testata, per un provvedimento aggiunto a mano. */
+  dataPredefinita: string
   onElimina:    () => void
   anagrafiche:  AnagraficaApi[]
   /** Storia dei ruoli della matricola, se gia' caricata in blocco. */
@@ -2839,6 +2937,16 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
 
   /** Pannello dei dettagli anagrafici: chiuso finche' non serve. */
   const [dettagli, setDettagli] = useState(false)
+
+  /**
+   * Il provvedimento a cui va il prossimo clic su un mese. E' stato dello
+   * schermo, non si salva. Se nel frattempo quel provvedimento e' stato tolto
+   * si ripiega sul primo.
+   */
+  const multi = r.provvedimenti.length > 1
+  const [attivo, setAttivo] = useState<number>(r.provvedimenti[0]?.id ?? 0)
+  const attivoId = r.provvedimenti.some(p => p.id === attivo) ? attivo : (r.provvedimenti[0]?.id ?? 0)
+  const iAttivo  = Math.max(0, r.provvedimenti.findIndex(p => p.id === attivoId))
 
   // Ambiguita' e scoperture sui mesi SELEZIONATI, cioe' su quelli che
   // finiranno davvero nel CSV. Si calcolano solo se lo storico e' gia' in
@@ -2969,7 +3077,7 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
           </button>
         )}
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-start gap-2">
           <button
             onClick={onElimina}
             title="Togli questa persona dall’elenco"
@@ -2978,21 +3086,84 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
           >
             ✕
           </button>
-          <label className="text-xs text-slate-500">n. provv.</label>
-          <input
-            value={r.numeroProvvedimento}
-            onChange={e => onPatch({ numeroProvvedimento: e.target.value })}
-            className="w-28 px-2 py-1 rounded bg-slate-950 border border-slate-700
-                       text-slate-100 text-sm font-mono focus:outline-none focus:border-indigo-500"
-          />
-          <label className="text-xs text-slate-500">del</label>
-          <input
-            type="date"
-            value={r.dataProvvedimento}
-            onChange={e => onPatch({ dataProvvedimento: e.target.value })}
-            className="w-36 px-2 py-1 rounded bg-slate-950 border border-slate-700
-                       text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
-          />
+          {/* Provvedimenti della persona. Con uno solo e' la riga di sempre;
+              con piu' d'uno ognuno ha la sua lettera, e quella attiva decide
+              a chi va il prossimo mese cliccato. */}
+          <div className="flex flex-col items-end gap-1">
+            {r.provvedimenti.map((p, i) => {
+              const col   = coloreProvv(i)
+              const mesiP = mesiDelProvv(r, p.id)
+              return (
+                <div key={p.id} className="flex items-center gap-2">
+                  {multi && (
+                    <span
+                      title={mesiP.length > 0 ? mesiP.map(etichettaMese).join(', ') : 'Nessun mese assegnato a questo provvedimento'}
+                      className={`max-w-[11rem] truncate text-[11px] font-mono ${mesiP.length > 0 ? 'text-slate-500' : 'text-amber-400'}`}
+                    >
+                      {mesiP.length > 0 ? mesiP.map(meseBreve).join(' · ') : 'nessun mese'}
+                    </span>
+                  )}
+                  {multi && (
+                    <button
+                      onClick={() => setAttivo(p.id)}
+                      title={p.id === attivoId
+                        ? `Provvedimento ${letteraProvv(i)} attivo: i mesi che clicchi vanno a lui`
+                        : `Rendi attivo il provvedimento ${letteraProvv(i)}: i mesi che clicchi andranno a lui`}
+                      className={`w-6 h-6 rounded text-xs font-bold transition-colors ${
+                        p.id === attivoId ? `${col.attivo} ring-2 ring-white/40` : col.spento
+                      }`}
+                    >
+                      {letteraProvv(i)}
+                    </button>
+                  )}
+                  <label className="text-xs text-slate-500">n. provv.</label>
+                  <input
+                    value={p.numero}
+                    onFocus={() => setAttivo(p.id)}
+                    onChange={e => { const v = e.target.value; onRiga(x => aggiornaProvv(x, p.id, { numero: v })) }}
+                    className="w-28 px-2 py-1 rounded bg-slate-950 border border-slate-700
+                               text-slate-100 text-sm font-mono focus:outline-none focus:border-indigo-500"
+                  />
+                  <label className="text-xs text-slate-500">del</label>
+                  <input
+                    type="date"
+                    value={p.data}
+                    onFocus={() => setAttivo(p.id)}
+                    onChange={e => { const v = e.target.value; onRiga(x => aggiornaProvv(x, p.id, { data: v })) }}
+                    className="w-36 px-2 py-1 rounded bg-slate-950 border border-slate-700
+                               text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
+                  />
+                  {multi && (
+                    <button
+                      onClick={() => onRiga(x => rimuoviProvv(x, p.id))}
+                      disabled={mesiP.length > 0}
+                      title={mesiP.length > 0
+                        ? 'Ha dei mesi: spostali su un altro provvedimento o toglili, poi potrai toglierlo'
+                        : 'Togli questo provvedimento'}
+                      className="px-1.5 py-0.5 rounded text-slate-500 hover:text-red-400 hover:bg-red-950/40
+                                 transition-colors text-sm disabled:opacity-30 disabled:hover:text-slate-500
+                                 disabled:hover:bg-transparent"
+                    >
+                      −
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+            <button
+              onClick={() => {
+                // L'id e' il primo libero, lo stesso che calcolera' nuovoProvv:
+                // il provvedimento nuovo diventa subito quello attivo.
+                const id = r.provvedimenti.reduce((m, p) => Math.max(m, p.id), -1) + 1
+                onRiga(x => nuovoProvv(x, dataPredefinita).riga)
+                setAttivo(id)
+              }}
+              title="Un altro provvedimento per questa persona, che concede altri mesi"
+              className="text-xs text-slate-500 hover:text-indigo-300 transition-colors"
+            >
+              + provvedimento
+            </button>
+          </div>
         </div>
       </header>
 
@@ -3105,7 +3276,7 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
         <div className="px-5 py-4 space-y-4">
           {/* Mesi */}
           <div>
-            <div className="flex items-baseline gap-3 mb-2">
+            <div className="flex items-baseline gap-x-3 gap-y-1 mb-2 flex-wrap">
               <p className="text-xs font-medium text-slate-400">Mesi da aggiungere</p>
               {!r.csaLetto && (
                 <p className="text-xs text-amber-400">CSA non ancora letto per questa persona</p>
@@ -3113,6 +3284,13 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
               {r.csaLetto && (
                 <p className="text-xs text-slate-500">
                   {r.mesiInCsa.size} già in CSA, non selezionabili
+                </p>
+              )}
+              {multi && (
+                <p className="basis-full text-xs text-slate-400">
+                  I mesi che clicchi vanno al provvedimento{' '}
+                  <span className={`font-bold ${coloreProvv(iAttivo).lettera}`}>{letteraProvv(iAttivo)}</span>.
+                  {' '}Per cambiarlo clicca un’altra lettera a destra; la lettera sotto un mese lo sposta al successivo.
                 </p>
               )}
             </div>
@@ -3123,22 +3301,47 @@ function BloccoRiga({ r, modo, mesiFinestra, onPatch, onToggleMese, onElimina, a
                   const k = chiaveMese(Number(anno), m)
                   const inCsa  = r.mesiInCsa.has(k)
                   const scelto = r.mesiScelti.has(k)
+                  // Con piu' provvedimenti il mese prende il colore del suo.
+                  const prov   = scelto ? provvDelMese(r, k) : null
+                  const iProv  = prov ? r.provvedimenti.findIndex(p => p.id === prov.id) : -1
                   return (
                     <div key={k} className="flex flex-col items-stretch gap-0.5">
                       <button
-                        onClick={() => onToggleMese(k)}
+                        onClick={() => onToggleMese(k, attivoId)}
                         disabled={inCsa}
-                        title={inCsa ? `${etichettaMese(k)}: già presente in CSA` : etichettaMese(k)}
+                        title={inCsa
+                          ? `${etichettaMese(k)}: già presente in CSA`
+                          : multi && prov
+                            ? `${etichettaMese(k)} — provvedimento ${letteraProvv(iProv)} (${estremiProvv(prov)})`
+                            : etichettaMese(k)}
                         className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
                           inCsa
                             ? 'bg-slate-800/60 text-slate-600 line-through cursor-not-allowed'
                             : scelto
-                              ? 'bg-emerald-600/30 text-emerald-300 ring-1 ring-emerald-500/40'
+                              ? (multi
+                                  ? (iProv >= 0 ? coloreProvv(iProv).mese : 'bg-red-900/50 text-red-200 ring-1 ring-red-500/60')
+                                  : 'bg-emerald-600/30 text-emerald-300 ring-1 ring-emerald-500/40')
                               : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
                         }`}
                       >
                         {MESI_BREVI[m]}
                       </button>
+                      {/* Lettera del provvedimento che concede il mese: un clic
+                          lo passa al successivo. "?" = mese senza provvedimento
+                          (solo da salvataggi rovinati): l'export e' fermo. */}
+                      {multi && scelto && !inCsa && (
+                        <button
+                          onClick={() => onRiga(x => provvSuccessivo(x, k))}
+                          title={prov
+                            ? `Provvedimento ${letteraProvv(iProv)} (${estremiProvv(prov)}): clicca per passarlo al successivo`
+                            : 'Mese senza provvedimento: clicca per assegnarlo'}
+                          className={`text-[11px] font-bold leading-none py-0.5 rounded hover:bg-slate-800 ${
+                            iProv >= 0 ? coloreProvv(iProv).lettera : 'text-red-400'
+                          }`}
+                        >
+                          {iProv >= 0 ? letteraProvv(iProv) : '?'}
+                        </button>
+                      )}
                       {/* Mese gia' in CSA: si mostra quanto vale, in sola lettura.
                           Serve a vedere lo storico degli importi mentre si
                           compilano i mesi nuovi. */}

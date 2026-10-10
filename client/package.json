@@ -1,13 +1,14 @@
 {
   "name": "@payroll-gang/client",
-  "version": "26.09.24.7",
+  "version": "26.10.10",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "html2canvas": "^1.4.1",

@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.09.24.7-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.10.10-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -55,7 +55,8 @@ payroll-gang-suite/
 │       │                        # Impostazioni, Utenti
 │       ├── store/               # Stato globale Zustand (useStore.ts)
 │       ├── types/               # Interfacce TypeScript + APP_VERSION
-│       └── utils/               # CSV / PDF / EML builder, calcoli scorporo (biz.ts)
+│       └── utils/               # CSV / PDF / EML builder, calcoli scorporo (biz.ts),
+│                                # provvedimentiRiga.ts (+ test): piu' provvedimenti per persona in Emolumenti
 ├── server/                      # API REST Fastify
 │   ├── sql/
 │   │   ├── proprieta_postgres.sql  # Proprieta' oggetti al superutente (serve dopo un restore da pannello)
@@ -143,6 +144,11 @@ Genera certificati a partire dai cedolini Cineca, replicando le regole di calcol
 CEDOLINO_SAMPLE="/percorso/Cedolino_....pdf" npm run test --workspace=server
 ```
 
+**Test del client** (logica pura, senza browser — oggi `utils/provvedimentiRiga.ts`). Si lanciano su Linux o su Windows, non dalla cartella condivisa con la VM: `node_modules` installato da Windows contiene l'esbuild per Windows.
+```bash
+npm run test --workspace=client
+```
+
 ---
 
 ## Sezione Verifica liquidato
@@ -164,10 +170,11 @@ CEDOLINO_SAMPLE="/percorso/Cedolino_....pdf" npm run test --workspace=server
 
 **Il flusso.** Si incollano i nominativi (o si cercano uno per uno in anagrafica), si legge da CSA che cosa c'e' **gia'** per quella voce, si scelgono i mesi da aggiungere — quelli gia' presenti non sono selezionabili — e si esporta.
 
-- **Caricamento** — scheda *Incolla lista* (`Cognome Nome`, numero provvedimento e, facoltativa, data in `GG/MM/AAAA`; separatori: tabulazione, `;` o spazi) oppure *Manuale*, con ricerca per nominativo o matricola. Il codice fiscale non passa di qui: la rotta `/anagrafiche` non lo espone (SEC-C2). Le righe si aggiungono a piu' riprese e i doppioni per matricola vengono scartati.
+- **Caricamento** — scheda *Incolla lista* (`Cognome Nome`, numero provvedimento e, facoltativa, data in `GG/MM/AAAA`; separatori: tabulazione, `;` o spazi) oppure *Manuale*, con ricerca per nominativo o matricola. Il codice fiscale non passa di qui: la rotta `/anagrafiche` non lo espone (SEC-C2). Le righe si aggiungono a piu' riprese; **una persona resta una riga sola**: lo stesso nominativo con un **altro numero** diventa un provvedimento in piu' di quella riga, con lo stesso numero non si duplica.
+- **Piu' provvedimenti per persona** (dalla 26.10.10, `utils/provvedimentiRiga.ts`, logica pura con test) — una persona puo' avere un provvedimento per agosto e un altro per settembre e ottobre, ognuno con numero e data suoi. Ogni mese scelto appartiene a **un solo** provvedimento (due sullo stesso mese sarebbero la competenza doppia). Con piu' provvedimenti ognuno ha una lettera e un colore: i mesi cliccati vanno al provvedimento attivo, la lettera sotto un mese lo passa al successivo, *+ provvedimento* ne aggiunge uno, *−* toglie quello che non ha mesi. Nel CSV ogni mese esce con gli estremi del suo provvedimento. *a tutte* della data predefinita compila solo le date vuote.
 - **Risoluzione nominativi** (`services/emolumenti/nominativi.ts`, logica pura con test) — tre grafie per gli apostrofi (`D'Angelo` / `D Angelo` / `DAngelo`), ordine invertito, tier esatto che batte il parziale. **Mai una scelta a indovinare**: con piu' candidati la riga resta ambigua e decide l'operatore, che puo' anche cercare in anagrafica direttamente dalla riga.
 - **Abbinamenti d'ufficio** — scegliendo il tipo (o la voce) si compilano voce e capitolo: DR `09834`/`000601` (maggiorazioni, a **parti** = 30), BS `09947`/`000706` (borse non esenti, IRAP, a **importo**), BE `09766`/`000602` (borse esenti, a **importo**). Restano modificabili a mano; se divergono compare un avviso che dice cosa, senza bloccare.
-- **Controlli bloccanti prima dell'export** — mesi non selezionati, tipo/voce/data provvedimento mancanti, importo assente o non valido sulle voci a importo, **stesso numero di provvedimento su matricole diverse**, righe con mesi ma CSA mai letto.
+- **Controlli bloccanti prima dell'export** — mesi non selezionati, tipo/voce mancanti, numero o data mancanti su un provvedimento che concede mesi, **provvedimento senza mesi** accanto ad altri, mese senza provvedimento, stesso numero due volte sulla stessa persona, **stesso numero di provvedimento su matricole diverse**, stessa matricola su piu' righe, importo assente o non valido sulle voci a importo, righe con mesi ma CSA mai letto.
 - **Export CSV per HR Suite** — stesso tracciato a 24 colonne delle liquidazioni; `dataProvvedimento` in ISO, `dataCompetenzaVoce` in `GG/MM/AAAA`; la colonna inattiva (parti o importo) va a **0**, non vuota.
 - **Export TXT matricole per area del conto** — un file per `ITALIA` / `SEPA` / `EXTRA_UE`, oppure Italia + estero, oppure uno solo. Ci finisce **solo chi ha mesi selezionati**; chi non ha una coordinata CSA nota resta fuori, e' segnalato con un pallino rosso sulla riga ed elencato per nome sotto il pulsante — e da li' si puo' assegnargli l'area a mano (vedi *Dettagli anagrafici per riga*).
 - **Dettagli anagrafici per riga** — il pulsante con ruolo e area del conto, in testa a ogni persona, apre l'elenco **di tutti i rapporti** che PGS conosce per quella matricola (`GET /emolumenti/storico-ruoli/:matricola`, letto solo quando si apre il pannello). Serve perche' l'elenco ne mostra **uno solo**, quello con la decorrenza piu' alta: per i docenti basta, per dottorandi e borsisti no — sono contratti brevi in catena, e la stessa persona puo' essere stata `DR` fino all'anno scorso ed essere `BS` adesso. Da li' si sceglie il ruolo giusto per il mese liquidato, e si assegna a mano l'area del conto a chi in anagrafica non ce l'ha. Le due scelte restano **nella lavorazione** (`ruoloScelto`, `areaContoScelta`), sono marcate *a mano* in interfaccia e **non tornano in anagrafica**: quella si corregge solo re-importando da SGE. Il ruolo scelto e' quello che finisce nel CSV.
@@ -376,6 +383,17 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.10.10
+**Emolumenti: piu' provvedimenti per la stessa persona**
+
+- Una persona puo' avere piu' provvedimenti nella stessa lavorazione, ognuno con numero e data suoi e con i suoi mesi (es. uno per agosto, un altro per settembre e ottobre). La riga resta una: lettura CSA, ruoli, conti e TXT non cambiano.
+- *Incolla lista*: lo stesso nominativo con un altro numero diventa un provvedimento in piu' della riga. **Prima la seconda riga veniva scartata come «gia' presente» e il suo provvedimento si perdeva.** Lo stesso nome non ancora risolto, incollato due volte, resta una riga sola.
+- Mesi assegnati per lettera e colore (A, B, …): clic sul mese con il provvedimento attivo, clic sulla lettera sotto il mese per spostarlo. Nel CSV ogni mese porta gli estremi del suo provvedimento; tracciato invariato.
+- Nuovi controlli bloccanti: provvedimento senza mesi, mese senza provvedimento, numero ripetuto sulla stessa persona, stessa matricola su piu' righe. Numero e data mancanti e numero su piu' matricole valgono ora per ogni provvedimento.
+- *a tutte* della data predefinita compila solo le date vuote: non cancella piu' date diverse.
+- Payload delle lavorazioni alla **v3**: le bozze salvate prima si aprono convertite (un provvedimento con tutti i mesi), senza l'avviso «versione diversa». Nessuna migrazione del database.
+- Logica in `client/src/utils/provvedimentiRiga.ts` con 13 test (`npm run test --workspace=client`).
 
 ### 26.09.24.7
 **Emolumenti: ruolo scelto a mano anche sui mesi senza rapporto**
