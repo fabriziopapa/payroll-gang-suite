@@ -9,7 +9,7 @@ import { useState, useEffect, useMemo, useRef, useId, cloneElement, isValidEleme
 import { useStore } from '../../store/useStore'
 import { lastDayOfMonth } from '../../utils/biz'
 import {
-  normalizeProvvedimento, hasValoreProv, provvedimentoMode,
+  normalizeProvvedimentoSalvataggio, conservaEstremi, hasValoreProv, provvedimentoMode,
   padIdentificativoProvvedimento, TIPO_PROVVEDIMENTO_DEFAULT,
 } from '../../utils/provvedimento'
 import { DEFAULT_CSV_PARAMS } from '../../constants/csvDefaults'
@@ -61,9 +61,11 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
   }
   const [scorporoMode, setScorporoMode] = useState<ScorporoMode>(initScorporoMode)
   const [riferimento, setRiferimento]               = useState(existing?.riferimentoCedolino ?? '')
-  // Provvedimento: identificativo XOR estremi. I valori esistenti vengono
-  // normalizzati all'apertura (i placeholder storici "000000000"/"000" valgono vuoto)
-  const provInit = normalizeProvvedimento(existing ?? {})
+  // Provvedimento: nel CSV identificativo XOR estremi. Con il flag
+  // "conserva" (default ON) il gruppo tiene entrambi i blocchi; senza, solo
+  // quello attivo. I placeholder storici "000000000"/"000" valgono vuoto.
+  const [conservaProv, setConservaProv]             = useState(conservaEstremi(existing ?? {}))
+  const provInit = normalizeProvvedimentoSalvataggio(existing ?? {}, conservaEstremi(existing ?? {}))
   const [idProv, setIdProv]                         = useState(provInit.identificativoProvvedimento)
   const [tipoProv, setTipoProv]                     = useState(provInit.tipoProvvedimento)
   const [numProv, setNumProv]                       = useState(provInit.numeroProvvedimento)
@@ -90,30 +92,38 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
     numeroProvvedimento:         numProv,
     dataProvvedimento:           dataProv,
   })
-  const idProvDisabled  = provMode === 'estremi'
-  const estremiDisabled = provMode === 'identificativo'
+  const estremiCompilati = hasValoreProv(tipoProv) || numProv.trim() !== '' || dataProv.trim() !== ''
+  // Con il flag attivo i due blocchi convivono e nessuno si disabilita
+  const idProvDisabled  = !conservaProv && provMode === 'estremi'
+  const estremiDisabled = !conservaProv && provMode === 'identificativo'
 
   function handleIdProvChange(raw: string) {
     const v = raw.replace(/\D/g, '').slice(0, 9)
     setIdProv(v)
-    // valorizzando l'ID si azzerano gli estremi (e viceversa)
-    if (hasValoreProv(v)) { setTipoProv(''); setNumProv(''); setDataProv('') }
+    // senza il flag, valorizzando l'ID si azzerano gli estremi (e viceversa)
+    if (!conservaProv && hasValoreProv(v)) { setTipoProv(''); setNumProv(''); setDataProv('') }
   }
   function handleTipoProvChange(v: string) {
     setTipoProv(v)
-    if (hasValoreProv(v)) setIdProv('')
+    if (!conservaProv && hasValoreProv(v)) setIdProv('')
   }
   function handleNumProvChange(v: string) {
     setNumProv(v)
     if (v.trim() !== '') {
-      setIdProv('')
+      if (!conservaProv) setIdProv('')
       // il tipo si precompila appena si inserisce il numero
       if (!hasValoreProv(tipoProv)) setTipoProv(tipoProvDefault)
     }
   }
   function handleDataProvChange(v: string) {
     setDataProv(v)
-    if (v.trim() !== '') setIdProv('')
+    if (!conservaProv && v.trim() !== '') setIdProv('')
+  }
+  function handleConservaProvChange(next: boolean) {
+    setConservaProv(next)
+    // spegnendo il flag con entrambi i blocchi compilati vince l'ID, come nel
+    // CSV: gli estremi si svuotano subito, cosi' si vede cosa verra' salvato
+    if (!next && hasValoreProv(idProv)) { setTipoProv(''); setNumProv(''); setDataProv('') }
   }
 
   // ── Validazione campi obbligatori (tab Principale) ────────
@@ -319,13 +329,15 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
       flagScorporo:                scorporoMode !== 'none',
       tipoScorporo:                scorporoMode === 'contoterzi' ? 'contoterzi' : scorporoMode === 'standard' ? 'standard' : undefined,
       riferimentoCedolino:         riferimento,
-      // Solo il blocco attivo viene salvato: l'altro resta vuoto
-      ...normalizeProvvedimento({
+      // Con il flag si salvano entrambi i blocchi, senza solo quello attivo.
+      // Il CSV resta esclusivo in ogni caso (buildCsvRows).
+      ...normalizeProvvedimentoSalvataggio({
         identificativoProvvedimento: idProv,
         tipoProvvedimento:           tipoProv,
         numeroProvvedimento:         numProv,
         dataProvvedimento:           dataProv,
-      }),
+      }, conservaProv),
+      conservaEstremiProvvedimento: conservaProv,
       aliquota:                    parseFloat(aliquota) || 0,
       parti:                       parseFloat(parti) || 0,
       flagImporto,
@@ -674,13 +686,24 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
             {/* ── TAB PROVVEDIMENTO ──────────────────────────── */}
             {tab === 'provvedimento' && (
               <>
-                <p className="text-xs text-slate-400 rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-2 leading-relaxed">
-                  I due blocchi sono <strong className="text-slate-200">alternativi</strong>: compila
-                  l&apos;<strong className="text-slate-200">ID Provvedimento</strong> oppure
-                  <strong className="text-slate-200"> Tipo + Numero + Data</strong>.
-                  Nel CSV HR viene esportato solo il blocco compilato; per passare all&apos;altro
-                  svuota il campo valorizzato.
-                </p>
+                <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-3">
+                  <ValoreToggle
+                    label="Conserva numero e data insieme all'ID"
+                    hint="Nel CSV HR va solo l'ID a 9 cifre; numero e data restano per la comunicazione PDF."
+                    checked={conservaProv}
+                    onChange={handleConservaProvChange}
+                  />
+                </div>
+
+                {!conservaProv && (
+                  <p className="text-xs text-slate-400 rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-2 leading-relaxed">
+                    I due blocchi sono <strong className="text-slate-200">alternativi</strong>: compila
+                    l&apos;<strong className="text-slate-200">ID Provvedimento</strong> oppure
+                    <strong className="text-slate-200"> Tipo + Numero + Data</strong>.
+                    Nel CSV HR viene esportato solo il blocco compilato; per passare all&apos;altro
+                    svuota il campo valorizzato.
+                  </p>
+                )}
 
                 <Field label="ID Provvedimento (9 cifre)">
                   <input value={idProv}
@@ -718,7 +741,9 @@ export default function DettaglioFormModal({ existing, onClose }: Props) {
 
                 <p className="text-xs text-slate-500" aria-live="polite">
                   {provMode === 'identificativo'
-                    ? 'Export CSV: identificativo valorizzato, tipo/numero/data vuoti.'
+                    ? (conservaProv && estremiCompilati
+                        ? 'Export CSV: solo identificativo. Tipo/numero/data restano salvati per la comunicazione, non vanno nel CSV.'
+                        : 'Export CSV: identificativo valorizzato, tipo/numero/data vuoti.')
                     : provMode === 'estremi'
                       ? 'Export CSV: tipo/numero/data valorizzati, identificativo vuoto.'
                       : 'Nessun provvedimento impostato: le quattro colonne restano vuote nel CSV.'}

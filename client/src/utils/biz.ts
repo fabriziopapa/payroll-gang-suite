@@ -79,7 +79,9 @@ export function buildCsvRows(
         ruolo:                       nom.ruolo,
         codiceVoce:                  det.voce,
         // Provvedimento: identificativo XOR estremi (tipo/numero/data).
-        // Un solo blocco finisce nel CSV, l'altro resta vuoto.
+        // Un solo blocco finisce nel CSV, l'altro resta vuoto — anche se il
+        // gruppo li conserva entrambi (conservaEstremiProvvedimento): vince l'ID.
+        // Unico punto per CSV HR, download del gruppo, Esporta CSV e Viewer.
         ...normalizeProvvedimento(det),
         annoCompetenzaLiquidazione:  anno,
         meseCompetenzaLiquidazione:  mese,
@@ -236,7 +238,7 @@ export function lastDayOfMonth(competenza: string): string {
 }
 
 /**
- * ISO date → "DD/MM/YYYY" (campo dataProvvedimento CSV).
+ * ISO date → "DD/MM/YYYY" per la UI (NON per il CSV: dataProvvedimento esce ISO).
  * Parse date-only ISO strings as local time to avoid UTC midnight offset bug.
  */
 export function formatDateItalian(isoDate: string): string {

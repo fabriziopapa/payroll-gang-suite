@@ -51,6 +51,8 @@ const DettaglioSchema = z.object({
   tipoProvvedimento:           z.string().max(10),
   numeroProvvedimento:         z.string().max(20),
   dataProvvedimento:           z.string().max(10),
+  // Senza questa riga lo strip-mode toglierebbe il flag al salvataggio.
+  conservaEstremiProvvedimento: z.boolean().optional(),
   aliquota:                    z.number().finite(),
   parti:                       z.number().finite(),
   flagAdempimenti:             z.number().finite(),

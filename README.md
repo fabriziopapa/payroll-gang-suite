@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.10.10.2-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.10.13-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -58,6 +58,7 @@ payroll-gang-suite/
 │       └── utils/               # CSV / PDF / EML builder, calcoli scorporo (biz.ts),
 │                                # provvedimentiRiga.ts (+ test): piu' provvedimenti per persona in Emolumenti
 │                                # meseNome.ts (+ test): mese di liquidazione nel nome della lavorazione
+│                                # provvedimento.ts (+ test): ID e estremi del provvedimento, salvataggio vs CSV HR
 ├── server/                      # API REST Fastify
 │   ├── sql/
 │   │   ├── proprieta_postgres.sql  # Proprieta' oggetti al superutente (serve dopo un restore da pannello)
@@ -107,6 +108,7 @@ payroll-gang-suite/
 - **Editor** — gruppi di liquidazione, nominativi HR, importi, ruoli storici
   - **Badge importo** — scomposizione dell'importo lordo in voci singole (floating panel), memorizzazione persistente in `importoBudget[]`
   - **Navigazione Excel** — `Enter` su importo passa al nominativo successivo, frecce su/giù disabilitate sul campo numerico
+  - **Provvedimento del gruppo** (dalla 26.10.13) — flag *Conserva numero e data insieme all'ID*, attivo di default: il gruppo salva ID a 9 cifre **e** tipo/numero/data, ma nel CSV HR — da *CSV HR*, dal download del gruppo, da *Esporta CSV* e dal Viewer — esce **solo l'ID** (`000025994;;;`). Numero e data servono alla comunicazione PDF. Senza ID escono gli estremi; con il flag spento i blocchi tornano alternativi come prima. Regola in `utils/provvedimento.ts`: `normalizeProvvedimentoSalvataggio()` per il salvataggio, `normalizeProvvedimento()` per l'export (unico punto: `buildCsvRows`).
   - **Incolla lista** — parsing intelligente di righe incollate: rileva automaticamente importo in formato italiano (`1.200,00`) o inglese (`1,200.00`), ricerca fuzzy con normalizzazione accenti e fallback per token parziali
 - **Viewer** — visualizzazione read-only delle liquidazioni archiviate con export CSV/TXT attivi
 - **Ricerca** — ricerca fulltext cross-bozza (per nome o testo libero), report aggregati per matricola / voce / periodo con export CSV; caricamento dati in singola query (no N+1)
@@ -145,7 +147,7 @@ Genera certificati a partire dai cedolini Cineca, replicando le regole di calcol
 CEDOLINO_SAMPLE="/percorso/Cedolino_....pdf" npm run test --workspace=server
 ```
 
-**Test del client** (logica pura, senza browser — oggi `utils/provvedimentiRiga.ts`). Si lanciano su Linux o su Windows, non dalla cartella condivisa con la VM: `node_modules` installato da Windows contiene l'esbuild per Windows.
+**Test del client** (logica pura, senza browser — `utils/provvedimentiRiga.ts`, `utils/meseNome.ts`, `utils/provvedimento.ts`). Si lanciano su Linux o su Windows, non dalla cartella condivisa con la VM: `node_modules` installato da Windows contiene l'esbuild per Windows.
 ```bash
 npm run test --workspace=client
 ```
@@ -387,6 +389,18 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.10.13
+**Gruppo liquidazione: ID provvedimento e numero/data conservati insieme, nel CSV HR solo l'ID**
+
+- Nuovo flag di gruppo **«Conserva numero e data insieme all'ID»** nel tab *Provvedimento*, **attivo di default**. Con il flag i due blocchi non si escludono piu' nel form: si salvano ID (a 9 cifre), tipo, numero e data.
+- **CSV HR invariato**: con l'ID valorizzato esce solo l'ID (`000025994;;;`), da tutti i punti di export — *CSV HR*, download del singolo gruppo, *Esporta CSV*, Viewer — che passano tutti da `buildCsvRows` → `normalizeProvvedimento()`. Senza ID escono gli estremi (`;029;900006;2026-09-02`).
+- Flag spento: comportamento della 26.09.08 (blocchi alternativi); spegnendolo con entrambi i blocchi compilati vince l'ID e gli estremi si svuotano subito nel form.
+- Gruppi salvati prima: flag assente = attivo. I loro dati sono gia' esclusivi, quindi il CSV non cambia. *Duplica gruppo* e *Copia liquidazione* copiano il flag.
+- **Comunicazione PDF**: «Provvedimento n. … del …» ora riporta numero e data anche con l'ID; date del provvedimento e di competenza voce in `GG/MM/AAAA` (prima ISO). Il CSV resta ISO per `dataProvvedimento`, come validato su HR.
+- Schema bozze (`server/src/schemas/bozzaDati.ts`): `conservaEstremiProvvedimento` booleano opzionale, altrimenti lo strip-mode lo toglieva al salvataggio. Nessuna migrazione del database.
+- Corretti commenti/costanti obsoleti sui formati data del CSV (`DATE_FORMATS` aveva i due formati invertiti; non usato a runtime).
+- 8 test nuovi in `client/src/utils/provvedimento.test.ts` (38 in tutto, `npm run test --workspace=client`).
 
 ### 26.10.10.2
 **Emolumenti: «Liquidazione di» a chip, sempre visibile, e «Genera nome» che cambia solo il mese**

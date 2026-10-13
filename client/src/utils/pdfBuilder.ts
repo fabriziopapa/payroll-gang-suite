@@ -4,7 +4,7 @@
 // ============================================================
 
 import type { DettaglioLiquidazione, Nominativo, ScorporoMap } from '../types'
-import { formatEur, calcolaImportoCSV } from './biz'
+import { formatEur, calcolaImportoCSV, formatCsvDate } from './biz'
 
 // ── Tipi esportati ────────────────────────────────────────────
 
@@ -89,9 +89,11 @@ export function buildPdfFragment(ctx: PdfContext): string {
   if (campi.includes('competenzaLiquidazione') && det.competenzaLiquidazione)
     addRow('Competenza', esc(det.competenzaLiquidazione))
   if (campi.includes('dataCompetenzaVoce') && det.dataCompetenzaVoce)
-    addRow('Data competenza voce', esc(det.dataCompetenzaVoce))
+    addRow('Data competenza voce', esc(formatCsvDate(det.dataCompetenzaVoce)))
+  // Date salvate in ISO (input type=date): nel documento GG/MM/AAAA.
+  // formatCsvDate lavora sulla stringa, niente Date() e niente fuso orario.
   if (campi.includes('provvedimento'))
-    addRow('Provvedimento', `n.\u00a0${esc(det.numeroProvvedimento) || '—'} del ${esc(det.dataProvvedimento) || '—'}`)
+    addRow('Provvedimento', `n.\u00a0${esc(det.numeroProvvedimento) || '—'} del ${esc(formatCsvDate(det.dataProvvedimento)) || '—'}`)
   if (campi.includes('riferimentoCedolino') && det.riferimentoCedolino)
     addRow('Rif. cedolino', esc(det.riferimentoCedolino))
 

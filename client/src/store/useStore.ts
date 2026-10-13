@@ -287,6 +287,7 @@ export const useStore = create<AppStore>()(
           tipoProvvedimento:           partial?.tipoProvvedimento           ?? '',
           numeroProvvedimento:         partial?.numeroProvvedimento         ?? '',
           dataProvvedimento:           partial?.dataProvvedimento           ?? '',
+          conservaEstremiProvvedimento: partial?.conservaEstremiProvvedimento ?? true,
           aliquota:                    partial?.aliquota                    ?? csv.aliquota,
           parti:                       partial?.parti                       ?? csv.parti,
           flagAdempimenti:             partial?.flagAdempimenti             ?? csv.flagAdempimenti,

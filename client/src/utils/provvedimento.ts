@@ -9,8 +9,15 @@
  *   - estremi valorizzati        -> `;029;900006;2026-09-02;`
  * Non vengono mai esportati entrambi i blocchi sulla stessa riga.
  *
- * Se (per dati storici) risultassero valorizzati entrambi, vince
- * l'identificativo: e' il dato che HR Suite risolve da solo.
+ * Se risultassero valorizzati entrambi, vince l'identificativo: e' il
+ * dato che HR Suite risolve da solo.
+ *
+ * Dalla 26.10.13 la regola vale per l'EXPORT, non per il salvataggio:
+ * con il flag di gruppo `conservaEstremiProvvedimento` (default ON) il
+ * gruppo conserva ID + tipo/numero/data — servono alla comunicazione PDF —
+ * ma nel CSV HR, da qualunque pulsante, esce solo l'ID.
+ *   - salvataggio -> normalizeProvvedimentoSalvataggio()
+ *   - export CSV  -> normalizeProvvedimento()  (buildCsvRows, unico punto)
  */
 
 export type ProvvedimentoMode = 'identificativo' | 'estremi' | 'nessuno'
@@ -84,5 +91,34 @@ export function normalizeProvvedimento(p: ProvvedimentoFields): Required<Provved
         numeroProvvedimento:         '',
         dataProvvedimento:           '',
       }
+  }
+}
+
+/**
+ * Il flag di gruppo: assente (gruppi salvati prima della 26.10.13) vale ON.
+ * Quei gruppi sono gia' esclusivi, quindi il CSV non cambia finche' non
+ * vengono modificati.
+ */
+export function conservaEstremi(p: { conservaEstremiProvvedimento?: boolean }): boolean {
+  return p.conservaEstremiProvvedimento ?? true
+}
+
+/**
+ * Quadrupla da SALVARE nel gruppo.
+ *  - conserva = true  -> si tengono tutti i campi (ID completato a 9 cifre,
+ *    placeholder di soli zeri azzerati). Il CSV restera' comunque esclusivo:
+ *    ci pensa normalizeProvvedimento() in buildCsvRows.
+ *  - conserva = false -> solo il blocco attivo, come prima della 26.10.13.
+ */
+export function normalizeProvvedimentoSalvataggio(
+  p: ProvvedimentoFields,
+  conserva: boolean,
+): Required<ProvvedimentoFields> {
+  if (!conserva) return normalizeProvvedimento(p)
+  return {
+    identificativoProvvedimento: padIdentificativoProvvedimento(p.identificativoProvvedimento),
+    tipoProvvedimento:           hasValoreProv(p.tipoProvvedimento) ? (p.tipoProvvedimento ?? '').trim() : '',
+    numeroProvvedimento:         (p.numeroProvvedimento ?? '').trim(),
+    dataProvvedimento:           (p.dataProvvedimento   ?? '').trim(),
   }
 }

@@ -9,7 +9,7 @@
 
 export const APP_NAME = 'Payroll Gang Suite' as const;
 // Convenzione: gli aggiornamenti di sicurezza usano il suffisso ".S"
-export const APP_VERSION = '26.10.10.2' as const;
+export const APP_VERSION = '26.10.13' as const;
 
 // ------------------------------------------------------------
 // RUOLI
@@ -227,15 +227,21 @@ export interface DettaglioLiquidazione {
   riferimentoCedolino: string;
 
   // --- Dati provvedimento (tutti editabili, generati da CSA) ---
-  // MUTUAMENTE ESCLUSIVI: o l'identificativo, o la terna tipo/numero/data.
-  // Vedi utils/provvedimento.ts (normalizeProvvedimento).
-  /** 9 cifre, es. "000025996". Vuoto se si usano tipo/numero/data. */
+  // Nel CSV HR sono MUTUAMENTE ESCLUSIVI: o l'identificativo, o la terna
+  // tipo/numero/data (vince l'identificativo). Nel gruppo possono convivere
+  // se conservaEstremiProvvedimento e' attivo. Vedi utils/provvedimento.ts.
+  /** 9 cifre, es. "000025996". Vuoto se si usano solo tipo/numero/data. */
   identificativoProvvedimento: string;
   /** Default "029" (precompilato all'inserimento del numero), configurabile in Impostazioni */
   tipoProvvedimento: string;
   numeroProvvedimento: string;
   /** Formato ISO YYYY-MM-DD (input date) */
   dataProvvedimento: string;
+  /**
+   * Conserva numero e data insieme all'ID: nel CSV HR esce solo l'ID, gli
+   * estremi restano per la comunicazione PDF. undefined = true (26.10.13).
+   */
+  conservaEstremiProvvedimento?: boolean;
 
   // --- Parametri CSV avanzati (da Impostazioni, override per dettaglio) ---
   aliquota: number;

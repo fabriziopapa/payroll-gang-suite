@@ -71,8 +71,8 @@ export const TAG_BUILTIN = ['TL'] as const;
 export const DATE_FORMATS = {
   /** Formato competenza liquidazione (UI e CSV anno/mese) */
   COMPETENZA: 'MM/YYYY',
-  /** Formato data competenza voce nel CSV HR */
-  DATA_COMPETENZA_VOCE_CSV: 'YYYY-MM-DD',
-  /** Formato data provvedimento nel CSV HR */
-  DATA_PROVVEDIMENTO_CSV: 'DD/MM/YYYY',
+  /** Formato data competenza voce nel CSV HR (convertita da formatCsvDate) */
+  DATA_COMPETENZA_VOCE_CSV: 'DD/MM/YYYY',
+  /** Formato data provvedimento nel CSV HR: ISO grezzo, validato su HR il 2026-09-08 */
+  DATA_PROVVEDIMENTO_CSV: 'YYYY-MM-DD',
 } as const;
