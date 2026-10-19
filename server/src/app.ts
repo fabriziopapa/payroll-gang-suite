@@ -46,7 +46,6 @@ import { emolumentiRoutes }   from './routes/emolumenti.js'
 import { tipiContoRoutes }    from './routes/tipiConto.js'
 import { vociConfigRoutes }   from './routes/vociConfig.js'
 import { auditRoutes } from './routes/audit.js'
-import { systemRoutes }      from './routes/system.js'
 import { areaContoRoutes, ricaricaElencoPaesi } from './routes/areaConto.js'
 import { PgPaesiContoRepository } from './db/repositories/PgPaesiContoRepository.js'
 
@@ -232,7 +231,6 @@ await app.register(emolumentiRoutes,   { prefix: '/api/v1/emolumenti' })
 await app.register(tipiContoRoutes,    { prefix: '/api/v1/emolumenti/tipi-conto' })
 await app.register(vociConfigRoutes,  { prefix: '/api/v1/voci-config' })
 await app.register(auditRoutes,       { prefix: '/api/v1/audit' })
-await app.register(systemRoutes,      { prefix: '/api/v1/system' })
 await app.register(areaContoRoutes,   { prefix: '/api/v1/area-conto' })
 
 // L'elenco dei paesi SEPA / EXTRA_UE (paesi_conto) si carica in memoria

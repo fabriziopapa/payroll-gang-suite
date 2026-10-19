@@ -83,11 +83,8 @@ const envSchema = z.object({
   // Codice rapportoParentela per figlio/figlia (da screen CSA: "FG")
   PARENTELA_FIGLIO: z.string().default('FG'),
 
-  // Controllo aggiornamenti (opzionale). File JSON di sola lettura scritto da
-  // pgs-update-check.sh: il server lo legge per mostrare agli amministratori
-  // se il repository ha commit piu' recenti di quelli installati.
-  // Assente = pannello aggiornamenti disattivato.
-  UPDATE_STATUS_FILE: z.string().min(1).optional(),
+  // UPDATE_STATUS_FILE (controllo aggiornamenti) rimossa nella 26.10.19.1.
+  // Lo schema non e' strict: un .env che la contiene ancora parte lo stesso.
 })
 
 const parsed = envSchema.safeParse(process.env)

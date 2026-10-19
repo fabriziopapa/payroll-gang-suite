@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.10.19-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.10.19.1-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -391,6 +391,15 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.10.19.1
+**Rimosso il controllo aggiornamenti in Impostazioni**
+
+- Tolti la card *Controllo aggiornamenti* (`AggiornamentiCard.tsx`), la rotta `GET /api/v1/system/update-status` (`routes/system.ts`), `systemApi` e i tipi relativi nel client, la variabile `UPDATE_STATUS_FILE` (schema `env.ts` e `.env.example`).
+- **Perche'**: non funzionava su nessun ambiente. In produzione (aaPanel) non e' mai stato attivo: era pensato solo per cPanel, e lo script non era adatto ne' all'utente `www` ne' all'hardening del pannello. In pre-produzione mostrava da cinque settimane lo stato del 12/09 (26.08.17.S), presentato come attuale: il riallineamento di quel giorno aveva lasciato in `.git` oggetti di root (il `fetch` come `pgs` falliva, con un messaggio fuorviante) e cancellato lo script, escluso da git dal 26.09.09. Inoltre il timer faceva eseguire a **root** un file nella cartella dell'applicazione, scrivibile dall'utente applicativo: mancando il file, chi controllava quell'utente poteva crearlo e farlo eseguire a root. Chi rilascia e' una persona sola, quindi l'informazione era gia' nota a chi fa il push.
+- **Avvio invariato**: lo schema dell'ambiente non e' strict, quindi un `.env` che contiene ancora `UPDATE_STATUS_FILE` parte lo stesso. La riga va comunque tolta, insieme a timer e file di stato, sulla pre-produzione (comandi nella documentazione operativa interna).
+- `.gitignore` continua a escludere `pgs-update-check.sh`, cosi' una copia locale non finisce in git per sbaglio.
+- La versione installata resta visibile nel badge in basso. Nessuna migrazione del database.
 
 ### 26.10.19
 **File HR: virgola o punto come separatore decimale, da Impostazioni**

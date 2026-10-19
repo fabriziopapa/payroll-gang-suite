@@ -848,37 +848,6 @@ export const verificaLiquidatoApi = {
   },
 }
 
-// ── Sistema: stato aggiornamenti (solo admin, sola lettura) ───
-
-export type StatoAggiornamento =
-  | 'non-configurato'
-  | 'aggiornato'
-  | 'disponibile'
-  | 'controllo-fallito'
-  | 'obsoleto'
-
-export interface CommitApi {
-  hash:      string
-  messaggio: string
-  data:      string
-}
-
-export interface UpdateStatusApi {
-  stato:                StatoAggiornamento
-  /** Comandi di aggiornamento, generati dal server (contengono percorsi di
-   *  sistema: non vanno messi nel bundle, che è pubblico). */
-  comandi?:             string[]
-  ramo?:                string
-  ultimoControllo?:     string
-  commitInstallato?:    string
-  commitDisponibile?:   string
-  versioneInstallata?:  string | null
-  versioneDisponibile?: string | null
-  commitMancanti?:      number
-  commits?:             CommitApi[]
-  messaggio?:           string
-}
-
 /** Una riga dell'elenco dei paesi (paesi_conto). Date 'AAAA-MM-GG'. */
 export interface PaeseContoApi {
   id:        number
@@ -901,14 +870,6 @@ export const paesiContoApi = {
       method: 'POST',
       body:   JSON.stringify(body),
     }),
-}
-
-export const systemApi = {
-  /**
-   * Stato degli aggiornamenti disponibili. Il server si limita a leggere un
-   * file scritto dal controllo aggiornamenti: non esegue git e non aggiorna nulla.
-   */
-  updateStatus: () => apiFetch<UpdateStatusApi>('/system/update-status'),
 }
 
 // ── Emolumenti: pannello CSA (dottorandi e borse) ─────────────
