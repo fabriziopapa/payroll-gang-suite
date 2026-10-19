@@ -90,7 +90,6 @@ payroll-gang-suite/
 │           └── pdfRegion/       #   estrazione via template regioni
 ├── shared/                      # Tipi condivisi client ↔ server
 ├── ecosystem.config.cjs         # Process manager (produzione)
-├── pgs-orfani.sh                # Sola lettura: job e script orfani, troncati o defunti sul server
 ├── .env.example                 # Variabili d'ambiente, documentate una per una
 ├── .githooks/pre-commit         # Guardrail PII e segreti (CF, matricole, idAb, chiavi)
 └── LICENSE
@@ -100,15 +99,6 @@ payroll-gang-suite/
 > configurazione dei singoli ambienti non fanno parte del repository: sono il
 > runbook di una specifica installazione e restano nella documentazione
 > operativa interna.
-
-**Verifica di job e script orfani — `pgs-orfani.sh`** (sola lettura, cPanel e aaPanel). Cerca processi zombie e daemon PM2 doppi o di root; unita' e timer systemd falliti o che puntano a file inesistenti; righe di cron che chiamano script inesistenti (compresi i task di aaPanel); script vuoti, con byte NUL, CRLF, sintassi rotta (tipico di un file troncato) o copie in `/root/pgs-operativo` diverse dal repository; residui noti (controllo aggiornamenti rimosso, `pm2-root.service`, dump del database, `.env.bak`, file tracciati modificati sul server). Cartella e utente dell'app si ricavano dal processo sulla porta 3001. Non corregge nulla: elenca. Root non esegue file scrivibili dall'utente applicativo, quindi si copia prima:
-
-```bash
-install -o root -g root -m 700 <cartella-app>/pgs-orfani.sh /root/pgs-operativo/pgs-orfani.sh
-bash /root/pgs-operativo/pgs-orfani.sh
-```
-
-Exit `0` se non ci sono ✘, `1` altrimenti; gli avvisi (!) non cambiano l'esito.
 
 
 ---
