@@ -132,12 +132,43 @@ export function formatCsvDate(isoDate: string): string {
   return `${parts[2]}/${parts[1]}/${parts[0]}`
 }
 
+// ── Separatore decimale dei file HR ──────────────────────────
+
+/** Separatore decimale delle colonne numeriche del CSV HR. */
+export type SeparatoreDecimale = ',' | '.'
+
+/**
+ * Separatore decimale da usare nei file HR, dall'impostazione
+ * `csvDecimaleVirgola` (Impostazioni → Parametri CSV default).
+ * Assente o true = virgola (default); false = punto.
+ *
+ * Riguarda SOLO l'esportazione: in memoria e nel database importo, parti e
+ * aliquota restano `number`, mai stringhe formattate. Cambiare l'impostazione
+ * non tocca nessun dato salvato, cambia solo il testo del file prodotto.
+ */
+export function separatoreDecimale(settings: { csvDecimaleVirgola?: boolean }): SeparatoreDecimale {
+  return settings.csvDecimaleVirgola === false ? '.' : ','
+}
+
+/**
+ * Numero → testo per le colonne numeriche del CSV HR (aliquota, parti, importo).
+ * Nessun separatore delle migliaia, nessun arrotondamento: le cifre sono
+ * quelle di sempre, cambia solo il carattere dei decimali.
+ */
+export function formatNumeroCsv(n: number, sep: SeparatoreDecimale): string {
+  const s = String(n)
+  return sep === ',' ? s.replace('.', ',') : s
+}
+
 /**
  * Serializza righe CsvExportRow in stringa CSV (RFC 4180, codifica ANSI gestita in download).
  * Date ISO → GG/MM/YYYY per compatibilità HR Suite.
- * Termina con \r\n (riga finale inclusa).
+ * `sep` = separatore decimale di aliquota, parti e importo (vedi separatoreDecimale):
+ * obbligatorio, cosi' nessun punto di export puo' dimenticare l'impostazione.
+ * Il separatore di campo resta il punto e virgola.
+ * Termina con \n (riga finale inclusa).
  */
-export function serializeCsv(rows: CsvExportRow[]): string {
+export function serializeCsv(rows: CsvExportRow[], sep: SeparatoreDecimale): string {
   const dataRows = rows.map(r =>
     [
       csvEscape(r.matricola),
@@ -152,9 +183,9 @@ export function serializeCsv(rows: CsvExportRow[]): string {
       csvEscape(r.meseCompetenzaLiquidazione),
       csvEscape(formatCsvDate(r.dataCompetenzaVoce)),
       csvEscape(r.codiceStatoVoce),
-      String(r.aliquota),
-      String(r.parti),
-      String(r.importo),
+      formatNumeroCsv(r.aliquota, sep),
+      formatNumeroCsv(r.parti, sep),
+      formatNumeroCsv(r.importo, sep),
       csvEscape(r.codiceDivisa),
       csvEscape(r.codiceEnte),
       csvEscape(r.codiceCapitolo),

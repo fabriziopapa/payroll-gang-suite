@@ -190,6 +190,8 @@ export default function App() {
             ? (raw.bolloOpzioni as string[]).filter(x => typeof x === 'string')
             : DEFAULT_BOLLO_OPZIONI,
           cinecaUseProxy:       raw?.cinecaUseProxy === true,
+          // Assente in DB = virgola: il default vale anche prima del primo salvataggio
+          csvDecimaleVirgola:   raw?.csvDecimaleVirgola !== false,
         })
       })
       .catch(() => { /* usa defaults locali già nello store */ })

@@ -60,6 +60,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   pdfRegionEditorEnabled:  false,
   bolloOpzioni:            DEFAULT_BOLLO_OPZIONI,
   cinecaUseProxy:          false,
+  csvDecimaleVirgola:      true,
 }
 
 // ── Helpers ───────────────────────────────────────────────────

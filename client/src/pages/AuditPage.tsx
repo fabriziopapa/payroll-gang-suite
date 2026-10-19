@@ -30,6 +30,7 @@ const AZIONE_META: Record<string, AzioneMeta> = {
   REFRESH_FINGERPRINT_CHANGED:   { label: 'Fingerprint sessione cambiato', tono: 'warn' },
   REFRESH_TOKEN_THEFT_SUSPECTED: { label: 'Sospetto furto token',        tono: 'danger' },
   SETTINGS_UPDATED:              { label: 'Impostazioni aggiornate',     tono: 'info' },
+  CSV_SEPARATORE_DECIMALE:       { label: 'Separatore decimale file HR', tono: 'warn' },
   CERTIFICATO_CREATO:            { label: 'Certificato creato',          tono: 'ok' },
   CERTIFICATO_SCARICATO:         { label: 'Certificato scaricato',       tono: 'info' },
   CERTIFICATO_ELIMINATO:         { label: 'Certificato eliminato',       tono: 'danger' },
@@ -83,6 +84,8 @@ function describeDettagli(azione: string, dettagli: unknown): string {
   switch (azione) {
     case 'LOGIN_FAILED':
       return d.reason ? `Motivo: ${val('reason')}` : ''
+    case 'CSV_SEPARATORE_DECIMALE':
+      return d.da && d.a ? `Da ${val('da')} a ${val('a')} · solo esportazione, dati invariati` : ''
     case 'SETTINGS_UPDATED':
       if (Array.isArray(d.chiavi)) return `Chiavi: ${(d.chiavi as unknown[]).join(', ')}`
       return d.chiave ? `Chiave: ${val('chiave')}` : ''

@@ -9,7 +9,7 @@
 
 export const APP_NAME = 'Payroll Gang Suite' as const;
 // Convenzione: gli aggiornamenti di sicurezza usano il suffisso ".S"
-export const APP_VERSION = '26.10.13' as const;
+export const APP_VERSION = '26.10.19' as const;
 
 // ------------------------------------------------------------
 // RUOLI
@@ -388,6 +388,9 @@ export interface AppSettings {
   /** Instrada le chiamate CSA-WS via reverse proxy in Italia (CINECA geo-blocca
    *  gli IP extra-UE). Richiede CINECA_PROXY_URL/SECRET nel .env del server. */
   cinecaUseProxy?:          boolean;
+  /** Separatore decimale dei file HR esportati: true/assente = virgola
+   *  (default), false = punto. Solo esportazione, i dati salvati non cambiano. */
+  csvDecimaleVirgola?:      boolean;
 }
 
 /** Default modalità assolvimento marca da bollo (seed lista bolloOpzioni). */

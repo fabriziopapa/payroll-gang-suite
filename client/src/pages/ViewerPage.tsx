@@ -13,7 +13,7 @@ import ArchiviaLiquidazioneModal from '../components/ArchiviaLiquidazioneModal'
 import { showToast } from '../components/ToastManager'
 import {
   calcolaImportoCSV, calcolaTotali, buildCsvRows,
-  serializeCsv, downloadCsv, formatEur,
+  serializeCsv, downloadCsv, formatEur, separatoreDecimale,
 } from '../utils/biz'
 import { SortableTh, compareNomBy, normalizeSearch, type SortCol, type SortState } from '../utils/sorting'
 import type { DettaglioLiquidazione, Nominativo, CoefficienteScorporo } from '../types'
@@ -120,7 +120,7 @@ export default function ViewerPage() {
   // ── Export CSV HR ────────────────────────────────────────────
   function handleExportCsv() {
     const rows    = buildCsvRows(dettagli, nominativi, settings.coefficienti, settings.coefficientiContoTerzi)
-    const csv     = serializeCsv(rows)
+    const csv     = serializeCsv(rows, separatoreDecimale(settings))
     const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '')
     const nomePart = viewerBozza!.nome.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30)
     downloadCsv(csv, `liquidazione_${nomePart}_${datePart}.csv`)

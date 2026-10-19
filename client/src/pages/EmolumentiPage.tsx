@@ -35,7 +35,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 // con gli stessi campi e le stesse parole.
 import ArchiviaLiquidazioneModal from '../components/ArchiviaLiquidazioneModal'
 import ModaleContiCsa, { type ParametriContiCsa } from '../components/ModaleContiCsa'
-import { serializeCsv, downloadCsv, lastDayOfMonth } from '../utils/biz'
+import { serializeCsv, downloadCsv, lastDayOfMonth, separatoreDecimale } from '../utils/biz'
 import { nomeOppureTe } from '../utils/utente'
 import { useStore } from '../store/useStore'
 import { TIPO_PROVVEDIMENTO_DEFAULT } from '../utils/provvedimento'
@@ -561,6 +561,8 @@ export default function EmolumentiPage() {
   const annoCorrente = new Date().getFullYear()
   /** Serve solo a scrivere «te» invece del proprio nome nell'elenco. */
   const utenteId = useStore(s => s.user?.id ?? null)
+  /** Separatore decimale dei file HR (Impostazioni): solo per l'export, i dati non cambiano. */
+  const sepDecimale = useStore(s => separatoreDecimale(s.settings))
 
   // Passo 1
   const [raw, setRaw] = useState('')
@@ -1669,7 +1671,7 @@ export default function EmolumentiPage() {
       }
     }
     const oggi = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-    downloadCsv(serializeCsv(out), `emolumenti_${voce.trim()}_${oggi}.csv`)
+    downloadCsv(serializeCsv(out, sepDecimale), `emolumenti_${voce.trim()}_${oggi}.csv`)
     showToast(`${out.length} righe esportate.`, 'success')
   }
 

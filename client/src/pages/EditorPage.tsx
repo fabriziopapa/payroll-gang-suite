@@ -7,7 +7,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { bozzeApi, vociConfigApi } from '../api/endpoints'
-import { buildCsvRows, serializeCsv, downloadCsv } from '../utils/biz'
+import { buildCsvRows, serializeCsv, downloadCsv, separatoreDecimale } from '../utils/biz'
 import DettaglioCard       from '../components/editor/DettaglioCard'
 import DettaglioFormModal  from '../components/editor/DettaglioFormModal'
 import NominativoFormModal from '../components/editor/NominativoFormModal'
@@ -104,7 +104,7 @@ export default function EditorPage() {
   // ── Export CSV ────────────────────────────────────────────
   function handleExportCsv() {
     const rows     = buildCsvRows(dettagli, nominativi, settings.coefficienti, settings.coefficientiContoTerzi)
-    const csv      = serializeCsv(rows)
+    const csv      = serializeCsv(rows, separatoreDecimale(settings))
     const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '')
     const nomePart = currentBozzaNome.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30)
     downloadCsv(csv, `liquidazione_${nomePart}_${datePart}.csv`)

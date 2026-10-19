@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.10.13-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.10.19-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -58,6 +58,7 @@ payroll-gang-suite/
 │       └── utils/               # CSV / PDF / EML builder, calcoli scorporo (biz.ts),
 │                                # provvedimentiRiga.ts (+ test): piu' provvedimenti per persona in Emolumenti
 │                                # meseNome.ts (+ test): mese di liquidazione nel nome della lavorazione
+│                                # csvDecimale.test.ts: separatore decimale dei file HR (virgola/punto)
 │                                # provvedimento.ts (+ test): ID e estremi del provvedimento, salvataggio vs CSV HR
 ├── server/                      # API REST Fastify
 │   ├── sql/
@@ -115,6 +116,7 @@ payroll-gang-suite/
 - **Import XML** — anagrafiche e voci da file DATAPACKET HR (max 5 MB, max 5.000 righe)
 - **Import XLSX** — anagrafiche SGE (max 10 MB, max 10.000 righe, import differenziale con hash SHA-256); include `NAZ_IBAN`, la nazione del conto, che entra nell'hash: senza, un cambio di conto non verrebbe mai aggiornato. L'area del conto (IT / SEPA / EXTRA_UE / NON_NOTO) non si importa: si calcola dalla nazione
 - **Export CSV** — tracciato HR ufficiale (header camelCase, `codiceStatoVoce=E`), calcolo scorporo automatico, CSV injection prevention
+- **Separatore decimale dei file HR** — interruttore *Virgola come separatore decimale* in *Impostazioni → Generali → Parametri CSV default* (chiave `csvDecimaleVirgola` in `app_settings`; attivo di default = `1234,56`, disattivo = `1234.56`). Vale per `aliquota`, `parti` e `importo` in **tutti** gli export CSV HR (CSV HR della liquidazione, download del singolo gruppo, Viewer, area Emolumenti), che passano tutti da `serializeCsv(rows, separatoreDecimale(settings))`. Agisce **solo sull'esportazione**: in memoria e nel database i valori restano numeri, nessun dato salvato cambia. Lo modifica solo un amministratore; ogni cambio registra nell'audit `CSV_SEPARATORE_DECIMALE` con il prima e il dopo. Restano col punto gli export di *Ricerca* (report, non tracciato HR).
 - **Export TXT Ruoli** — file per ruolo con deduplicazione matricole
 - **Comunicazioni** — generazione email con allegato PDF nominale
 - **Gestione utenti** — admin panel, TOTP onboarding, ruoli admin/base, lockout anti-brute-force
@@ -378,7 +380,7 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 - Rate limiting globale (100 req/60s) + auth (5 req/300s)
 - Audit log append-only per login, CRUD bozze, import, settings, gestione utenti
 - Validazione strutturale JSONB `dati` bozze con `BozzaDatiSchema` (Zod) lato server
-- Whitelist chiavi `app_settings` — rifiuta chiavi non consentite (SEC-H04)
+- Whitelist chiavi `app_settings` — rifiuta chiavi non consentite (SEC-H04); `csvDecimaleVirgola` accetta solo `true`/`false` (400 altrimenti)
 - MIME injection prevention su corpo email (strip `\r`)
 - CSV injection prevention su export ricerca (neutralizzazione `=`, `+`, `-`, `@`)
 - `clearAuth` resetta tutti i campi PII dallo store client al logout/scadenza token
@@ -389,6 +391,19 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.10.19
+**File HR: virgola o punto come separatore decimale, da Impostazioni**
+
+- Nuovo interruttore **«Virgola come separatore decimale»** in *Impostazioni → Generali → Parametri CSV default*, nello stile degli altri interruttori (salvataggio immediato, toast di conferma). **Attivo di default**: i file HR escono con `1234,56`; disattivato, con `1234.56`.
+- ⚠ **Cambia l'output di default**: fino alla 26.10.13 i decimali uscivano **col punto**. Dopo l'aggiornamento, senza toccare nulla, escono con la virgola. Per tornare al comportamento precedente basta spegnere l'interruttore.
+- Vale per le tre colonne numeriche del tracciato — `aliquota`, `parti`, `importo` — in **ogni** export CSV HR: *CSV HR* dell'editor, download del singolo gruppo, Viewer, area Emolumenti. Separatore di campo (`;`), date, codifica Windows-1252 e terminatore LF invariati; nessun separatore delle migliaia, nessun arrotondamento.
+- **Solo esportazione**: importo, parti e aliquota restano numeri in memoria e nel database; cambiare l'impostazione non modifica nessuna liquidazione, lavorazione o bozza salvata. `serializeCsv(rows, sep)` ha ora il separatore **obbligatorio**, cosi' nessun punto di export puo' dimenticare l'impostazione (lo verifica il compilatore).
+- **Audit**: ogni cambio effettivo registra `CSV_SEPARATORE_DECIMALE` (*Separatore decimale file HR*, entita' `app_settings`) con `{ da, a }` — es. «Da virgola a punto» — oltre alla consueta `SETTINGS_UPDATED`. Il server accetta solo `true`/`false` (400 altrimenti).
+- Visibile a tutti; lo cambia solo un amministratore (per gli altri l'interruttore e' disabilitato con la nota).
+- Gli export di *Ricerca* (report, non tracciato HR) restano col punto.
+- Chiave `csvDecimaleVirgola` in `app_settings`: **nessuna migrazione del database**; assente = virgola.
+- 6 test nuovi in `client/src/utils/csvDecimale.test.ts` (`npm run test --workspace=client`).
 
 ### 26.10.13
 **Gruppo liquidazione: ID provvedimento e numero/data conservati insieme, nel CSV HR solo l'ID**

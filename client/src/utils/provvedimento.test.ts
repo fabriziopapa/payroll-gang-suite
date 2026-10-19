@@ -35,7 +35,7 @@ const NOM = {
 
 /** Le quattro colonne del provvedimento (5a-8a) della prima riga del CSV HR. */
 function colonneProv(det: DettaglioLiquidazione): string {
-  const riga = serializeCsv(buildCsvRows([det], [NOM], {})).split(/\r?\n/)[1]!
+  const riga = serializeCsv(buildCsvRows([det], [NOM], {}), ',').split(/\r?\n/)[1]!
   return riga.split(';').slice(4, 8).join(';')
 }
 

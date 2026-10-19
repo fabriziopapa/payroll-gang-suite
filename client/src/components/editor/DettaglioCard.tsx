@@ -7,7 +7,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useStore } from '../../store/useStore'
 import { showToast } from '../ToastManager'
 import { ConfirmDialog } from '../ConfirmDialog'
-import { calcolaImportoCSV, formatEur, finRapWarn, buildCsvRows, serializeCsv, downloadCsv, isImportoAttivo, isPartiAttivo } from '../../utils/biz'
+import { calcolaImportoCSV, formatEur, finRapWarn, buildCsvRows, serializeCsv, downloadCsv, isImportoAttivo, isPartiAttivo, separatoreDecimale } from '../../utils/biz'
 import type { DettaglioLiquidazione, Nominativo, VoceConfig } from '../../types'
 import { SortableTh, compareNomBy, normalizeSearch, type SortCol } from '../../utils/sorting'
 import { anagraficheApi, cinecaApi, type RuoloAtApiResult } from '../../api/endpoints'
@@ -360,7 +360,7 @@ export default function DettaglioCard({
   function handleDownloadCsvGruppo() {
     const rows = buildCsvRows([dettaglio], noms, settings.coefficienti, settings.coefficientiContoTerzi)
     const slug = (dettaglio.nomeDescrittivo || 'gruppo').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40)
-    downloadCsv(serializeCsv(rows), `liquidazione_${slug}.csv`)
+    downloadCsv(serializeCsv(rows, separatoreDecimale(settings)), `liquidazione_${slug}.csv`)
   }
 
   // Ref per tenere la coda disambiguation in attesa (aperta dopo conflitti)

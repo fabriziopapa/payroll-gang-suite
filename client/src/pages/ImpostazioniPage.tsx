@@ -36,6 +36,7 @@ export default function ImpostazioniPage() {
   const [savingTurnstile, setSavingTurnstile] = useState(false)
   const [savingPdfRegion, setSavingPdfRegion] = useState(false)
   const [savingCinecaProxy, setSavingCinecaProxy] = useState(false)
+  const [savingCsvDecimale, setSavingCsvDecimale] = useState(false)
 
   // form aggiunta riga scorporo standard
   const [newRuolo,    setNewRuolo]    = useState('')
@@ -138,6 +139,25 @@ export default function ImpostazioniPage() {
         : 'Errore nel salvataggio', 'error')
     } finally {
       setSavingCinecaProxy(false)
+    }
+  }
+
+  // ── Separatore decimale dei file HR ──────────────────────────
+  // Salvataggio immediato come gli altri interruttori; il server registra il
+  // cambio nell'audit (CSV_SEPARATORE_DECIMALE). Tocca solo l'esportazione.
+  async function handleToggleCsvDecimale(virgola: boolean) {
+    setSavingCsvDecimale(true)
+    try {
+      await settingsApi.update({ csvDecimaleVirgola: virgola })
+      setSettings({ ...settings, csvDecimaleVirgola: virgola })
+      showToast(
+        virgola ? 'File HR: decimali con la virgola' : 'File HR: decimali con il punto',
+        'success',
+      )
+    } catch {
+      showToast('Errore nel salvataggio', 'error')
+    } finally {
+      setSavingCsvDecimale(false)
     }
   }
 
@@ -457,6 +477,38 @@ export default function ImpostazioniPage() {
                   />
                 </div>
               ))}
+            </div>
+
+            {/* Separatore decimale dei file HR — salvataggio immediato, solo admin */}
+            <div className="flex items-center justify-between gap-4 mt-5 pt-5 border-t border-slate-800">
+              <div className="min-w-0">
+                <p className="text-sm text-slate-300 font-medium">Virgola come separatore decimale</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Attivo: i file HR escono con la virgola (<span className="font-mono text-slate-400">1234,56</span>).
+                  Disattivo: con il punto (<span className="font-mono text-slate-400">1234.56</span>).
+                  Vale per importo, parti e aliquota in ogni esportazione CSV HR. I dati salvati non cambiano.
+                  {!user?.isAdmin && ' Modificabile solo da un amministratore.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={savingCsvDecimale || !user?.isAdmin}
+                onClick={() => handleToggleCsvDecimale(!(settings.csvDecimaleVirgola ?? true))}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full
+                  border-2 border-transparent transition-colors duration-200
+                  focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2
+                  focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed
+                  ${(settings.csvDecimaleVirgola ?? true) ? 'bg-indigo-600' : 'bg-slate-700'}`}
+                role="switch"
+                aria-checked={settings.csvDecimaleVirgola ?? true}
+                aria-label="Virgola come separatore decimale nei file HR"
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white
+                    shadow transform transition duration-200
+                    ${(settings.csvDecimaleVirgola ?? true) ? 'translate-x-5' : 'translate-x-0'}`}
+                />
+              </button>
             </div>
           </section>
 

@@ -12,7 +12,7 @@ import { cinecaProxyConfigured } from '../config/env.js'
 
 // SEC-H04: whitelist delle chiavi consentite in app_settings.
 // Chiavi scritte dal server (import): last_import_*
-// Chiavi scritte dal client (impostazioni): coefficienti, csvDefaults, tags, rubrica, modelliComunicazione, turnstileEnabled
+// Chiavi scritte dal client (impostazioni): coefficienti, csvDefaults, tags, rubrica, modelliComunicazione, turnstileEnabled, csvDecimaleVirgola
 // Aggiungere nuove chiavi qui quando si estende il modello dati.
 const ALLOWED_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   // Scritte dal server durante gli import
@@ -31,7 +31,12 @@ const ALLOWED_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   'pdfRegionEditorEnabled',
   'bolloOpzioni',
   'cinecaUseProxy',
+  'csvDecimaleVirgola',
 ])
+
+/** Separatore decimale dei file HR: true/assente = virgola (default), false = punto. */
+const CSV_DECIMALE = 'csvDecimaleVirgola'
+const nomeSeparatore = (v: unknown): 'virgola' | 'punto' => (v === false ? 'punto' : 'virgola')
 
 /**
  * Applica a runtime le chiavi con effetto lato server.
@@ -39,6 +44,9 @@ const ALLOWED_SETTINGS_KEYS: ReadonlySet<string> = new Set([
  * Ritorna un messaggio d'errore se il valore non è applicabile, altrimenti null.
  */
 function applyServerSideSetting(chiave: string, valore: unknown): string | null {
+  if (chiave === CSV_DECIMALE && typeof valore !== 'boolean') {
+    return 'csvDecimaleVirgola deve essere true o false'
+  }
   if (chiave === 'cinecaUseProxy') {
     if (valore === true && !cinecaProxyConfigured) {
       return 'Proxy CINECA non configurato sul server (CINECA_PROXY_URL / CINECA_PROXY_SECRET in .env)'
@@ -57,6 +65,26 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
 
   const repo      = new PgSettingsRepository(app.db)
   const auditRepo = new PgAuditRepository(app.db)
+
+  /**
+   * Scrive la chiave; se e' il separatore decimale dei file HR e cambia
+   * davvero, registra nell'audit una voce dedicata con il prima e il dopo
+   * (oltre alla SETTINGS_UPDATED generica). Tocca solo l'esportazione.
+   */
+  async function salva(chiave: string, valore: unknown, userId: string, ip: string): Promise<void> {
+    const prima = chiave === CSV_DECIMALE ? await repo.get<unknown>(chiave) : null
+    await repo.set(chiave, valore)
+    if (chiave === CSV_DECIMALE && nomeSeparatore(prima) !== nomeSeparatore(valore)) {
+      await auditRepo.log({
+        userId,
+        azione:   'CSV_SEPARATORE_DECIMALE',
+        entita:   'app_settings',
+        entitaId: CSV_DECIMALE,
+        dettagli: { da: nomeSeparatore(prima), a: nomeSeparatore(valore) },
+        ip,
+      })
+    }
+  }
 
   // GET /settings/public — senza autenticazione
   // Espone solo le chiavi in PUBLIC_SETTINGS_KEYS (valori non sensibili)
@@ -89,7 +117,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       }
       const err = applyServerSideSetting(chiave, valore)
       if (err) return reply.status(400).send({ error: err })
-      await repo.set(chiave, valore)
+      await salva(chiave, valore, req.user!.id, req.ip)
     }
     await auditRepo.log({
       userId:   req.user!.id,
@@ -111,7 +139,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     const { valore } = z.object({ valore: z.unknown() }).parse(req.body)
     const applyErr = applyServerSideSetting(chiave, valore)
     if (applyErr) return reply.status(400).send({ error: applyErr })
-    await repo.set(chiave, valore)
+    await salva(chiave, valore, req.user!.id, req.ip)
     await auditRepo.log({
       userId:   req.user!.id,
       azione:   'SETTINGS_UPDATED',
