@@ -9,32 +9,8 @@ import { requireAdmin } from '../middleware/authenticate.js'
 import { env, REFRESH_TOKEN_MS } from '../config/env.js'
 import { PgSettingsRepository } from '../db/repositories/PgSettingsRepository.js'
 import { clientIp } from '../lib/clientIp.js'
+import { verifyTurnstile } from '../lib/turnstile.js'
 
-// SEC-A3 — Fail-closed: se Turnstile è ATTIVO (secret configurata + toggle
-// runtime `turnstileEnabled` non disattivato), il token è obbligatorio e la
-// verifica deve riuscire. Errore di rete verso Cloudflare ⇒ login rifiutato
-// (resta il rate limit come protezione, ma il CAPTCHA non è più bypassabile
-// causando un timeout). Se la secret manca o il toggle è spento ⇒ skip.
-async function verifyTurnstile(
-  enabled: boolean,
-  token: string | undefined,
-  ip: string,
-): Promise<boolean> {
-  if (!env.TURNSTILE_SECRET_KEY || !enabled) return true
-  if (!token) return false
-  try {
-    const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ secret: env.TURNSTILE_SECRET_KEY, response: token, remoteip: ip }),
-      signal:  AbortSignal.timeout(5000),
-    })
-    const data = await res.json() as { success: boolean }
-    return data.success
-  } catch {
-    return false
-  }
-}
 // MailerService è accessibile tramite app.mailer (decorato in app.ts)
 
 const REFRESH_COOKIE = 'pgs_refresh'
@@ -127,7 +103,14 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     })
     const { activationToken, token, cfTurnstileToken } = schema.parse(request.body)
 
-    if (!(await verifyTurnstile(await turnstileEnabled(), cfTurnstileToken, clientIp(request)))) {
+    const captcha = await verifyTurnstile(
+      env.TURNSTILE_SECRET_KEY, await turnstileEnabled(), cfTurnstileToken, clientIp(request),
+    )
+    if (!captcha.ok) {
+      request.log.warn(
+        { captcha: { route: 'activate', reason: captcha.reason, codes: captcha.codes, ms: captcha.ms } },
+        'Turnstile: verifica rifiutata',
+      )
       return reply.code(400).send({ error: 'CAPTCHA_FAILED' })
     }
 
@@ -154,7 +137,14 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     })
     const { username, token, cfTurnstileToken } = schema.parse(request.body)
 
-    if (!(await verifyTurnstile(await turnstileEnabled(), cfTurnstileToken, clientIp(request)))) {
+    const captcha = await verifyTurnstile(
+      env.TURNSTILE_SECRET_KEY, await turnstileEnabled(), cfTurnstileToken, clientIp(request),
+    )
+    if (!captcha.ok) {
+      request.log.warn(
+        { captcha: { route: 'login', reason: captcha.reason, codes: captcha.codes, ms: captcha.ms } },
+        'Turnstile: verifica rifiutata',
+      )
       return reply.code(400).send({ error: 'CAPTCHA_FAILED' })
     }
 
@@ -169,6 +159,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       // SEC-M01: account bloccato — informazione differenziata
       if (err.message === 'ACCOUNT_LOCKED') {
         return reply.code(423).send({ error: 'ACCOUNT_LOCKED' })
+      }
+      // Errore imprevisto (DB, decifratura, …): la risposta resta il 401
+      // generico, ma il dettaglio finisce nel log invece di sparire.
+      if (err?.message !== 'AUTH_FAILED') {
+        request.log.error({ err }, 'Login: errore imprevisto, risposto AUTH_FAILED')
       }
       // Risposta generica — non rivela se l'utente esiste
       return reply.code(401).send({ error: 'AUTH_FAILED' })

@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.10.19.1-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.10.20-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -43,7 +43,8 @@ gestisce comunicazioni ai destinatari e archivia le liquidazioni per ateneo.
 payroll-gang-suite/
 ├── client/                      # SPA React/Vite
 │   └── src/
-│       ├── api/                 # Client API tipizzati (endpoints.ts, client.ts — JWT + auto-refresh)
+│       ├── api/                 # Client API tipizzati (endpoints.ts, client.ts — JWT + auto-refresh;
+│       │                        #   client.test.ts: niente refresh dopo un 401 di login/attivazione)
 │       ├── components/          # Componenti React (ConfirmDialog, ToastManager, Layout,
 │       │                        #   ModaleContiCsa, PaesiContoCard, TipiContoPage, …)
 │       │   ├── editor/          #   DettaglioCard, DettaglioFormModal, ComunicazioneModal
@@ -75,6 +76,7 @@ payroll-gang-suite/
 │       │   │                    #   (già incluse in setup.sql: NON eseguire su install nuova)
 │       │   └── repositories/    # Repository pattern (PgBozze, PgUsers, PgCertificati, …)
 │       ├── lib/                 # clientIp.ts (IP reale dietro Cloudflare) ·
+│       │                        # turnstile.ts (verifica Turnstile con motivo del rifiuto, con test) ·
 │       │                        # areaConto.ts (regola IT/SEPA/EXTRA_UE — elenco EPC v8.0, con test;
 │       │                        #   unica fonte dell'area del conto, anche per GET /area-conto)
 │       ├── middleware/          # authenticate.ts (JWT preHandler)
@@ -378,6 +380,7 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 - Cookie: `HttpOnly` + `Secure` + `SameSite=Strict`
 - TOTP secret cifrati a riposo con AES-256-GCM
 - Rate limiting globale (100 req/60s) + auth (5 req/300s)
+- Cloudflare Turnstile su login e attivazione (fail-closed): ogni rifiuto finisce nel log PM2 come `Turnstile: verifica rifiutata` con il motivo (`missing_token`, `http_<n>`, `rejected` + `error-codes`, `timeout_<ms>ms`, `network:<codice>`)
 - Audit log append-only per login, CRUD bozze, import, settings, gestione utenti
 - Validazione strutturale JSONB `dati` bozze con `BozzaDatiSchema` (Zod) lato server
 - Whitelist chiavi `app_settings` — rifiuta chiavi non consentite (SEC-H04); `csvDecimaleVirgola` accetta solo `true`/`false` (400 altrimenti)
@@ -391,6 +394,18 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.10.20
+**Login: la verifica Turnstile non fa piu' scadere il codice OTP; motivi dei rifiuti nel log**
+
+- **Causa dell'errore del 20/10**: la verifica Turnstile partiva solo *dopo* la sesta cifra del codice, e il login veniva inviato al termine della verifica. Con verifiche di 40-60 secondi il codice arrivava al server gia' scaduto (`invalid_token`). Ora la verifica parte **all'apertura della pagina** (`execution: 'render'`, rinnovo automatico del token alla scadenza dei 5 minuti) e il callback **salva soltanto** il token: il login parte subito da Invio, dal pulsante o dall'invio automatico alla sesta cifra.
+- Finche' il token non e' pronto il pulsante resta disabilitato con la scritta **«Verifica di sicurezza in corso…»**; nessun invio ritardato con un codice vecchio. Dopo un tentativo fallito il token usato (monouso) viene scartato e la verifica riparte da sola; il campo OTP si svuota come prima.
+- **Riquadro Turnstile visibile quando serve**: il contenitore era `display:none`, quindi se Cloudflare chiedeva un clic (`interaction-only`) il riquadro restava invisibile. Ora e' sotto il modulo e compare solo in quel caso. Il widget di attivazione viene creato solo con `?activate=`.
+- **Messaggio giusto con un codice sbagliato**: dopo il 401 di `/auth/login` e `/auth/activate` il client non tenta piu' `/auth/refresh`. Prima il messaggio diventava «Errore di connessione (UNAUTHORIZED)» e, con un vecchio cookie ancora valido, il login veniva rimandato con lo stesso token Turnstile (rifiutato come duplicato).
+- Se lo script di Cloudflare non si carica compare «Impossibile caricare la verifica di sicurezza». Gli errori del widget vanno in console (`Turnstile error-callback`).
+- **Server, solo log, risposte invariate**: `verifyTurnstile` spostata in `server/src/lib/turnstile.ts` e ora restituisce anche il motivo del rifiuto, scritto nel log PM2 (`Turnstile: verifica rifiutata`, con rotta, motivo, `error-codes`, durata). Il client riceve sempre `400 CAPTCHA_FAILED`. Gli errori imprevisti del login (non `AUTH_FAILED`/`ACCOUNT_LOCKED`) finiscono nel log come `Login: errore imprevisto`; la risposta resta `401 AUTH_FAILED`.
+- Per leggere i rifiuti sul VPS: `grep -h 'Turnstile: verifica rifiutata' logs/pm2-out.log | tail`.
+- 7 test nuovi in `server/src/lib/turnstile.test.ts`, 2 in `client/src/api/client.test.ts`. Nessuna migrazione del database, nessuna dipendenza nuova, nessuna impostazione nuova.
 
 ### 26.10.19.1
 **Rimosso il controllo aggiornamenti in Impostazioni**

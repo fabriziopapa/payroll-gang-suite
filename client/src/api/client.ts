@@ -30,6 +30,17 @@ async function tryRefresh(): Promise<string | null> {
   }
 }
 
+// ── Rotte senza refresh ──────────────────────────────────────
+// Su login e attivazione un 401 e' la risposta alle credenziali inviate, non un
+// access token scaduto: tentare il refresh e' inutile e, se riuscisse con un
+// vecchio cookie, rimanderebbe la stessa richiesta con lo stesso token
+// Turnstile (monouso), che Cloudflare rifiuterebbe come duplicato.
+const NO_REFRESH_PATHS = ['/auth/login', '/auth/activate']
+
+export function shouldRefreshOn401(path: string): boolean {
+  return !NO_REFRESH_PATHS.includes(path.split('?')[0] ?? path)
+}
+
 // ── Fetch principale ─────────────────────────────────────────
 export async function apiFetch<T = unknown>(
   path: string,
@@ -55,7 +66,7 @@ export async function apiFetch<T = unknown>(
   let res = await req(_token)
 
   // Token scaduto → tenta refresh
-  if (res.status === 401) {
+  if (res.status === 401 && shouldRefreshOn401(path)) {
     let newTok: string | null
 
     if (_refreshing) {

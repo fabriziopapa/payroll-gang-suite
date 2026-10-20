@@ -2,6 +2,9 @@
 // PAYROLL GANG SUITE — Login Page (TOTP passwordless)
 // Supporta flusso di attivazione via ?activate=UUID
 // Protezione bot: Cloudflare Turnstile invisible/managed
+// 26.10.20: la verifica parte all'apertura della pagina (execution 'render'),
+// non piu' dopo la sesta cifra del codice. Prima il codice OTP aspettava la
+// fine della verifica (anche 40-60 s) e arrivava al server gia' scaduto.
 // ============================================================
 
 import React, { useState, useRef, useEffect, useCallback } from 'react'
@@ -32,7 +35,7 @@ interface TurnstileRenderOpts {
   execution:          'execute' | 'render'
   appearance:         'always' | 'execute' | 'interaction-only' | 'invisible'
   callback:           (token: string) => void
-  'error-callback':   () => void
+  'error-callback':   (code?: string) => void
   'expired-callback'?: () => void
 }
 
@@ -87,6 +90,13 @@ export default function LoginPage() {
   const loginWidgetRef       = useRef<string | null>(null)
   const activateWidgetRef    = useRef<string | null>(null)
 
+  // Token Turnstile pronti (monouso, validi 5 minuti). Il ref serve all'invio,
+  // lo stato al pulsante ("Verifica di sicurezza in corso…" finche' manca).
+  const loginCfTokenRef    = useRef<string | null>(null)
+  const activateCfTokenRef = useRef<string | null>(null)
+  const [loginCfReady,    setLoginCfReady]    = useState(false)
+  const [activateCfReady, setActivateCfReady] = useState(false)
+
   // Live refs — updated every render to avoid stale closures in Turnstile callbacks
   const doLoginApiRef    = useRef<((cfToken?: string) => Promise<void>) | null>(null)
   const doActivateApiRef = useRef<((cfToken?: string) => Promise<void>) | null>(null)
@@ -112,6 +122,8 @@ export default function LoginPage() {
       )
       setToken('')
       tokenRef.current?.focus()
+      // Il token Turnstile appena usato non vale piu': ne serve uno nuovo
+      if (loginWidgetRef.current) window.turnstile?.reset(loginWidgetRef.current)
     } finally {
       setLoading(false)
     }
@@ -139,6 +151,7 @@ export default function LoginPage() {
       )
       setActivateToken('')
       activateTokenRef.current?.focus()
+      if (activateWidgetRef.current) window.turnstile?.reset(activateWidgetRef.current)
     } finally {
       setActivateLoading(false)
     }
@@ -156,40 +169,52 @@ export default function LoginPage() {
   useEffect(() => {
     if (!turnstileEnabled) return // null (attesa) o false (disabilitato)
 
+    const CF_MSG = 'Verifica di sicurezza non riuscita. Ricarica la pagina per riprovare.'
+
     window.onTurnstileLoad = () => {
       if (loginContainerRef.current && !loginWidgetRef.current) {
         loginWidgetRef.current = window.turnstile.render(loginContainerRef.current, {
           sitekey:    TURNSTILE_SITE_KEY!,
-          execution:  'execute',
+          execution:  'render',
           appearance: 'interaction-only',
+          // Salva solo il token: il login parte da Invio o dal pulsante
           callback: (cfToken: string) => {
-            doLoginApiRef.current?.(cfToken)
-            if (loginWidgetRef.current) window.turnstile.reset(loginWidgetRef.current)
+            loginCfTokenRef.current = cfToken
+            setLoginCfReady(true)
+            setError(prev => (prev === CF_MSG ? null : prev))
           },
-          'error-callback': () => {
-            setError('Verifica di sicurezza fallita. Riprova.')
-            setLoading(false)
+          'error-callback': (code?: string) => {
+            console.warn('Turnstile error-callback (login):', code)
+            loginCfTokenRef.current = null
+            setLoginCfReady(false)
+            setError(CF_MSG)
           },
+          // Con refresh-expired 'auto' (default) Turnstile ne genera uno nuovo da solo
           'expired-callback': () => {
-            if (loginWidgetRef.current) window.turnstile.reset(loginWidgetRef.current)
+            loginCfTokenRef.current = null
+            setLoginCfReady(false)
           },
         })
       }
       if (activateContainerRef.current && !activateWidgetRef.current) {
         activateWidgetRef.current = window.turnstile.render(activateContainerRef.current, {
           sitekey:    TURNSTILE_SITE_KEY!,
-          execution:  'execute',
+          execution:  'render',
           appearance: 'interaction-only',
           callback: (cfToken: string) => {
-            doActivateApiRef.current?.(cfToken)
-            if (activateWidgetRef.current) window.turnstile.reset(activateWidgetRef.current)
+            activateCfTokenRef.current = cfToken
+            setActivateCfReady(true)
+            setActivateError(prev => (prev === CF_MSG ? null : prev))
           },
-          'error-callback': () => {
-            setActivateError('Verifica di sicurezza fallita. Riprova.')
-            setActivateLoading(false)
+          'error-callback': (code?: string) => {
+            console.warn('Turnstile error-callback (attivazione):', code)
+            activateCfTokenRef.current = null
+            setActivateCfReady(false)
+            setActivateError(CF_MSG)
           },
           'expired-callback': () => {
-            if (activateWidgetRef.current) window.turnstile.reset(activateWidgetRef.current)
+            activateCfTokenRef.current = null
+            setActivateCfReady(false)
           },
         })
       }
@@ -198,6 +223,9 @@ export default function LoginPage() {
     const script = document.createElement('script')
     script.src   = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad'
     script.async = true
+    script.onerror = () => setError(
+      'Impossibile caricare la verifica di sicurezza (Cloudflare). Controlla la connessione e ricarica la pagina.',
+    )
     document.head.appendChild(script)
 
     return () => {
@@ -244,32 +272,36 @@ export default function LoginPage() {
   async function handleLoginSubmit(e?: React.FormEvent) {
     e?.preventDefault()
     if (!username.trim() || token.length !== 6 || loading) return
+    // Turnstile attivo (o impostazione non ancora letta) e token non pronto:
+    // non si invia; il pulsante mostra "Verifica di sicurezza in corso…"
+    const cfToken = loginCfTokenRef.current
+    if (turnstileEnabled !== false && !cfToken) return
 
     setLoading(true)
     setError(null)
-
-    if (turnstileEnabled && loginWidgetRef.current) {
-      // Turnstile callback chiamerà doLoginApiRef.current quando pronto
-      window.turnstile.execute(loginWidgetRef.current)
-    } else {
-      await doLoginApiRef.current?.()
-    }
+    // Monouso: consumato da questo tentativo
+    loginCfTokenRef.current = null
+    setLoginCfReady(false)
+    await doLoginApiRef.current?.(cfToken ?? undefined)
   }
 
   // ── Attivazione ───────────────────────────────────────────────
   async function handleActivateSubmit(e?: React.FormEvent) {
     e?.preventDefault()
     if (!activateId || activateToken.length !== 6 || activateLoading) return
+    const cfToken = activateCfTokenRef.current
+    if (turnstileEnabled !== false && !cfToken) return
 
     setActivateLoading(true)
     setActivateError(null)
-
-    if (turnstileEnabled && activateWidgetRef.current) {
-      window.turnstile.execute(activateWidgetRef.current)
-    } else {
-      await doActivateApiRef.current?.()
-    }
+    activateCfTokenRef.current = null
+    setActivateCfReady(false)
+    await doActivateApiRef.current?.(cfToken ?? undefined)
   }
+
+  // Verifica Turnstile ancora da completare (o impostazione non ancora letta)
+  const loginCfPending    = turnstileEnabled !== false && !loginCfReady
+  const activateCfPending = turnstileEnabled !== false && !activateCfReady
 
   // ── Render ────────────────────────────────────────────────────
 
@@ -385,7 +417,7 @@ export default function LoginPage() {
 
                   <button
                     type="submit"
-                    disabled={activateLoading || activateToken.length !== 6}
+                    disabled={activateLoading || activateCfPending || activateToken.length !== 6}
                     className="w-full py-2.5 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500
                                text-white font-medium text-sm transition
                                disabled:opacity-50 disabled:cursor-not-allowed
@@ -399,7 +431,7 @@ export default function LoginPage() {
                         </svg>
                         Attivazione…
                       </>
-                    ) : 'Attiva account'}
+                    ) : activateCfPending ? 'Verifica di sicurezza in corso…' : 'Attiva account'}
                   </button>
                 </form>
               </>
@@ -478,7 +510,7 @@ export default function LoginPage() {
               {/* Submit */}
               <button
                 type="submit"
-                disabled={loading || !username.trim() || token.length !== 6}
+                disabled={loading || loginCfPending || !username.trim() || token.length !== 6}
                 className="w-full py-2.5 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500
                            text-white font-medium text-sm transition
                            disabled:opacity-50 disabled:cursor-not-allowed
@@ -493,19 +525,22 @@ export default function LoginPage() {
                     </svg>
                     Accesso in corso…
                   </>
-                ) : 'Accedi'}
+                ) : loginCfPending ? 'Verifica di sicurezza in corso…' : 'Accedi'}
               </button>
 
             </form>
           </div>
         )}
 
-        {/* Turnstile invisible containers — sempre nel DOM, fuori dai blocchi condizionali */}
+        {/* Turnstile — sempre nel DOM, fuori dai blocchi condizionali.
+            NON nascosti: con 'interaction-only' restano vuoti e compaiono solo
+            se Cloudflare chiede un clic (prima erano display:none e il clic
+            era impossibile). Il widget di attivazione solo con ?activate=. */}
         {TURNSTILE_SITE_KEY && (
-          <>
-            <div ref={loginContainerRef}    aria-hidden="true" className="hidden" />
-            <div ref={activateContainerRef} aria-hidden="true" className="hidden" />
-          </>
+          <div className="flex justify-center">
+            <div ref={loginContainerRef} />
+            {activateId && <div ref={activateContainerRef} />}
+          </div>
         )}
 
         <p className="text-center text-slate-600 text-xs mt-6">
