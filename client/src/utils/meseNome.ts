@@ -84,3 +84,59 @@ export function meseNomeDiverso(nome: string, meseLiquidazione: string): string 
   const m = meseNelNome(nome)
   return m && m.chiave !== meseLiquidazione ? m.chiave : null
 }
+
+/** Mese 'AAAA-MM' di una data 'AAAA-MM-GG'; '' se non ha quella forma. */
+function meseDellaData(data: string | null | undefined): string {
+  const m = (data ?? '').match(/^(\d{4})-(0[1-9]|1[0-2])-\d{2}$/)
+  return m ? `${m[1]}-${m[2]}` : ''
+}
+
+export interface PillolaLiquidazione {
+  /** "settembre 2026", oppure '' se il mese non si conosce. */
+  etichetta: string
+  /** Ambra: mese sconosciuto, oppure il nome o la data dicono un altro mese. */
+  ambra:     boolean
+  /** Spiegazione per il tooltip. */
+  titolo:    string
+}
+
+/**
+ * La pillola del mese di liquidazione (elenco e intestazione dell'editor).
+ *
+ * Vale il mese di «Liquidazione di». Se manca — lavorazioni archiviate prima
+ * della 26.10.10.2, quando il campo si poteva lasciare vuoto — si usa il mese
+ * della DATA di liquidazione scritta all'archiviazione. Solo visualizzazione:
+ * nessun dato salvato cambia.
+ *
+ * Ambra se il mese non si conosce, se il nome dice un altro mese o se
+ * «Liquidazione di» e data di liquidazione non coincidono (26.10.20.1).
+ */
+export function pillolaLiquidazione(
+  nome:             string,
+  meseLiquidazione: string | null | undefined,
+  dataLiquidazione: string | null | undefined,
+): PillolaLiquidazione {
+  const scelto = /^\d{4}-(0[1-9]|1[0-2])$/.test(meseLiquidazione ?? '') ? meseLiquidazione! : ''
+  const daData = meseDellaData(dataLiquidazione)
+  const mese   = scelto || daData
+  if (!mese) {
+    return { etichetta: '', ambra: true, titolo: 'Mese in cui si paga: da indicare in «Liquidazione di»' }
+  }
+
+  const avvisi: string[] = []
+  const nomeDice = meseNomeDiverso(nome, mese)
+  if (nomeDice) avvisi.push(`Il nome dice ${etichettaMeseLiq(nomeDice)}`)
+  if (scelto && daData && daData !== scelto) {
+    avvisi.push(`La data di liquidazione (${dataLiquidazione}) dice ${etichettaMeseLiq(daData)}`)
+  }
+
+  return {
+    etichetta: etichettaMeseLiq(mese),
+    ambra:     avvisi.length > 0,
+    titolo:    avvisi.length > 0
+      ? avvisi.join(' · ')
+      : scelto
+        ? 'Mese in cui si paga (Liquidazione di)'
+        : `Dal giorno di liquidazione ${dataLiquidazione}`,
+  }
+}

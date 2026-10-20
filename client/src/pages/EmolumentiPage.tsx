@@ -47,7 +47,7 @@ import {
   potaConferme, leggiConferme,
   type DateConfermate, dateAnomale, potaDate, leggiDateConfermate, problemiDate,
 } from '../utils/provvedimentiRiga'
-import { conMeseNelNome, etichettaMeseLiq, meseNomeDiverso } from '../utils/meseNome'
+import { conMeseNelNome, etichettaMeseLiq, meseNomeDiverso, pillolaLiquidazione } from '../utils/meseNome'
 import type { CsvExportRow } from '../types'
 
 const VOCE_DEFAULT     = '09834'
@@ -1802,19 +1802,19 @@ export default function EmolumentiPage() {
                   )}
                 </div>
 
-                {/* Mese di liquidazione, dal payload (solo quel campo). Ambra se
-                    manca o se il nome dice un altro mese. */}
+                {/* Mese di liquidazione: «Liquidazione di», o in mancanza il mese
+                    della data di liquidazione. Ambra se manca, se il nome dice un
+                    altro mese o se mese e data non coincidono. */}
                 {(() => {
-                  const ml = etichettaMeseLiq(l.meseLiquidazione ?? '')
-                  const diverso = meseNomeDiverso(l.nome, l.meseLiquidazione ?? '')
+                  const p = pillolaLiquidazione(l.nome, l.meseLiquidazione, l.dataLiquidazione)
                   return (
                     <span
-                      title={diverso ? `Il nome dice ${etichettaMeseLiq(diverso)}` : 'Mese in cui si paga'}
+                      title={p.titolo}
                       className={`ml-auto text-xs px-2.5 py-0.5 rounded-full border shrink-0 ${
-                        !ml || diverso ? 'border-amber-700/70 text-amber-300' : 'border-slate-700 text-slate-400'
+                        p.ambra ? 'border-amber-700/70 text-amber-300' : 'border-slate-700 text-slate-400'
                       }`}
                     >
-                      {ml || 'liquidazione da indicare'}
+                      {p.etichetta || 'liquidazione da indicare'}
                     </span>
                   )
                 })()}
@@ -1918,20 +1918,22 @@ export default function EmolumentiPage() {
               </span>
             )}
             {/* Il mese di liquidazione accanto al nome: un refuso fra i due si
-                vede senza scorrere la pagina. Ambra se manca o se il nome dice
-                un altro mese. */}
-            <span
-              title={meseNomeLavorazione
-                ? `Il nome dice ${etichettaMeseLiq(meseNomeLavorazione)}`
-                : 'Mese in cui si paga (Liquidazione di)'}
-              className={`text-xs px-2.5 py-0.5 rounded-full border shrink-0 ${
-                !meseLiquidazione || meseNomeLavorazione
-                  ? 'border-amber-700/70 text-amber-300'
-                  : 'border-slate-700 text-slate-400'
-              }`}
-            >
-              liquidazione {meseLiquidazione ? etichettaMeseLiq(meseLiquidazione) : 'da indicare'}
-            </span>
+                vede senza scorrere la pagina. Stessa regola dell'elenco
+                (pillolaLiquidazione): ambra se manca, se il nome dice un altro
+                mese o se «Liquidazione di» e data di liquidazione divergono. */}
+            {(() => {
+              const p = pillolaLiquidazione(nomeLavorazione, meseLiquidazione, dataLiquidazione)
+              return (
+                <span
+                  title={p.titolo}
+                  className={`text-xs px-2.5 py-0.5 rounded-full border shrink-0 ${
+                    p.ambra ? 'border-amber-700/70 text-amber-300' : 'border-slate-700 text-slate-400'
+                  }`}
+                >
+                  liquidazione {p.etichetta || 'da indicare'}
+                </span>
+              )
+            })()}
           </nav>
 
           {/* ── Barra della lavorazione aperta ───────────── */}

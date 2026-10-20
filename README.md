@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.10.20-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.10.20.1-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -59,6 +59,7 @@ payroll-gang-suite/
 │       └── utils/               # CSV / PDF / EML builder, calcoli scorporo (biz.ts),
 │                                # provvedimentiRiga.ts (+ test): piu' provvedimenti per persona in Emolumenti
 │                                # meseNome.ts (+ test): mese di liquidazione nel nome della lavorazione
+│                                #   e pillola «liquidazione …» (mese scelto o, in mancanza, dalla data)
 │                                # csvDecimale.test.ts: separatore decimale dei file HR (virgola/punto)
 │                                # provvedimento.ts (+ test): ID e estremi del provvedimento, salvataggio vs CSV HR
 ├── server/                      # API REST Fastify
@@ -394,6 +395,16 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.10.20.1
+**Emolumenti: la pillola del mese di liquidazione usa anche la data di liquidazione**
+
+- Le lavorazioni archiviate prima della 26.10.10.2 senza «Liquidazione di» mostravano **«liquidazione da indicare»** anche con la data di liquidazione inserita all'archiviazione (es. le due di settembre 2026, liquidate il 2026-09-15). La pillola guardava solo il mese scelto nell'editor (`dati.testata.meseLiquidazione`).
+- Ora, se «Liquidazione di» manca, vale il **mese della data di liquidazione**: le due di settembre mostrano «settembre 2026» in grigio, con tooltip «Dal giorno di liquidazione 2026-09-15».
+- **Mesi diversi evidenziati**: se «Liquidazione di» e data di liquidazione cadono in mesi diversi la pillola diventa **ambra** e il tooltip dice «La data di liquidazione (…) dice …». Il mese mostrato resta quello di «Liquidazione di». Resta l'avviso, gia' presente, quando il nome dice un altro mese.
+- Stessa regola nell'elenco e nell'intestazione dell'editor, in un'unica funzione (`pillolaLiquidazione` in `client/src/utils/meseNome.ts`).
+- **Solo visualizzazione**: nessun dato salvato cambia; «Genera nome», CSV e «Verifica conti da CSA» invariati. Nessuna migrazione del database.
+- 5 test nuovi in `client/src/utils/meseNome.test.ts`.
 
 ### 26.10.20
 **Login: la verifica Turnstile non fa piu' scadere il codice OTP; motivi dei rifiuti nel log**

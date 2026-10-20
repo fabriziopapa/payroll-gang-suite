@@ -3,7 +3,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { conMeseNelNome, etichettaMeseLiq, meseNelNome, meseNomeDiverso } from './meseNome.ts'
+import { conMeseNelNome, etichettaMeseLiq, meseNelNome, meseNomeDiverso, pillolaLiquidazione } from './meseNome.ts'
 
 test('riconosce mese e anno nel nome, anche con maiuscole', () => {
   assert.equal(meseNelNome('Dottorati di Ricerca (DR) Maggiorazioni Ottobre 2026')?.chiave, '2026-10')
@@ -42,4 +42,44 @@ test('etichetta del mese di liquidazione', () => {
   assert.equal(etichettaMeseLiq('2026-10'), 'ottobre 2026')
   assert.equal(etichettaMeseLiq('2026-1'), '')
   assert.equal(etichettaMeseLiq(''), '')
+})
+
+// ── Pillola del mese di liquidazione (26.10.20.1) ──────────────────────────
+
+test('pillola: vale «Liquidazione di», grigia se nome e data coincidono', () => {
+  const p = pillolaLiquidazione('BS Ottobre 2026', '2026-10', '2026-10-16')
+  assert.equal(p.etichetta, 'ottobre 2026')
+  assert.equal(p.ambra, false)
+  assert.equal(p.titolo, 'Mese in cui si paga (Liquidazione di)')
+})
+
+test('pillola: senza «Liquidazione di» vale il mese della data (archiviate prima della 26.10.10.2)', () => {
+  for (const vuoto of ['', null, undefined]) {
+    const p = pillolaLiquidazione('Borse di Studio (BS) Settembre 2026', vuoto, '2026-09-15')
+    assert.equal(p.etichetta, 'settembre 2026')
+    assert.equal(p.ambra, false)
+    assert.equal(p.titolo, 'Dal giorno di liquidazione 2026-09-15')
+  }
+})
+
+test('pillola: «Liquidazione di» e data in mesi diversi -> ambra, vince «Liquidazione di»', () => {
+  const p = pillolaLiquidazione('BS Ottobre 2026', '2026-10', '2026-09-15')
+  assert.equal(p.etichetta, 'ottobre 2026')
+  assert.equal(p.ambra, true)
+  assert.equal(p.titolo, 'La data di liquidazione (2026-09-15) dice settembre 2026')
+})
+
+test('pillola: nome con un altro mese -> ambra, anche col mese preso dalla data', () => {
+  const p = pillolaLiquidazione('BS Ottobre 2026', null, '2026-09-15')
+  assert.equal(p.etichetta, 'settembre 2026')
+  assert.equal(p.ambra, true)
+  assert.equal(p.titolo, 'Il nome dice ottobre 2026')
+})
+
+test('pillola: nessun mese e nessuna data (o data malformata) -> da indicare, ambra', () => {
+  for (const data of [null, '', '15/09/2026']) {
+    const p = pillolaLiquidazione('BS Settembre 2026', '', data)
+    assert.equal(p.etichetta, '')
+    assert.equal(p.ambra, true)
+  }
 })
