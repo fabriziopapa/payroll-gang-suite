@@ -124,6 +124,7 @@ export function csvBytes(righe: readonly RigaVersamento[], cfg: AllegatiConfig, 
 
 export async function pdfBytes(
   codice: string, descr: string, righe: readonly RigaVersamento[], mesi: readonly string[], cfg: AllegatiConfig,
+  periodo: readonly string[] = mesi,
 ): Promise<Uint8Array<ArrayBuffer>> {
   const { jsPDF } = await import('jspdf')
   const land = cfg.pdf.orient === 'l'
@@ -134,7 +135,7 @@ export async function pdfBytes(
   const somma = att.reduce((s, c) => s + COLDEF[c.k].peso, 0) || 1
   const cols = att.map(c => ({ k: c.k, t: c.pdf, w: W * COLDEF[c.k].peso / somma, destra: !!COLDEF[c.k].num }))
   const iImp = cols.findIndex(c => c.k === 'IMPORTO')
-  const ctx = contesto(codice, descr, righe, mesi)
+  const ctx = contesto(codice, descr, righe, periodo)
   const oggi = new Date().toLocaleDateString('it-IT')
 
   let y = 18
@@ -143,7 +144,7 @@ export async function pdfBytes(
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10)
   doc.text(descr, X0, y); y += 5
   doc.setTextColor(90)
-  doc.text(`Periodo: ${periodoBreve(mesi)}  ·  ${righe.length} righe  ·  generato il ${oggi}`, X0, y)
+  doc.text(`Periodo: ${periodoBreve(periodo)}  ·  ${righe.length} righe  ·  generato il ${oggi}`, X0, y)
   doc.setTextColor(0); y += 8
 
   const testo = (t: string, x: number, w: number, destra: boolean) => {
@@ -213,9 +214,9 @@ export interface Allegato {
 
 export async function allegatiPer(
   codice: string, descr: string, righe: readonly RigaVersamento[], mesi: readonly string[],
-  cfg: AllegatiConfig, perMese: boolean, solo?: 'csv' | 'pdf',
+  cfg: AllegatiConfig, perMese: boolean, solo?: 'csv' | 'pdf', periodo: readonly string[] = mesi,
 ): Promise<Allegato[]> {
-  const ctx = { CODICE_ENTE: codice, PERIODO_FILE: periodoFile(mesi) }
+  const ctx = { CODICE_ENTE: codice, PERIODO_FILE: periodoFile(periodo) }
   const multi = mesi.length > 1
   const out: Allegato[] = []
   if (solo ? solo === 'csv' : cfg.csv.attivo) {
@@ -225,7 +226,7 @@ export async function allegatiPer(
     })
   }
   if (solo ? solo === 'pdf' : cfg.pdf.attivo) {
-    out.push({ nome: nomeFile(cfg.nomeAllegati, ctx, 'pdf', perMese), bytes: await pdfBytes(codice, descr, righe, mesi, cfg), tipo: 'application/pdf' })
+    out.push({ nome: nomeFile(cfg.nomeAllegati, ctx, 'pdf', perMese), bytes: await pdfBytes(codice, descr, righe, mesi, cfg, periodo), tipo: 'application/pdf' })
   }
   return out
 }

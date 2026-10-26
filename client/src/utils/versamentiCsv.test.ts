@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  ANNO_PIU_MESE, aggregaEnti, cfCarattereControllo, colonnaMeseAuto, contaFontiNascita, elabora,
+  ANNO_PIU_MESE, aggregaEnti, annoDaNomeFile, espandiMesi, periodoDaNomeFile, cfCarattereControllo, colonnaMeseAuto, contaFontiNascita, elabora,
   leggiFile, meseDaNomeFile, nascitaDa, nascitaDaCf, parseCsv, parseData, parseImporto, parseMese,
 } from './versamentiCsv.ts'
 
@@ -126,4 +126,53 @@ test('aggregazione per ente sui mesi selezionati', () => {
   assert.equal(alfa.cents, 4480); assert.deepEqual(alfa.mesi, ['2025-01', '2025-02'])
   const soloFeb = aggregaEnti(e.righe, new Set(['2025-02']))
   assert.deepEqual(soloFeb.map(x => x.codice), ['S90101'])
+})
+
+test('anno dal nome del file: l\'ultimo anno che non fa parte di una data', () => {
+  assert.equal(annoDaNomeFile('STAMPA_VERSAMENTI_20260706_GEN_DIC_2025.CSV'), '2025')
+  assert.equal(annoDaNomeFile('STAMPA_VERSAMENTI_20260706.CSV'), '2026')
+  assert.equal(annoDaNomeFile('versamenti.csv'), '')
+})
+
+test('colonna MESE con il solo numero del mese (stampa CSA): l\'anno viene dal campo anno', () => {
+  const testo = [
+    'MESE;ENTE;ENTE_DESCR;VOCE;MATRICOLA;NOME;DATA_NASC;IMP_TOT;',
+    '09;P90150;CRAL Demo;00854 - Quota C.R.A.L.;091001;ROSSI MARIO;19571218;5;',
+    '1;P90150;CRAL Demo;00854 - Quota C.R.A.L.;091001;ROSSI MARIO;19571218;5;',
+  ].join('\r\n')
+  const f = leggiFile('STAMPA_VERSAMENTI_20260706_GEN_DIC_2025.CSV', testo, 'Windows-1252')
+  assert.equal(colonnaMeseAuto(f.headers), 'MESE')
+  const e = elabora(f, 'MESE', '', '2025')
+  assert.equal(e.serveAnno, true)
+  assert.deepEqual(e.mesi, ['2025-01', '2025-09'])
+  assert.deepEqual(e.righe[0]?.nascita, { ok: true, iso: '1957-12-18', fonte: 'csv' })
+  const senza = elabora(f, 'MESE', '', '')
+  assert.equal(senza.righe.length, 0)
+  assert.equal(senza.scartate[0]?.motivo, "mese senza anno: indica l'anno")
+})
+
+test('periodo dal nome del file e mesi compresi', () => {
+  assert.deepEqual(periodoDaNomeFile('STAMPA_VERSAMENTI_20260706_GEN_DIC_2025.CSV'), { da: '2025-01', a: '2025-12' })
+  assert.deepEqual(periodoDaNomeFile('STAMPA_VERSAMENTI_20260105_NOV_DIC_2025.CSV'), { da: '2025-11', a: '2025-12' })
+  assert.deepEqual(periodoDaNomeFile('STAMPA_VERSAMENTI_20260105_NOV_2025.CSV'), { da: '2025-11', a: '2025-11' })
+  assert.equal(periodoDaNomeFile('STAMPA_VERSAMENTI_20260105.CSV'), null)
+  assert.deepEqual(espandiMesi('2025-11', '2026-02'), ['2025-11', '2025-12', '2026-01', '2026-02'])
+  assert.deepEqual(espandiMesi('2025-05', '2025-03'), ['2025-05'])
+})
+
+test('file senza colonna del mese: importi sul periodo «da … a …», scritto nella mail', () => {
+  const testo = [
+    'ENTE;ENTE_DESCR;VOCE;MATRICOLA;NOME;DATA_NASC;IMP_TOT;',
+    'P90150;CRAL Demo;00854 - Quota C.R.A.L.;091001;ROSSI MARIO;19571218;10;',
+  ].join('\r\n')
+  const f = leggiFile('STAMPA_VERSAMENTI_20260105_NOV_DIC_2025.CSV', testo, 'Windows-1252')
+  assert.equal(colonnaMeseAuto(f.headers), '')
+  const e = elabora(f, '', '2025-11', '', '2025-12')
+  assert.deepEqual(e.periodo, ['2025-11', '2025-12'])
+  assert.equal(e.righe.length, 1)
+  const [a] = aggregaEnti(e.righe, new Set(e.mesi), e.periodo)
+  assert.deepEqual(a?.mesi, ['2025-11'])
+  assert.deepEqual(a?.periodo, ['2025-11', '2025-12'])
+  // con la colonna del mese il periodo e' quello dei mesi
+  assert.equal(elabora(leggiFile('x.csv', fileDiProva(), 'UTF-8'), ANNO_PIU_MESE, '').periodo, null)
 })

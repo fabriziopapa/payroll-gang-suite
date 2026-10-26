@@ -42,17 +42,35 @@ export function DettaglioEnteModal({ ente, rubrica, modello, perMese, generando,
   onChiudi: () => void; onAnteprima: () => void; onGenera: () => void
 }) {
   const righe = ordina(ente.righe, 'mese')
+  // File senza colonna del mese: ogni riga vale per tutto il periodo.
+  const etichettaMese = (m: string) => (ente.mesi.length === 1 && ente.periodo.length > 1 ? periodoBreve(ente.periodo) : meseLabel(m))
   const multi = ente.mesi.length > 1
   const ok = !!rubrica?.abilitato && !!rubrica.email.length
   const descr = rubrica?.descrizione ?? ente.descr
 
   async function solo(tipo: 'csv' | 'pdf') {
     if (!modello) return
-    const [x] = await allegatiPer(ente.codice, descr, ente.righe, ente.mesi, modello.allegati, perMese, tipo)
+    const [x] = await allegatiPer(ente.codice, descr, ente.righe, ente.mesi, modello.allegati, perMese, tipo, ente.periodo)
     if (x) scaricaFile(x.nome, x.bytes, x.tipo)
   }
 
+  // Enti come INPDAP o l'Agenzia delle Entrate hanno decine di migliaia di
+  // righe in un anno: oltre MAX_DETTAGLIO a schermo si mostra il riepilogo per
+  // mese; il dettaglio completo resta negli allegati.
+  const MAX_DETTAGLIO = 1000
+  const troppe = righe.length > MAX_DETTAGLIO
   const corpo: ReactNode[] = []
+  if (troppe) {
+    const perMese = new Map<string, { n: number; c: number }>()
+    for (const r of righe) { const x = perMese.get(r.mese) ?? { n: 0, c: 0 }; x.n++; x.c += r.cents; perMese.set(r.mese, x) }
+    for (const [m, x] of perMese) corpo.push(
+      <tr key={m} className="border-t border-slate-800">
+        <td colSpan={2} className="px-5 py-1.5 text-slate-200">{etichettaMese(m)}</td>
+        <td colSpan={2} className="px-3 py-1.5 text-slate-400 tabular-nums">{x.n.toLocaleString('it-IT')} righe</td>
+        <td className="px-5 py-1.5 text-right tabular-nums text-slate-200">{fmtEuro(x.c)}</td>
+      </tr>,
+    )
+  }
   let corrente: string | null = null, sub = 0
   const chiudi = () => {
     if (multi && corrente) corpo.push(
@@ -62,7 +80,7 @@ export function DettaglioEnteModal({ ente, rubrica, modello, perMese, generando,
       </tr>,
     )
   }
-  righe.forEach((r, i) => {
+  if (!troppe) righe.forEach((r, i) => {
     if (r.mese !== corrente) { chiudi(); corrente = r.mese; sub = 0 }
     sub += r.cents
     corpo.push(
@@ -72,19 +90,19 @@ export function DettaglioEnteModal({ ente, rubrica, modello, perMese, generando,
           title={r.nascita.ok ? (r.nascita.fonte === 'csv' ? 'Da DATA_NASC del CSV' : 'DATA_NASC assente: ricavata dal codice fiscale') : `Data di nascita: ${r.nascita.motivo}`}>
           {r.nascita.ok ? <>{fmtData(r.nascita.iso)}{r.nascita.fonte === 'cf' && <span className="ml-1 text-[10px] text-violet-300">da CF</span>}</> : `— ${r.nascita.motivo}`}
         </td>
-        <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{meseLabel(r.mese)}</td>
+        <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{etichettaMese(r.mese)}</td>
         <td className="px-3 py-1.5 font-mono text-xs text-slate-400">{r.voce}</td>
         <td className="px-5 py-1.5 text-right tabular-nums text-slate-200">{fmtEuro(r.cents)}</td>
       </tr>,
     )
   })
-  chiudi()
+  if (!troppe) chiudi()
 
   return (
     <Finestra
       onChiudi={onChiudi}
       titolo={<><p className="font-mono text-xs text-slate-500">{ente.codice}</p><h3 className="text-base font-semibold text-white">{descr}</h3></>}
-      sottotitolo={<p className="text-xs text-slate-500 mt-0.5">{periodoBreve(ente.mesi)} · {righe.length} righe · totale <span className="text-slate-200 tabular-nums">{fmtEuro(ente.cents)} €</span></p>}
+      sottotitolo={<p className="text-xs text-slate-500 mt-0.5">{periodoBreve(ente.periodo)} · {righe.length} righe · totale <span className="text-slate-200 tabular-nums">{fmtEuro(ente.cents)} €</span></p>}
       piede={<>
         <button type="button" className={btnSecondario} disabled={!modello} onClick={() => void solo('csv')}><IconaDownload /> Solo CSV</button>
         <button type="button" className={btnSecondario} disabled={!modello} onClick={() => void solo('pdf')}><IconaDownload /> Solo PDF</button>
@@ -92,6 +110,11 @@ export function DettaglioEnteModal({ ente, rubrica, modello, perMese, generando,
         <button type="button" className={btnPrimario} disabled={!ok || generando} title={ok ? '' : 'Ente disabilitato o senza email'} onClick={onGenera}><IconaDownload /> Genera EML</button>
       </>}
     >
+      {troppe && (
+        <p className="px-6 pt-4 text-xs text-amber-300">
+          {righe.length.toLocaleString('it-IT')} righe: a schermo il riepilogo per mese. Il dettaglio di ogni persona è nel CSV e nel PDF (anche con «Solo CSV» / «Solo PDF»).
+        </p>
+      )}
       <table className="w-full text-sm">
         <thead className="sticky top-0 bg-slate-900"><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500">
           <th className="px-5 py-2 font-semibold">Nominativo</th><th className="px-3 py-2 font-semibold">Data di nascita</th>

@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.10.26-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.10.26.1-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -263,11 +263,16 @@ Menu *Modulo Versamenti → Versamenti enti*, **per tutti gli utenti**. Porting 
 ### Guida
 
 1. **Carica il file** (trascinandolo o con un clic). Colonne obbligatorie: `ENTE`, `ENTE_DESCR`, `VOCE`, `MATRICOLA`, `NOME`, `IMP_TOT`. Facoltative: `DATA_NASC` e `COD_FISC`. Separatore `;`, `,` o TAB, codifica UTF-8 o Windows-1252, campi tra virgolette: tutto riconosciuto da solo. Il riquadro delle colonne le colora: verdi le obbligatorie, viola quelle della data di nascita, azzurra quella del mese, grigie le ignorate.
-2. **Il mese.** PGS cerca `ANNO`+`MESE`, oppure una colonna come `ANNO_MESE`, `COMPETENZA`, `PERIODO`, `MESE_RIF`… (formati `202503`, `2025-03`, `03/2025`, `15/03/2025`, `MAR 2025`). La si puo' scegliere a mano; per un file di un solo mese senza colonna si indica il mese (proposto: il mese prima della data nel nome del file). I chip dei mesi filtrano totali, allegati ed EML.
+2. **Il mese.** Dipende da come e' stata fatta la *Stampa versamenti* in CSA:
+   - **con «Suddivisione per mese»** il file ha la colonna `MESE` con il **solo numero** del mese (`01`…`12`): l'**anno** si legge dal nome del file (`STAMPA_VERSAMENTI_20260706_GEN_DIC_2025` → 2025) e compare il campo *Anno* per correggerlo. I chip dei mesi filtrano totali, allegati ed EML; si puo' fare un EML per mese;
+   - **senza «Suddivisione per mese»** la colonna non c'e' e ogni importo e' la **somma del periodo** *da … a …* scelto in CSA: il periodo si legge dal nome del file (`GEN_DIC_2025` → gennaio–dicembre 2025; `NOV_2025` → solo novembre; in mancanza, il mese prima della data di stampa) e si corregge con i campi *Periodo: da / a*. Il testo della mail dice «nei mesi da … a …».
+   Riconosciute anche `ANNO`+`MESE` e colonne come `ANNO_MESE`, `COMPETENZA`, `PERIODO`, `MESE_RIF` (formati `202503`, `2025-03`, `03/2025`, `15/03/2025`, `MAR 2025`); la colonna del mese si puo' sempre scegliere a mano.
+   Le altre colonne della stampa (IBAN, `ABI`, `CAB`, `CONTO_CORR`, `RUOLO`, `ALIQUOTA`, `PARTI`, `IMPONIBILE`) si ignorano.
 3. **Data di nascita**: prima `DATA_NASC` del CSV (`12/03/1968`, `1968-03-12`, `19680312`); se manca o non si legge, dal **codice fiscale** (omocodia compresa, carattere di controllo verificato; un anno che darebbe meno di 14 anni e' del Novecento). Senza entrambi: «—». Sotto le colonne: quante persone da CSV, quante dal CF, quante senza.
 4. **Enti nuovi**: al caricamento gli enti mai visti entrano in rubrica **abilitati, senza email** (come nel Java). Il riquadro **«Da controllare»** mostra gli enti abilitati senza indirizzo: si scrivono le email (**piu' indirizzi separati da virgola** o punto e virgola) oppure si disabilita l'ente. Ogni modifica si salva subito.
-5. **Genera**: «Genera» su un ente o «Scarica tutti gli EML». Opzioni: *uno per ente con tutti i mesi* oppure *uno per ente per ciascun mese*; modello di ciascun ente o uno per tutti; anteprima di ogni EML (testo, allegati, intestazioni) con la possibilita' di cambiare modello solo per quell'ente o *usarlo sempre*. Esclusi da «Scarica tutti»: enti senza email, disabilitati, con totale ≤ 0 (evidenziati in ambra). Clic sulla riga: dettaglio dell'ente con subtotali per mese e *Solo CSV* / *Solo PDF*.
-6. **Outlook**: si apre l'`.eml` scaricato; e' una bozza (`X-Unsent: 1`) con destinatari, oggetto, testo e allegati, da controllare e inviare.
+5. **Enti con molte righe** (INPDAP, Agenzia delle Entrate: decine di migliaia in un anno): nel dettaglio a schermo compare il riepilogo per mese oltre le 1.000 righe; gli allegati contengono sempre tutto (un ente da ~14.000 righe da' un PDF di ~9 MB in pochi secondi). Gli enti fiscali e previdenziali che non devono ricevere la mail si **disabilitano** una volta sola in rubrica.
+6. **Genera**: «Genera» su un ente o «Scarica tutti gli EML». Opzioni: *uno per ente con tutti i mesi* oppure *uno per ente per ciascun mese*; modello di ciascun ente o uno per tutti; anteprima di ogni EML (testo, allegati, intestazioni) con la possibilita' di cambiare modello solo per quell'ente o *usarlo sempre*. Esclusi da «Scarica tutti»: enti senza email, disabilitati, con totale ≤ 0 (evidenziati in ambra). Clic sulla riga: dettaglio dell'ente con subtotali per mese e *Solo CSV* / *Solo PDF*.
+7. **Outlook**: si apre l'`.eml` scaricato; e' una bozza (`X-Unsent: 1`) con destinatari, oggetto, testo e allegati, da controllare e inviare.
 
 ### L'EML
 
@@ -436,6 +441,15 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.10.26.1
+**Versamenti enti: la stampa vera di CSA, con o senza «Suddivisione per mese»**
+
+- **Correzione**: con il file reale `STAMPA_VERSAMENTI_20260706_GEN_DIC_2025.CSV` ogni riga finiva in *Righe scartate* con «mese non riconosciuto». La colonna `MESE` di CSA contiene solo il numero del mese (`09`), senza anno. Ora l'**anno** si legge dal nome del file (`…_GEN_DIC_2025` → 2025) e c'e' il campo *Anno* per correggerlo; se manca, le righe si scartano con «mese senza anno: indica l'anno».
+- **File senza colonna del mese** (stampa CSA senza «Suddivisione per mese»: importi sommati sul periodo): il periodo *da … a …* si legge dal nome del file (`GEN_DIC_2025`, `NOV_2025`) e si corregge con *Periodo: da / a*. Mail, titolo del PDF e nomi file usano il periodo intero («nei mesi da gennaio a dicembre 2025»); nel dettaglio la colonna Mese mostra il periodo.
+- **Enti molto grandi**: oltre le 1.000 righe il dettaglio a schermo mostra il riepilogo per mese invece di migliaia di righe (il browser restava bloccato); gli allegati restano completi.
+- Verificato sul file reale (solo conteggi, nessun dato copiato): 89.808 righe tutte valide, 12 mesi, 77 enti, 743 persone tutte con data di nascita da `DATA_NASC`; stesso esito togliendo la colonna `MESE`. Ente piu' grande: 13.954 righe → CSV 1,1 MB, PDF 8,7 MB in ~4 s.
+- Nessuna migrazione, nessuna modifica al server. 4 test nuovi in `client/src/utils/versamentiCsv.test.ts`.
 
 ### 26.10.26
 **Versamenti enti: la stampa versamenti di CSA diventa una mail per ente, senza salvare i dati delle persone**

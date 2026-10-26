@@ -130,11 +130,11 @@ export default function ModelliMailTab({ modelli, enti, esempio, onRicarica, onE
 
   async function prova(tipo: 'csv' | 'pdf') {
     if (!esempio || !bozza) return
-    const [x] = await allegatiPer(esempio.a.codice, esempio.descr, esempio.a.righe, esempio.a.mesi, bozza.allegati, false, tipo)
+    const [x] = await allegatiPer(esempio.a.codice, esempio.descr, esempio.a.righe, esempio.a.mesi, bozza.allegati, false, tipo, esempio.a.periodo)
     if (x) scaricaFile(x.nome, x.bytes, x.tipo)
   }
 
-  const ctx = esempio ? contesto(esempio.a.codice, esempio.descr, esempio.a.righe, esempio.a.mesi) : null
+  const ctx = esempio ? contesto(esempio.a.codice, esempio.descr, esempio.a.righe, esempio.a.periodo) : null
   const a = bozza.allegati
   const isPred = !!originale?.predefinito
 
@@ -234,9 +234,9 @@ export default function ModelliMailTab({ modelli, enti, esempio, onRicarica, onE
               <p className={etichettaCls}>File generati</p>
               <div className="flex flex-wrap gap-1.5">
                 {[
-                  nomeFile(a.nomeEml, { CODICE_ENTE: esempio.a.codice, PERIODO_FILE: periodoFile(esempio.a.mesi) }, 'eml', false),
-                  ...(a.csv.attivo ? [nomeFile(a.nomeAllegati, { CODICE_ENTE: esempio.a.codice, PERIODO_FILE: periodoFile(esempio.a.mesi) }, 'csv', false)] : []),
-                  ...(a.pdf.attivo ? [nomeFile(a.nomeAllegati, { CODICE_ENTE: esempio.a.codice, PERIODO_FILE: periodoFile(esempio.a.mesi) }, 'pdf', false)] : []),
+                  nomeFile(a.nomeEml, { CODICE_ENTE: esempio.a.codice, PERIODO_FILE: periodoFile(esempio.a.periodo) }, 'eml', false),
+                  ...(a.csv.attivo ? [nomeFile(a.nomeAllegati, { CODICE_ENTE: esempio.a.codice, PERIODO_FILE: periodoFile(esempio.a.periodo) }, 'csv', false)] : []),
+                  ...(a.pdf.attivo ? [nomeFile(a.nomeAllegati, { CODICE_ENTE: esempio.a.codice, PERIODO_FILE: periodoFile(esempio.a.periodo) }, 'pdf', false)] : []),
                 ].map(n => <span key={n} className="font-mono text-xs px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-200">{n}</span>)}
               </div>
               {a.csv.attivo && a.colonne.some(c => c.on) && (

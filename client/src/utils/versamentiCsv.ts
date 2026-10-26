@@ -90,6 +90,51 @@ export function parseAnnoMese(anno: string, mese: string): string | null {
   return ym(+anno.trim(), /^\d{1,2}$/.test(m) ? +m : meseDaNome(m))
 }
 
+/**
+ * L'anno della stampa dal nome del file: l'ultimo anno a quattro cifre che
+ * non fa parte di una data (STAMPA_VERSAMENTI_20260706_GEN_DIC_2025 → 2025);
+ * in mancanza, l'anno della data di stampa. Serve quando la colonna MESE
+ * contiene solo il numero del mese, come nella stampa CSA.
+ */
+export function annoDaNomeFile(nome: string): string {
+  const anni = [...nome.matchAll(/(?<!\d)((?:19|20)\d{2})(?!\d)/g)].map(m => m[1]!)
+  if (anni.length) return anni[anni.length - 1]!
+  const d = nome.match(/(?<!\d)(20\d{2})\d{4}(?!\d)/)
+  return d ? d[1]! : ''
+}
+
+const MESI_NOME = ['GEN', 'FEB', 'MAR', 'APR', 'MAG', 'GIU', 'LUG', 'AGO', 'SET', 'OTT', 'NOV', 'DIC']
+
+/**
+ * Il periodo «da … a …» scritto nel nome del file (STAMPA_VERSAMENTI_…_GEN_DIC_2025
+ * → 2025-01 … 2025-12; …_NOV_2025 → solo novembre). Serve quando la stampa e'
+ * fatta SENZA «Suddivisione per mese»: allora non c'e' la colonna MESE e gli
+ * importi sono la somma del periodo.
+ */
+export function periodoDaNomeFile(nome: string): { da: string; a: string } | null {
+  const anno = annoDaNomeFile(nome)
+  const mesi = [...nome.toUpperCase().matchAll(/(?<![A-Z])(GEN|FEB|MAR|APR|MAG|GIU|LUG|AGO|SET|OTT|NOV|DIC)(?![A-Z])/g)]
+    .map(m => MESI_NOME.indexOf(m[1]!) + 1)
+  if (!/^\d{4}$/.test(anno) || !mesi.length) return null
+  const da = ym(+anno, mesi[0]!), a = ym(+anno, mesi[1] ?? mesi[0]!)
+  return da && a ? { da, a: a < da ? da : a } : null
+}
+
+/** Tutti i mesi da `da` ad `a` compresi ('AAAA-MM'). Fuori ordine o non validi → solo `da`. */
+export function espandiMesi(da: string, a: string): string[] {
+  if (!/^\d{4}-\d{2}$/.test(da)) return []
+  if (!/^\d{4}-\d{2}$/.test(a) || a < da) return [da]
+  const out: string[] = []
+  let y = +da.slice(0, 4), m = +da.slice(5, 7)
+  for (let i = 0; i < 240; i++) {
+    const k = `${y}-${String(m).padStart(2, '0')}`
+    out.push(k)
+    if (k === a) break
+    if (++m > 12) { m = 1; y++ }
+  }
+  return out
+}
+
 /** Dal nome STAMPA_VERSAMENTI_20260706_... il mese precedente alla data di stampa. */
 export function meseDaNomeFile(nome: string): string {
   const r = nome.match(/(20\d{2})(\d{2})(\d{2})/)
@@ -213,6 +258,13 @@ export interface EsitoElaborazione {
   scartate:  RigaScartata[]
   /** Mesi presenti nel file, ordinati. */
   mesi:      string[]
+  /** La colonna del mese contiene solo il numero del mese: l'anno viene da `anno`. */
+  serveAnno: boolean
+  /**
+   * File SENZA colonna del mese: il periodo che gli importi coprono (da … a …).
+   * Le righe hanno tutte `mese` = primo mese del periodo. null con la colonna.
+   */
+  periodo:   string[] | null
 }
 
 export function leggiFile(nome: string, testo: string, codifica: string): FileVersamenti {
@@ -223,12 +275,14 @@ export function leggiFile(nome: string, testo: string, codifica: string): FileVe
 
 /**
  * Dalle righe grezze alle righe valide. `colMese`: ANNO_PIU_MESE, il nome di
- * una colonna, oppure '' (file di un solo mese: vale `meseManuale`).
+ * una colonna, oppure '' (file di un solo mese: vale `meseManuale`). Se la
+ * colonna contiene solo il numero del mese ('01'…'12') l'anno e' `anno`.
  */
-export function elabora(f: FileVersamenti, colMese: string, meseManuale: string): EsitoElaborazione {
+export function elabora(f: FileVersamenti, colMese: string, meseManuale: string, anno = '', meseManualeA = ''): EsitoElaborazione {
   const ix = (n: string) => f.headers.indexOf(n)
   const mancanti = RICHIESTE.filter(n => ix(n) < 0)
-  if (mancanti.length) return { mancanti, righe: [], scartate: [], mesi: [] }
+  if (mancanti.length) return { mancanti, righe: [], scartate: [], mesi: [], serveAnno: false, periodo: null }
+  let serveAnno = false
   const iA = ix('ANNO'), iM = ix('MESE')
   const iC = colMese && colMese !== ANNO_PIU_MESE ? ix(colMese) : -1
   const righe: RigaVersamento[] = [], scartate: RigaScartata[] = []
@@ -237,12 +291,16 @@ export function elabora(f: FileVersamenti, colMese: string, meseManuale: string)
     const g = (i: number) => (i >= 0 ? (r[i] ?? '') : '').trim()
     const ente = g(ix('ENTE'))
     const cents = parseImporto(g(ix('IMP_TOT')))
+    const vMese = iC >= 0 ? g(iC) : ''
+    const soloMese = iC >= 0 && /^\d{1,2}$/.test(vMese)
+    if (soloMese) serveAnno = true
     const mese = colMese === ANNO_PIU_MESE ? parseAnnoMese(g(iA), g(iM))
-      : iC >= 0 ? parseMese(g(iC))
+      : soloMese ? parseAnnoMese(anno, vMese)
+      : iC >= 0 ? parseMese(vMese)
       : (meseManuale || null)
     const motivo = !ente ? 'ENTE vuoto'
       : cents === null ? `IMP_TOT non numerico: «${g(ix('IMP_TOT'))}»`
-      : !mese ? (colMese ? 'mese non riconosciuto' : 'mese non indicato')
+      : !mese ? (soloMese && !/^\d{4}$/.test(anno) ? 'mese senza anno: indica l\'anno' : colMese ? 'mese non riconosciuto' : 'mese non indicato')
       : null
     if (motivo || cents === null || !mese) { scartate.push({ riga: n + 2, motivo: motivo ?? '', testo: r.join(f.sep) }); return }
     const cf = g(ix('COD_FISC')).toUpperCase()
@@ -252,7 +310,8 @@ export function elabora(f: FileVersamenti, colMese: string, meseManuale: string)
     })
     mesi.add(mese)
   })
-  return { mancanti: [], righe, scartate, mesi: [...mesi].sort() }
+  const periodo = !colMese && meseManuale ? espandiMesi(meseManuale, meseManualeA || meseManuale) : null
+  return { mancanti: [], righe, scartate, mesi: [...mesi].sort(), serveAnno, periodo: periodo?.length ? periodo : null }
 }
 
 export interface EnteAggregato {
@@ -260,19 +319,25 @@ export interface EnteAggregato {
   descr:   string
   righe:   RigaVersamento[]
   cents:   number
+  /** Mesi in cui l'ente compare (la suddivisione per mese degli allegati). */
   mesi:    string[]
+  /** Il periodo da scrivere nella mail: i mesi, o il «da … a …» di un file senza colonna del mese. */
+  periodo: string[]
 }
 
 /** Raggruppa per ente le righe dei mesi selezionati. */
-export function aggregaEnti(righe: RigaVersamento[], mesiSel: ReadonlySet<string>): EnteAggregato[] {
-  const m = new Map<string, EnteAggregato & { mesiSet: Set<string> }>()
+export function aggregaEnti(righe: RigaVersamento[], mesiSel: ReadonlySet<string>, periodo: string[] | null = null): EnteAggregato[] {
+  const m = new Map<string, Omit<EnteAggregato, 'mesi' | 'periodo'> & { mesiSet: Set<string> }>()
   for (const r of righe) {
     if (!mesiSel.has(r.mese)) continue
     let e = m.get(r.ente)
-    if (!e) { e = { codice: r.ente, descr: r.descr, righe: [], cents: 0, mesi: [], mesiSet: new Set() }; m.set(r.ente, e) }
+    if (!e) { e = { codice: r.ente, descr: r.descr, righe: [], cents: 0, mesiSet: new Set() }; m.set(r.ente, e) }
     e.righe.push(r); e.cents += r.cents; e.mesiSet.add(r.mese)
   }
-  return [...m.values()].map(({ mesiSet, ...e }) => ({ ...e, mesi: [...mesiSet].sort() }))
+  return [...m.values()].map(({ mesiSet, ...e }) => {
+    const mesi = [...mesiSet].sort()
+    return { ...e, mesi, periodo: periodo ?? mesi }
+  })
 }
 
 /** Persone distinte (matricola + nome) per fonte della data di nascita. */

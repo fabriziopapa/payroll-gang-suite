@@ -19,7 +19,7 @@ import { versamentiApi, type VersamentoEnteApi } from '../api/endpoints'
 import { showToast } from '../components/ToastManager'
 import {
   ANNO_PIU_MESE, OPZIONALI, RICHIESTE, aggregaEnti, colonnaMeseAuto, contaFontiNascita,
-  decodificaCsv, elabora, leggiFile, meseDaNomeFile, type EnteAggregato, type FileVersamenti,
+  annoDaNomeFile, decodificaCsv, elabora, leggiFile, meseDaNomeFile, periodoDaNomeFile, type EnteAggregato, type FileVersamenti,
 } from '../utils/versamentiCsv'
 import { completaAllegati } from '../utils/versamentiAllegati'
 import { fmtEuro, meseBreve, modelloPer, periodoBreve, type ModelloVersamento } from '../utils/versamentiModelli'
@@ -53,6 +53,8 @@ export default function VersamentiEntiPage() {
   const [file, setFile]               = useState<FileVersamenti | null>(null)
   const [colMese, setColMese]         = useState('')
   const [meseManuale, setMeseManuale] = useState('')
+  const [anno, setAnno]               = useState('')
+  const [meseManualeA, setMeseManualeA] = useState('')
   const [mesiSel, setMesiSel]         = useState<Set<string>>(new Set())
   const [nuovi, setNuovi]             = useState<Set<string>>(new Set())
   const [modo, setModo]               = useState<'unico' | 'mese'>('unico')
@@ -83,7 +85,7 @@ export default function VersamentiEntiPage() {
   }, [])
 
   // ── Elaborazione del file (solo nel browser) ──────────────
-  const esito = useMemo(() => (file ? elabora(file, colMese, meseManuale) : null), [file, colMese, meseManuale])
+  const esito = useMemo(() => (file ? elabora(file, colMese, meseManuale, anno, meseManualeA) : null), [file, colMese, meseManuale, anno, meseManualeA])
 
   useEffect(() => {
     if (!esito) return
@@ -120,14 +122,19 @@ export default function VersamentiEntiPage() {
     const letto = leggiFile(f.name, testo, codifica)
     setFile(letto)
     setColMese(colonnaMeseAuto(letto.headers))
-    setMeseManuale(meseDaNomeFile(f.name))
+    // Senza colonna del mese: il «da … a …» dal nome del file (GEN_DIC_2025),
+    // altrimenti il mese prima della data di stampa.
+    const pr = periodoDaNomeFile(f.name), m = meseDaNomeFile(f.name)
+    setMeseManuale(pr?.da ?? m)
+    setMeseManualeA(pr?.a ?? m)
+    setAnno(annoDaNomeFile(f.name))
     setMesiSel(new Set())
     setNuovi(new Set())
     setOverride({})
     sincronizzati.current = ''
   }
 
-  const aggregati = useMemo(() => (esito ? aggregaEnti(esito.righe, mesiSel) : []), [esito, mesiSel])
+  const aggregati = useMemo(() => (esito ? aggregaEnti(esito.righe, mesiSel, esito.periodo) : []), [esito, mesiSel])
   const modelloDi = useCallback((codice: string) => modelloPer(codice, {
     modelli, override, modelloElab: modelloElab || null, modelloEnte: entiMap.get(codice)?.modelloId ?? null,
   }), [modelli, override, modelloElab, entiMap])
@@ -160,7 +167,7 @@ export default function VersamentiEntiPage() {
       // Audit prima del download: se non si registra, non si scarica.
       await versamentiApi.eventoGenerazione({
         file: file.nome, enti: lista.map(a => a.codice), eml: emls.length,
-        righe: emls.reduce((s, x) => s + x.righe, 0), mesi: [...mesiSel].sort(), modo,
+        righe: emls.reduce((s, x) => s + x.righe, 0), mesi: esito?.periodo ?? [...mesiSel].sort(), modo,
       })
       for (const x of emls) { scaricaFile(x.nomeFile, x.sorgente, 'message/rfc822'); if (emls.length > 1) await pausa(350) }
       showToast(emls.length === 1 ? `Scaricato ${emls[0]!.nomeFile}` : `Scaricati ${emls.length} EML`, 'success')
@@ -256,7 +263,7 @@ export default function VersamentiEntiPage() {
               <summary className="cursor-pointer select-none text-slate-300">Guida rapida</summary>
               <ol className="list-decimal ml-5 mt-2 space-y-1">
                 <li>Carica la stampa versamenti di CSA. Servono le colonne <span className="font-mono">{RICHIESTE.join(', ')}</span>; facoltative <span className="font-mono">{OPZIONALI.join(', ')}</span> per la data di nascita.</li>
-                <li>Controlla la colonna del mese (o il mese del file, se il file è di un solo mese) e scegli i mesi.</li>
+                <li>In CSA, con «Suddivisione per mese» il file ha la colonna <span className="font-mono">MESE</span> (solo il numero: l'anno viene dal nome del file, correggibile); senza, gli importi sono la somma del periodo «da … a …», che si legge dal nome del file (es. <span className="font-mono">GEN_DIC_2025</span>) e si può correggere. Poi scegli i mesi.</li>
                 <li>Nel riquadro «Da controllare» inserisci le email degli enti nuovi (più indirizzi separati da virgola) o disabilitali.</li>
                 <li>Scarica l'EML di un ente o tutti insieme e aprili con Outlook: sono bozze da inviare, con CSV e PDF allegati.</li>
                 <li>Testi e allegati si cambiano in «Modelli mail»; il modello di ciascun ente in «Rubrica enti».</li>
@@ -267,14 +274,16 @@ export default function VersamentiEntiPage() {
           {file && esito && (
             <>
               <InfoFile file={file} esito={esito} colMese={colMese} setColMese={c => { setColMese(c); setMesiSel(new Set()) }}
-                meseManuale={meseManuale} setMeseManuale={m => { setMeseManuale(m); setMesiSel(new Set()) }} />
+                meseManuale={meseManuale} setMeseManuale={m => { setMeseManuale(m); setMesiSel(new Set()) }}
+                anno={anno} setAnno={a => { setAnno(a); setMesiSel(new Set()) }}
+                meseManualeA={meseManualeA} setMeseManualeA={m => { setMeseManualeA(m); setMesiSel(new Set()) }} />
 
               {!esito.mancanti.length && (
                 <>
                   <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                     <Riquadro k="Righe" v={aggregati.reduce((s, a) => s + a.righe.length, 0).toLocaleString('it-IT')} s="nei mesi selezionati" />
                     <Riquadro k="Enti" v={String(aggregati.length)} s={`${nuovi.size} nuovi in questo file`} cls={nuovi.size ? 'text-indigo-300' : 'text-white'} />
-                    <Riquadro k="Mesi" v={`${mesiSel.size}/${esito.mesi.length}`} s={esito.mesi.length ? periodoBreve(esito.mesi) : '—'} />
+                    <Riquadro k="Mesi" v={`${mesiSel.size}/${esito.mesi.length}`} s={esito.periodo ? `${periodoBreve(esito.periodo)} (senza suddivisione)` : esito.mesi.length ? periodoBreve(esito.mesi) : '—'} />
                     <Riquadro k="Totale" v={`${fmtEuro(aggregati.reduce((s, a) => s + a.cents, 0))} €`} s="trattenute versate" />
                     <Riquadro k="Scartate" v={String(esito.scartate.length)} s={esito.scartate.length ? 'righe da controllare' : 'nessuna'} cls={esito.scartate.length ? 'text-amber-400' : 'text-white'} />
                   </div>
@@ -288,7 +297,7 @@ export default function VersamentiEntiPage() {
                           className={`px-3 py-1 rounded-full text-xs font-medium border ${mesiSel.size === esito.mesi.length ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}`}>Tutti</button>
                         {esito.mesi.map(m => (
                           <button key={m} type="button" aria-pressed={mesiSel.has(m)} onClick={() => cliccaMese(m)}
-                            className={`px-3 py-1 rounded-full text-xs font-medium border tabular-nums ${mesiSel.has(m) ? 'bg-indigo-600/25 border-indigo-500 text-indigo-200' : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300'}`}>{meseBreve(m)}</button>
+                            className={`px-3 py-1 rounded-full text-xs font-medium border tabular-nums ${mesiSel.has(m) ? 'bg-indigo-600/25 border-indigo-500 text-indigo-200' : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300'}`}>{esito.periodo ? periodoBreve(esito.periodo) : meseBreve(m)}</button>
                         ))}
                       </div>
                     </div>
@@ -490,15 +499,17 @@ function Riquadro({ k, v, s, cls = 'text-white' }: { k: string; v: string; s: st
   )
 }
 
-function InfoFile({ file, esito, colMese, setColMese, meseManuale, setMeseManuale }: {
+function InfoFile({ file, esito, colMese, setColMese, meseManuale, setMeseManuale, anno, setAnno, meseManualeA, setMeseManualeA }: {
   file: FileVersamenti; esito: ReturnType<typeof elabora>
   colMese: string; setColMese: (c: string) => void
   meseManuale: string; setMeseManuale: (m: string) => void
+  anno: string; setAnno: (a: string) => void
+  meseManualeA: string; setMeseManualeA: (m: string) => void
 }) {
   const opzioni: Array<[string, string]> = []
   if (file.headers.includes('ANNO') && file.headers.includes('MESE')) opzioni.push([ANNO_PIU_MESE, 'ANNO + MESE'])
   file.headers.forEach(h => opzioni.push([h, h]))
-  opzioni.push(['', 'nessuna: file di un solo mese'])
+  opzioni.push(['', 'nessuna: importi sommati sul periodo'])
   const fonti = contaFontiNascita(esito.righe)
   const req = new Set<string>(RICHIESTE), opz = new Set<string>(OPZIONALI)
   return (
@@ -540,12 +551,31 @@ function InfoFile({ file, esito, colMese, setColMese, meseManuale, setMeseManual
               </select>
             </div>
             {!colMese && (
-              <div className="flex flex-col gap-1.5 w-48">
-                <label htmlFor="vers-mese-man" className={etichettaCls}>Mese del file</label>
-                <input id="vers-mese-man" type="month" value={meseManuale} onChange={e => setMeseManuale(e.target.value)} className={inputCls} />
+              <>
+                <div className="flex flex-col gap-1.5 w-44">
+                  <label htmlFor="vers-mese-man" className={etichettaCls}>Periodo: da</label>
+                  <input id="vers-mese-man" type="month" value={meseManuale} onChange={e => setMeseManuale(e.target.value)} className={inputCls} />
+                </div>
+                <div className="flex flex-col gap-1.5 w-44">
+                  <label htmlFor="vers-mese-man-a" className={etichettaCls}>a</label>
+                  <input id="vers-mese-man-a" type="month" value={meseManualeA} min={meseManuale} onChange={e => setMeseManualeA(e.target.value)} className={inputCls} />
+                </div>
+              </>
+            )}
+            {colMese && colMese !== ANNO_PIU_MESE && esito.serveAnno && (
+              <div className="flex flex-col gap-1.5 w-40">
+                <label htmlFor="vers-anno" className={etichettaCls}>Anno</label>
+                <input id="vers-anno" inputMode="numeric" maxLength={4} value={anno} onChange={e => setAnno(e.target.value.replace(/\D/g, ''))}
+                  className={`${inputCls} tabular-nums ${/^\d{4}$/.test(anno) ? '' : '!border-amber-600'}`} />
               </div>
             )}
           </div>
+          {!colMese && (
+            <p className="text-xs text-slate-500 -mt-2">Il file non ha la colonna del mese (stampa CSA senza «Suddivisione per mese»): gli importi sono la somma del periodo indicato, che finisce nel testo della mail.</p>
+          )}
+          {colMese && colMese !== ANNO_PIU_MESE && esito.serveAnno && (
+            <p className="text-xs text-slate-500 -mt-2">La colonna {colMese} ha solo il numero del mese: l'anno viene dal nome del file{anno ? '' : ' (non trovato: indicalo)'}.</p>
+          )}
         </>
       )}
     </div>
