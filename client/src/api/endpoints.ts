@@ -1200,6 +1200,11 @@ export const versamentiApi = {
       method: 'POST', body: JSON.stringify(body),
     }),
 
+  importaEnti: (body: { file: string; righe: Array<{ codice: string; descrizione: string; email: string; abilitato: boolean }> }) =>
+    apiFetch<{ enti: VersamentoEnteApi[]; nuovi: string[]; aggiornati: string[]; saltati: string[]; invariati: string[] }>('/versamenti/enti/importa', {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+
   aggiornaEnte: (codice: string, body: { email?: string; abilitato?: boolean; modelloId?: string | null }) =>
     apiFetch<{ ente: VersamentoEnteApi }>(`/versamenti/enti/${encodeURIComponent(codice)}`, {
       method: 'PATCH', body: JSON.stringify(body),

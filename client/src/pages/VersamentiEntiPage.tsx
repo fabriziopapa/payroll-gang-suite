@@ -32,6 +32,7 @@ import {
 import RubricaEntiTab from '../components/versamenti/RubricaEntiTab'
 import ModelliMailTab from '../components/versamenti/ModelliMailTab'
 import { AnteprimaEmlModal, DettaglioEnteModal } from '../components/versamenti/Modali'
+import GuidaStampaCsa from '../components/versamenti/GuidaStampaCsa'
 
 type Scheda = 'elab' | 'rub' | 'mod'
 
@@ -230,7 +231,7 @@ export default function VersamentiEntiPage() {
       {!caricato && <p className="text-sm text-slate-500">Caricamento…</p>}
 
       {caricato && scheda === 'rub' && (
-        <RubricaEntiTab enti={enti} modelli={modelli} nuovi={nuovi} codiciNelFile={codiciNelFile} onAggiornato={aggiornaEnte} />
+        <RubricaEntiTab enti={enti} modelli={modelli} nuovi={nuovi} codiciNelFile={codiciNelFile} onAggiornato={aggiornaEnte} onEnti={setEnti} />
       )}
       {caricato && scheda === 'mod' && (
         <ModelliMailTab modelli={modelli} enti={enti} esempio={esempioModelli} onRicarica={ricaricaModelli} onEntiCambiati={() => versamentiApi.enti().then(r => setEnti(r.enti)).catch(() => {})} />
@@ -260,11 +261,15 @@ export default function VersamentiEntiPage() {
                 onChange={e => { const f = e.target.files?.[0]; if (f) void apriFile(f); e.target.value = '' }} />
             </div>
             <details className="text-xs text-slate-400">
+              <summary className="cursor-pointer select-none text-slate-300">Come estrarre la stampa da CSA</summary>
+              <div className="mt-3"><GuidaStampaCsa /></div>
+            </details>
+            <details className="text-xs text-slate-400">
               <summary className="cursor-pointer select-none text-slate-300">Guida rapida</summary>
               <ol className="list-decimal ml-5 mt-2 space-y-1">
                 <li>Carica la stampa versamenti di CSA. Servono le colonne <span className="font-mono">{RICHIESTE.join(', ')}</span>; facoltative <span className="font-mono">{OPZIONALI.join(', ')}</span> per la data di nascita.</li>
                 <li>In CSA, con «Suddivisione per mese» il file ha la colonna <span className="font-mono">MESE</span> (solo il numero: l'anno viene dal nome del file, correggibile); senza, gli importi sono la somma del periodo «da … a …», che si legge dal nome del file (es. <span className="font-mono">GEN_DIC_2025</span>) e si può correggere. Poi scegli i mesi.</li>
-                <li>Nel riquadro «Da controllare» inserisci le email degli enti nuovi (più indirizzi separati da virgola) o disabilitali.</li>
+                <li>Nel riquadro «Da controllare» inserisci le email degli enti nuovi (più indirizzi separati da virgola) o disabilitali. Una rubrica già pronta (es. quella del vecchio programma Java) si carica con «Importa rubrica» nella scheda Rubrica enti.</li>
                 <li>Scarica l'EML di un ente o tutti insieme e aprili con Outlook: sono bozze da inviare, con CSV e PDF allegati.</li>
                 <li>Testi e allegati si cambiano in «Modelli mail»; il modello di ciascun ente in «Rubrica enti».</li>
               </ol>

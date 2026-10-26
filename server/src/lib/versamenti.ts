@@ -24,9 +24,35 @@ const SEGNAPOSTO_TITOLO = [...SEGNAPOSTO_TESTO, 'PERIODO_FILE'] as const
 export const COLONNE = ['NOME', 'DATA_NASCITA', 'MATRICOLA', 'COD_FISC', 'MESE', 'VOCE', 'IMPORTO'] as const
 
 const MAX_EMAIL = 20
-// Volutamente semplice: niente spazi, niente separatori, una chiocciola, un
-// dominio con un punto. Outlook fa il resto; qui si fermano i refusi.
-const EMAIL_RE = /^[^\s@,;<>()"]+@[^\s@,;<>()"]+\.[A-Za-z]{2,}$/
+// Solo ASCII (audit 26.10.26.2, V-7): parte locale con i caratteri «atext»
+// della RFC 5322, dominio a etichette [A-Za-z0-9-]. Fuori restano spazi,
+// a capo, caratteri di controllo e invisibili, e le lettere non latine che
+// imitano quelle latine (omografi: «un\u0456versita.example» con la «і»
+// cirillica). Gli EML portano dati personali: un dominio che SEMBRA giusto
+// non deve passare. Un dominio con accenti si scrive nella forma xn--.
+// Nessun quantificatore annidato: la regex resta lineare (e prima si
+// controlla la lunghezza).
+const EMAIL_RE = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/
+
+// ── Testi salvati o scritti nell'audit (audit 26.10.26.2, V-6) ──
+// Caratteri di controllo (C0/C1, NUL compreso), separatori di riga Unicode,
+// caratteri invisibili e override bidirezionali («Trojan Source»).
+// Il NUL in particolare: PostgreSQL lo rifiuta in TEXT e JSONB, e un NUL
+// nel solo nome file faceva fallire l'audit DOPO il commit dell'import.
+const NON_STAMPABILI = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g
+// Nei testi su piu' righe restano a capo e tabulazioni.
+const NON_STAMPABILI_TESTO = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u2028-\u202e\u2066-\u2069\ufeff]/g
+
+/** Una riga di testo: i caratteri non stampabili diventano spazi, poi trim. */
+export const pulisciRiga = (s: string): string => s.replace(NON_STAMPABILI, ' ').trim()
+
+/** Schema zod di una riga di testo ripulita, lunga al massimo `max`. */
+export const rigaSicura = (max: number, min = 0) =>
+  z.string().max(max * 4).transform(pulisciRiga).pipe(z.string().min(min).max(max))
+
+/** Testo su piu' righe (corpo del messaggio): via controlli, NUL e override bidi. */
+export const testoSicuro = (max: number) =>
+  z.string().max(max * 2).transform(s => s.replace(NON_STAMPABILI_TESTO, '')).pipe(z.string().min(1).max(max))
 
 export type EsitoEmail = { ok: true; lista: string[] } | { ok: false; errata: string } | { ok: false; troppe: true }
 
@@ -50,7 +76,7 @@ export function segnapostoIgnoti(testo: string, ammessi: readonly string[]): str
   return [...new Set(trovati.filter(k => !ammessi.includes(k)))]
 }
 
-const testoBreve = (max: number) => z.string().trim().min(1).max(max)
+const testoBreve = (max: number) => rigaSicura(max, 1)
 
 export const allegatiSchema = z.object({
   nomeEml:      testoBreve(120),
@@ -65,7 +91,7 @@ export const allegatiSchema = z.object({
   }),
   pdf: z.object({
     attivo:    z.boolean(),
-    titolo:    z.string().max(200),
+    titolo:    rigaSicura(200),
     orient:    z.enum(['p', 'l']),
     subtotali: z.boolean(),
     totale:    z.boolean(),
@@ -83,7 +109,7 @@ export type AllegatiConfig = z.infer<typeof allegatiSchema>
 export const modelloSchema = z.object({
   nome:     testoBreve(80),
   oggetto:  testoBreve(200),
-  testo:    z.string().min(1).max(8000),
+  testo:    testoSicuro(8000),
   allegati: allegatiSchema,
 })
 export type ModelloInput = z.infer<typeof modelloSchema>
@@ -100,4 +126,44 @@ export function erroreModello(m: ModelloInput): string | null {
   if (new Set(a.colonne.map(c => c.k)).size !== a.colonne.length) return 'COLONNE_RIPETUTE'
   if ((a.csv.attivo || a.pdf.attivo) && !a.colonne.some(c => c.on)) return 'NESSUNA_COLONNA'
   return null
+}
+
+// ── Import della rubrica (es. dal Java GestioneSaldiEnti) ─────
+// Regola: un import non sovrascrive mai il lavoro fatto in PGS.
+//   · ente che non c'e'            → si crea con email e abilitazione del file;
+//   · ente presente SENZA email    → prende email e abilitazione del file;
+//   · ente presente CON email      → non si tocca (nemmeno l'abilitazione);
+//   · riga che non porterebbe nulla di nuovo (niente email, stessa
+//     abilitazione) → invariata: rifare l'import non riscrive niente.
+
+export interface RigaImportEnte {
+  codice:      string
+  descrizione: string
+  email:       string[]
+  abilitato:   boolean
+}
+
+export interface PianoImport {
+  nuovi:      RigaImportEnte[]
+  aggiorna:   RigaImportEnte[]
+  saltati:    string[]
+  invariati:  string[]
+}
+
+export function pianoImport(
+  righe: readonly RigaImportEnte[],
+  esistenti: ReadonlyMap<string, { email: readonly string[]; abilitato: boolean }>,
+): PianoImport {
+  const visti = new Set<string>()
+  const piano: PianoImport = { nuovi: [], aggiorna: [], saltati: [], invariati: [] }
+  for (const r of righe) {
+    if (visti.has(r.codice)) continue          // la prima riga di un codice vince
+    visti.add(r.codice)
+    const e = esistenti.get(r.codice)
+    if (!e) piano.nuovi.push(r)
+    else if (e.email.length > 0) piano.saltati.push(r.codice)
+    else if (r.email.length === 0 && r.abilitato === e.abilitato) piano.invariati.push(r.codice)
+    else piano.aggiorna.push(r)
+  }
+  return piano
 }

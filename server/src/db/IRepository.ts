@@ -847,6 +847,13 @@ export interface EsitoSincronizzaEnti {
   descrizioni:  Array<{ codice: string; prima: string; dopo: string }>
 }
 
+export interface EsitoImportEnti {
+  nuovi:      string[]
+  aggiornati: string[]
+  saltati:    string[]
+  invariati:  string[]
+}
+
 export interface IVersamentiRepository {
   enti(): Promise<VersamentoEnteRow[]>
   ente(codice: string): Promise<VersamentoEnteRow | null>
@@ -857,6 +864,12 @@ export interface IVersamentiRepository {
    */
   sincronizzaEnti(enti: Array<{ codice: string; descrizione: string }>, file: string, userId: string | null): Promise<EsitoSincronizzaEnti>
   aggiornaEnte(codice: string, patch: { email?: string[]; abilitato?: boolean; modelloId?: string | null }, userId: string | null): Promise<VersamentoEnteRow | null>
+  /**
+   * Import di una rubrica (es. dal Java), in una transazione: crea gli enti
+   * nuovi, completa (email + abilitazione) quelli SENZA email, non tocca
+   * quelli che un'email in PGS ce l'hanno gia'. Regola in lib/versamenti.ts.
+   */
+  importaEnti(righe: Array<{ codice: string; descrizione: string; email: string[]; abilitato: boolean }>, userId: string | null): Promise<EsitoImportEnti>
 
   modelli(): Promise<VersamentoModelloRow[]>
   modello(id: string): Promise<VersamentoModelloRow | null>

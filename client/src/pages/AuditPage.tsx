@@ -51,6 +51,7 @@ const AZIONE_META: Record<string, AzioneMeta> = {
   BOZZA_ELIMINATA:               { label: 'Liquidazione eliminata',       tono: 'danger' },
   VERSAMENTI_ENTI_SINCRONIZZATI: { label: 'Versamenti: enti dal file',    tono: 'info' },
   VERSAMENTI_ENTE_MODIFICATO:    { label: 'Versamenti: ente modificato',  tono: 'info' },
+  VERSAMENTI_ENTI_IMPORTATI:     { label: 'Versamenti: rubrica importata', tono: 'warn' },
   VERSAMENTI_MODELLO_CREATO:     { label: 'Versamenti: modello creato',   tono: 'ok' },
   VERSAMENTI_MODELLO_MODIFICATO: { label: 'Versamenti: modello modificato', tono: 'info' },
   VERSAMENTI_MODELLO_PREDEFINITO:{ label: 'Versamenti: modello predefinito', tono: 'warn' },
@@ -95,6 +96,10 @@ function describeDettagli(azione: string, dettagli: unknown): string {
       const descr = Array.isArray(d.descrizioni) ? d.descrizioni.length : 0
       return [val('file'), nuovi.length ? `${nuovi.length} enti nuovi (${nuovi.slice(0, 8).join(', ')}${nuovi.length > 8 ? '…' : ''})` : '', descr ? `${descr} descrizioni aggiornate` : '']
         .filter(Boolean).join(' · ')
+    }
+    case 'VERSAMENTI_ENTI_IMPORTATI': {
+      const n = (k: string) => (Array.isArray(d[k]) ? (d[k] as unknown[]).length : Number(d[k] ?? 0))
+      return [val('file'), `${val('righe')} righe`, `${n('nuovi')} nuovi`, `${n('aggiornati')} completati`, `${n('saltati')} non toccati (avevano gia' email)`, `${n('invariati')} invariati`].join(' · ')
     }
     case 'VERSAMENTI_ENTE_MODIFICATO': {
       const c = (d.cambi ?? {}) as Record<string, { prima: unknown; dopo: unknown }>

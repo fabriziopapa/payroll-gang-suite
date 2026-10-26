@@ -11,8 +11,9 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import * as schema from '../schema.js'
 import type {
   IVersamentiRepository, VersamentoEnteRow, VersamentoModelloRow,
-  VersamentoModelloInput, EsitoSincronizzaEnti,
+  VersamentoModelloInput, EsitoSincronizzaEnti, EsitoImportEnti,
 } from '../IRepository.js'
+import { pianoImport, type RigaImportEnte } from '../../lib/versamenti.js'
 
 type DB = PostgresJsDatabase<typeof schema>
 type RigaEnte = typeof schema.versamentiEnti.$inferSelect
@@ -20,6 +21,14 @@ type RigaModello = typeof schema.versamentiModelli.$inferSelect
 
 /** Oggi a Roma, 'AAAA-MM-GG': l'ufficio lavora in quel fuso. */
 const oggi = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Rome' }).format(new Date())
+
+/**
+ * Sincronizzazione e import scrivono la rubrica in blocco: un lucchetto di
+ * transazione li mette in fila. FOR UPDATE da solo non basta, perche' non
+ * blocca le righe che ancora non esistono (due import con lo stesso ente
+ * nuovo → chiave duplicata → 500).
+ */
+const lucchettoRubrica = sql`SELECT pg_advisory_xact_lock(hashtext('pgs.versamenti_enti'))`
 
 function violazioneUnica(err: unknown): boolean {
   const e = err as { code?: string; cause?: { code?: string } } | null
@@ -47,6 +56,7 @@ export class PgVersamentiRepository implements IVersamentiRepository {
     if (!enti.length) return { nuovi: [], descrizioni: [] }
     const giorno = oggi()
     return this.db.transaction(async tx => {
+      await tx.execute(lucchettoRubrica)
       const codici = enti.map(e => e.codice)
       const esistenti = new Map(
         (await tx.select({ codice: schema.versamentiEnti.codice, descrizione: schema.versamentiEnti.descrizione })
@@ -91,6 +101,35 @@ export class PgVersamentiRepository implements IVersamentiRepository {
     const [r] = await this.db.update(schema.versamentiEnti).set(set)
       .where(eq(schema.versamentiEnti.codice, codice)).returning()
     return r ? toEnte(r) : null
+  }
+
+  async importaEnti(righe: RigaImportEnte[], userId: string | null): Promise<EsitoImportEnti> {
+    if (!righe.length) return { nuovi: [], aggiornati: [], saltati: [], invariati: [] }
+    return this.db.transaction(async tx => {
+      await tx.execute(lucchettoRubrica)
+      const codici = [...new Set(righe.map(r => r.codice))]
+      const esistenti = new Map(
+        (await tx.select({ codice: schema.versamentiEnti.codice, email: schema.versamentiEnti.email, abilitato: schema.versamentiEnti.abilitato })
+          .from(schema.versamentiEnti)
+          .where(inArray(schema.versamentiEnti.codice, codici))
+          .for('update'))
+          .map(r => [r.codice, { email: r.email ?? [], abilitato: r.abilitato }]),
+      )
+      const piano = pianoImport(righe, esistenti)
+      if (piano.nuovi.length) {
+        await tx.insert(schema.versamentiEnti).values(piano.nuovi.map(r => ({
+          codice: r.codice, descrizione: r.descrizione || r.codice, email: r.email, abilitato: r.abilitato,
+          createdBy: userId, updatedBy: userId,
+        })))
+      }
+      for (const r of piano.aggiorna) {
+        // La descrizione resta quella di PGS (viene dalla stampa CSA).
+        await tx.update(schema.versamentiEnti)
+          .set({ email: r.email, abilitato: r.abilitato, updatedAt: new Date(), updatedBy: userId })
+          .where(eq(schema.versamentiEnti.codice, r.codice))
+      }
+      return { nuovi: piano.nuovi.map(r => r.codice), aggiornati: piano.aggiorna.map(r => r.codice), saltati: piano.saltati, invariati: piano.invariati }
+    })
   }
 
   // ── Modelli ───────────────────────────────────────────────

@@ -6,25 +6,50 @@
 // subito e va nell'audit.
 // ============================================================
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { versamentiApi, type VersamentoEnteApi } from '../../api/endpoints'
 import { showToast } from '../ToastManager'
 import type { ModelloVersamento } from '../../utils/versamentiModelli'
-import { CampoEmail, InterruttoreEnte, Pill, cardCls, inputCls, messaggioErrore } from './ui'
+import { leggiRubricaCsv, anteprimaImport, type LetturaRubrica } from '../../utils/versamentiRubrica'
+import { ApiError } from '../../api/client'
+import { CampoEmail, InterruttoreEnte, Pill, btnPrimario, btnSecondario, cardCls, inputCls, messaggioErrore } from './ui'
 
 type Filtro = 'tutti' | 'abilitati' | 'disabilitati' | 'senza' | 'nuovi'
 
 const fmtData = (iso: string | null) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '—')
 
-export default function RubricaEntiTab({ enti, modelli, nuovi, codiciNelFile, onAggiornato }: {
+export default function RubricaEntiTab({ enti, modelli, nuovi, codiciNelFile, onAggiornato, onEnti }: {
   enti:          VersamentoEnteApi[]
   modelli:       ModelloVersamento[]
   nuovi:         ReadonlySet<string>
   codiciNelFile: ReadonlySet<string>
   onAggiornato:  (e: VersamentoEnteApi) => void
+  onEnti:        (enti: VersamentoEnteApi[]) => void
 }) {
   const [filtro, setFiltro] = useState<Filtro>('tutti')
   const [cerca, setCerca] = useState('')
+  const [importa, setImporta] = useState<{ nome: string; l: LetturaRubrica } | null>(null)
+  const [importando, setImportando] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  async function apriRubrica(f: File) {
+    if (f.size > 5 * 1024 * 1024) { showToast('File troppo grande (oltre 5 MB).', 'error'); return }
+    setImporta({ nome: f.name, l: leggiRubricaCsv(await f.arrayBuffer()) })
+  }
+  async function confermaImport() {
+    if (!importa) return
+    setImportando(true)
+    try {
+      const r = await versamentiApi.importaEnti({ file: importa.nome, righe: importa.l.righe })
+      onEnti(r.enti)
+      setImporta(null)
+      showToast(`Rubrica importata: ${r.nuovi.length} nuovi, ${r.aggiornati.length} completati, ${r.saltati.length + r.invariati.length} non toccati`, 'success')
+    } catch (err) {
+      const msg = err instanceof ApiError && err.code === 'EMAIL_NON_VALIDA' ? 'Un indirizzo non è valido: correggi il file.' : messaggioErrore(err)
+      showToast(`Import non riuscito: ${msg}`, 'error')
+    } finally { setImportando(false) }
+  }
+  const ant = importa && !importa.l.mancanti.length ? anteprimaImport(importa.l.righe, enti) : null
   const predefinito = modelli.find(m => m.predefinito)
 
   const filtri: Record<Filtro, (e: VersamentoEnteApi) => boolean> = {
@@ -54,6 +79,57 @@ export default function RubricaEntiTab({ enti, modelli, nuovi, codiciNelFile, on
   )
 
   return (
+    <div className="flex flex-col gap-6">
+    {importa && (
+      <div className="border border-indigo-800/70 bg-indigo-950/20 rounded-xl p-5 flex flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold text-indigo-200">Importa rubrica</h3>
+          <span className="font-mono text-xs text-slate-400 break-all">{importa.nome}</span>
+        </div>
+        {importa.l.mancanti.length > 0 ? (
+          <p className="text-sm text-red-300">Mancano le colonne {importa.l.mancanti.join(', ')}. Servono almeno <span className="font-mono">codice</span> (o <span className="font-mono">ENTE</span>) ed <span className="font-mono">email</span>; facoltative <span className="font-mono">descrizione</span> e <span className="font-mono">abilitato</span>.</p>
+        ) : ant && (
+          <>
+            <ul className="text-sm text-slate-300 grid sm:grid-cols-2 gap-x-6 gap-y-1">
+              <li><span className="tabular-nums text-white">{importa.l.righe.length}</span> enti nel file</li>
+              <li><span className="tabular-nums text-white">{ant.nuovi.length}</span> nuovi, da creare</li>
+              <li><span className="tabular-nums text-white">{ant.aggiorna.length}</span> già in rubrica senza email: prendono email e abilitazione</li>
+              <li><span className="tabular-nums text-white">{ant.saltati.length}</span> già con email in PGS: non si toccano</li>
+              <li><span className="tabular-nums text-white">{ant.invariati.length}</span> già uguali: niente da cambiare</li>
+              <li><span className="tabular-nums text-white">{ant.conEmail}</span> arrivano con almeno un indirizzo</li>
+              <li><span className="tabular-nums text-white">{ant.disabilitati}</span> arrivano disabilitati</li>
+            </ul>
+            {ant.conEmail > 0 && (
+              // Controllo a occhio prima di confermare: a questi indirizzi
+              // andranno gli EML con i dati delle persone.
+              <details className="text-xs text-slate-300">
+                <summary className="cursor-pointer text-indigo-300 hover:text-indigo-200">Indirizzi che verranno scritti ({ant.conEmail})</summary>
+                <ul className="mt-2 max-h-56 overflow-auto border border-slate-800 rounded-lg divide-y divide-slate-800">
+                  {[...ant.nuovi, ...ant.aggiorna].filter(r => r.email).map(r => (
+                    <li key={r.codice} className="px-3 py-1.5 flex flex-wrap gap-x-3">
+                      <span className="font-mono text-slate-400 w-20 shrink-0">{r.codice}</span>
+                      <span className="text-slate-400 truncate max-w-[16rem]">{r.descrizione || (enti.find(e => e.codice === r.codice)?.descrizione ?? '')}</span>
+                      <span className="font-mono break-all text-slate-100">{r.email}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {importa.l.errori.length > 0 && (
+              <div className="border border-amber-800 bg-amber-950/30 rounded-lg px-4 py-2.5 text-xs text-amber-300">
+                {importa.l.errori.length} righe scartate e non importate:
+                <ul className="list-disc ml-5 mt-1">{importa.l.errori.slice(0, 20).map(e => <li key={e.riga}>riga {e.riga}: {e.motivo}</li>)}</ul>
+              </div>
+            )}
+          </>
+        )}
+        <div className="flex flex-wrap gap-2 justify-end">
+          <button type="button" className={btnSecondario} onClick={() => setImporta(null)} disabled={importando}>Annulla</button>
+          <button type="button" className={btnPrimario} disabled={!ant || !importa.l.righe.length || importando || (!ant.nuovi.length && !ant.aggiorna.length)}
+            onClick={() => void confermaImport()}>{importando ? 'Importo…' : 'Importa'}</button>
+        </div>
+      </div>
+    )}
     <div className={`${cardCls} overflow-hidden`}>
       <div className="px-5 py-3.5 border-b border-slate-800 flex flex-wrap items-center gap-2">
         {chip('tutti', 'Tutti')}{chip('abilitati', 'Abilitati')}{chip('disabilitati', 'Disabilitati')}
@@ -61,6 +137,10 @@ export default function RubricaEntiTab({ enti, modelli, nuovi, codiciNelFile, on
         <div className="flex-1" />
         <input value={cerca} onChange={e => setCerca(e.target.value)} placeholder="Cerca codice, descrizione, email…"
           aria-label="Cerca nella rubrica" className={`${inputCls} !w-64 !py-1.5`} />
+        <button type="button" className={`${btnSecondario} !py-1.5`} onClick={() => fileRef.current?.click()}
+          title="CSV con colonne codice (o ENTE), descrizione, email, abilitato: non sovrascrive gli enti che hanno già un'email">Importa rubrica</button>
+        <input ref={fileRef} type="file" accept=".csv,.txt" className="sr-only"
+          onChange={e => { const f = e.target.files?.[0]; if (f) void apriRubrica(f); e.target.value = '' }} />
       </div>
       {enti.length === 0 ? (
         <p className="px-5 py-6 text-sm text-slate-500">La rubrica è vuota: si riempie da sola al primo caricamento di una stampa versamenti.</p>
@@ -97,6 +177,7 @@ export default function RubricaEntiTab({ enti, modelli, nuovi, codiciNelFile, on
       <p className="px-5 py-3 border-t border-slate-800 text-xs text-slate-500">
         PGS salva per ogni ente solo codice, descrizione, email, abilitazione, modello e ultimo file. Ogni modifica è nell'Audit.
       </p>
+    </div>
     </div>
   )
 }

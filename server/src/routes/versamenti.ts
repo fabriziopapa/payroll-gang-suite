@@ -11,6 +11,8 @@
 //   GET    /enti                       { enti[] }
 //   POST   /enti/sincronizza           { file, enti:[{codice,descrizione}] } → { enti[], nuovi[] }
 //   PATCH  /enti/:codice               { email?, abilitato?, modelloId? }    → { ente }
+//   POST   /enti/importa               { file, righe:[{codice,descrizione,email,abilitato}] }
+//                                       → { enti[], nuovi[], aggiornati[], saltati[], invariati[] }
 //   GET    /modelli                    { modelli[] }
 //   POST   /modelli                    modello                               → { modello }
 //   PUT    /modelli/:id                modello                               → { modello }
@@ -23,11 +25,14 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import { PgVersamentiRepository } from '../db/repositories/PgVersamentiRepository.js'
 import { PgAuditRepository } from '../db/repositories/PgAuditRepository.js'
-import { modelloSchema, erroreModello, normalizzaEmail } from '../lib/versamenti.js'
+import { modelloSchema, erroreModello, normalizzaEmail, rigaSicura } from '../lib/versamenti.js'
 
 const CODICE  = z.string().trim().regex(/^[A-Za-z0-9._-]{1,20}$/)
 const MESE    = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/)
 const MAX_ENTI = 2000
+// Nome file e descrizione finiscono nel DB e nell'audit: ripuliti (V-6).
+const NOME_FILE   = rigaSicura(200, 1)
+const DESCRIZIONE = rigaSicura(200)
 
 export async function versamentiRoutes(app: FastifyInstance): Promise<void> {
   const repo      = new PgVersamentiRepository(app.db)
@@ -46,10 +51,10 @@ export async function versamentiRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/enti/sincronizza', auth, async (request, reply) => {
     const b = z.object({
-      file: z.string().trim().min(1).max(200),
+      file: NOME_FILE,
       enti: z.array(z.object({
         codice:      CODICE,
-        descrizione: z.string().trim().max(200),
+        descrizione: DESCRIZIONE,
       })).max(MAX_ENTI),
     }).parse(request.body)
 
@@ -65,6 +70,38 @@ export async function versamentiRoutes(app: FastifyInstance): Promise<void> {
       })
     }
     return reply.send({ enti: await repo.enti(), nuovi: esito.nuovi })
+  })
+
+  // Import di una rubrica (es. dal Java GestioneSaldiEnti): non sovrascrive
+  // mai un ente che in PGS ha gia' un'email. Un indirizzo non valido ferma
+  // tutto e dice in quale ente si trova.
+  app.post('/enti/importa', auth, async (request, reply) => {
+    const b = z.object({
+      file:  NOME_FILE,
+      righe: z.array(z.object({
+        codice:      CODICE,
+        descrizione: DESCRIZIONE,
+        email:       z.string().max(6000),
+        abilitato:   z.boolean(),
+      })).min(1).max(MAX_ENTI),
+    }).parse(request.body)
+
+    const righe = []
+    for (const r of b.righe) {
+      const n = normalizzaEmail(r.email)
+      if (!n.ok) {
+        return reply.code(400).send('errata' in n
+          ? { error: 'EMAIL_NON_VALIDA', codice: r.codice, valore: n.errata }
+          : { error: 'TROPPE_EMAIL', codice: r.codice })
+      }
+      righe.push({ codice: r.codice, descrizione: r.descrizione, email: n.lista, abilitato: r.abilitato })
+    }
+    const esito = await repo.importaEnti(righe, request.user?.id ?? null)
+    await audit(request, 'VERSAMENTI_ENTI_IMPORTATI', undefined, {
+      file: b.file, righe: b.righe.length,
+      nuovi: esito.nuovi, aggiornati: esito.aggiornati, saltati: esito.saltati.length, invariati: esito.invariati.length,
+    })
+    return reply.send({ enti: await repo.enti(), ...esito })
   })
 
   app.patch('/enti/:codice', auth, async (request, reply) => {
@@ -161,7 +198,7 @@ export async function versamentiRoutes(app: FastifyInstance): Promise<void> {
   // ── Generazione EML: solo l'evento, nessun dato delle persone ──
   app.post('/eventi/generazione', auth, async (request, reply) => {
     const b = z.object({
-      file:  z.string().trim().max(200),
+      file:  rigaSicura(200),
       enti:  z.array(CODICE).min(1).max(MAX_ENTI),
       eml:   z.number().int().min(1).max(100_000),
       righe: z.number().int().min(0).max(10_000_000),

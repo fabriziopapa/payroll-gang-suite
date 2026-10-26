@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.10.26.1-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.10.26.2-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -67,6 +67,7 @@ payroll-gang-suite/
 │                                # versamentiCsv.ts (+ test): lettura STAMPA_VERSAMENTI (mesi, importi, data di nascita)
 │                                # versamentiModelli.ts / versamentiAllegati.ts / versamentiEml.ts
 │                                #   (+ versamentiDocumenti.test.ts): segnaposto, CSV/PDF allegati, EML per Outlook
+│                                # versamentiRubrica.ts (+ test): import della rubrica enti (es. dal Java), anteprima
 ├── server/                      # API REST Fastify
 │   ├── sql/
 │   │   ├── proprieta_postgres.sql  # Proprieta' oggetti al superutente (serve dopo un restore da pannello)
@@ -262,6 +263,7 @@ Menu *Modulo Versamenti → Versamenti enti*, **per tutti gli utenti**. Porting 
 
 ### Guida
 
+0. **Estrarre la stampa da CSA**: nella pagina, riquadro *«Come estrarre la stampa da CSA»* (`components/versamenti/GuidaStampaCsa.tsx`): uno **schema** della finestra *Stampa versamenti* con le opzioni da usare evidenziate — stampa *di controllo*, Anno e mesi *da / a*, **Dettaglio nominativo**, **Dettaglio codice fiscale**, **Dettaglio aliquota/parti/imp.**, *Suddivisione per mese* facoltativa, *Ruoli* e *Accrediti/liquidazioni*, ordinamento *Ente/voce*, nome del file proposto lasciato com'e'. E' ricostruito in HTML: le schermate di CSA non vanno nel repository.
 1. **Carica il file** (trascinandolo o con un clic). Colonne obbligatorie: `ENTE`, `ENTE_DESCR`, `VOCE`, `MATRICOLA`, `NOME`, `IMP_TOT`. Facoltative: `DATA_NASC` e `COD_FISC`. Separatore `;`, `,` o TAB, codifica UTF-8 o Windows-1252, campi tra virgolette: tutto riconosciuto da solo. Il riquadro delle colonne le colora: verdi le obbligatorie, viola quelle della data di nascita, azzurra quella del mese, grigie le ignorate.
 2. **Il mese.** Dipende da come e' stata fatta la *Stampa versamenti* in CSA:
    - **con «Suddivisione per mese»** il file ha la colonna `MESE` con il **solo numero** del mese (`01`…`12`): l'**anno** si legge dal nome del file (`STAMPA_VERSAMENTI_20260706_GEN_DIC_2025` → 2025) e compare il campo *Anno* per correggerlo. I chip dei mesi filtrano totali, allegati ed EML; si puo' fare un EML per mese;
@@ -270,6 +272,7 @@ Menu *Modulo Versamenti → Versamenti enti*, **per tutti gli utenti**. Porting 
    Le altre colonne della stampa (IBAN, `ABI`, `CAB`, `CONTO_CORR`, `RUOLO`, `ALIQUOTA`, `PARTI`, `IMPONIBILE`) si ignorano.
 3. **Data di nascita**: prima `DATA_NASC` del CSV (`12/03/1968`, `1968-03-12`, `19680312`); se manca o non si legge, dal **codice fiscale** (omocodia compresa, carattere di controllo verificato; un anno che darebbe meno di 14 anni e' del Novecento). Senza entrambi: «—». Sotto le colonne: quante persone da CSV, quante dal CF, quante senza.
 4. **Enti nuovi**: al caricamento gli enti mai visti entrano in rubrica **abilitati, senza email** (come nel Java). Il riquadro **«Da controllare»** mostra gli enti abilitati senza indirizzo: si scrivono le email (**piu' indirizzi separati da virgola** o punto e virgola) oppure si disabilita l'ente. Ogni modifica si salva subito.
+   **Importa rubrica** (scheda *Rubrica enti*): carica un CSV `codice;descrizione;email;abilitato` (riconosciute anche le intestazioni del Java: `ENTE`, `ENTE_DESCR`, `MAIL`, `ATTIVO`; `abilitato` vale `1/0`, `si/no`, `true/false`, vuoto = abilitato). Prima di scrivere mostra l'**anteprima**: nuovi, completati, non toccati, invariati, quanti arrivano con email e quanti disabilitati, le righe scartate con il motivo e — da aprire — **l'elenco degli indirizzi che verranno scritti**, da controllare a occhio. La regola, uguale nel client e nel server (`pianoImport`): un ente **nuovo** si crea con email e abilitazione del file; un ente **gia' presente senza email** prende email e abilitazione del file (la descrizione resta quella di CSA); un ente che in PGS **ha gia' un'email non si tocca**, nemmeno l'abilitazione; una riga che non cambierebbe nulla resta *invariata*, quindi reimportare lo stesso file non riscrive niente. Un indirizzo non valido ferma l'import e dice in quale ente si trova.
 5. **Enti con molte righe** (INPDAP, Agenzia delle Entrate: decine di migliaia in un anno): nel dettaglio a schermo compare il riepilogo per mese oltre le 1.000 righe; gli allegati contengono sempre tutto (un ente da ~14.000 righe da' un PDF di ~9 MB in pochi secondi). Gli enti fiscali e previdenziali che non devono ricevere la mail si **disabilitano** una volta sola in rubrica.
 6. **Genera**: «Genera» su un ente o «Scarica tutti gli EML». Opzioni: *uno per ente con tutti i mesi* oppure *uno per ente per ciascun mese*; modello di ciascun ente o uno per tutti; anteprima di ogni EML (testo, allegati, intestazioni) con la possibilita' di cambiare modello solo per quell'ente o *usarlo sempre*. Esclusi da «Scarica tutti»: enti senza email, disabilitati, con totale ≤ 0 (evidenziati in ambra). Clic sulla riga: dettaglio dell'ente con subtotali per mese e *Solo CSV* / *Solo PDF*.
 7. **Outlook**: si apre l'`.eml` scaricato; e' una bozza (`X-Unsent: 1`) con destinatari, oggetto, testo e allegati, da controllare e inviare.
@@ -291,7 +294,9 @@ Scheda *Modelli mail*: **piu' messaggi predefiniti**, ognuno con nome, oggetto, 
 | `versamenti_enti` | codice, descrizione, email (elenco, max 20), abilitato, modello (vuoto = predefinito), ultimo file e giorno in cui l'ente e' comparso, chi e quando ha modificato |
 | `versamenti_modelli` | nome (unico), oggetto, testo, allegati (JSON validato), predefinito, chi e quando |
 
-Audit: `VERSAMENTI_ENTI_SINCRONIZZATI` (enti nuovi e descrizioni cambiate), `VERSAMENTI_ENTE_MODIFICATO` (prima → dopo), `VERSAMENTI_MODELLO_CREATO` / `_MODIFICATO` / `_PREDEFINITO` / `_ELIMINATO`, `VERSAMENTI_EML_GENERATI` (solo conteggi).
+Audit: `VERSAMENTI_ENTI_SINCRONIZZATI` (enti nuovi e descrizioni cambiate), `VERSAMENTI_ENTI_IMPORTATI` (nome del file, righe, codici degli enti nuovi e completati, quanti non toccati e invariati: **nessun indirizzo**), `VERSAMENTI_ENTE_MODIFICATO` (prima → dopo), `VERSAMENTI_MODELLO_CREATO` / `_MODIFICATO` / `_PREDEFINITO` / `_ELIMINATO`, `VERSAMENTI_EML_GENERATI` (solo conteggi).
+
+**Regole di sicurezza della rubrica** (audit 26.10.26.2). Gli indirizzi si accettano **solo in ASCII** (parte locale RFC 5322, dominio `[A-Za-z0-9-]`, un dominio con accenti si scrive `xn--…`): niente spazi, a capo, caratteri di controllo o invisibili, e niente **omografi** (una «і» cirillica che fa sembrare giusto un dominio sbagliato: gli EML portano dati personali). Nomi file, descrizioni e testi dei modelli si **ripuliscono** sul server da NUL, caratteri di controllo, invisibili e override bidirezionali prima di finire nel database o nell'audit. Sincronizzazione e import scrivono la rubrica **in fila** (lucchetto di transazione `pg_advisory_xact_lock`), cosi' due caricamenti contemporanei dello stesso ente nuovo non vanno in errore.
 
 ## Sezione PDF Region Editor
 
@@ -441,6 +446,19 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.10.26.2
+**Versamenti enti: import della rubrica, guida di CSA, audit di sicurezza**
+
+- **Importa rubrica** (scheda *Rubrica enti*): si caricano le email gia' note, per esempio esportate dal database del Java *GestioneSaldiEnti*, con l'**abilitazione** di ciascun ente. Anteprima prima di scrivere, con l'elenco degli indirizzi da controllare; non sovrascrive mai un ente che in PGS ha gia' un'email; rifare l'import non cambia nulla. Nuova rotta `POST /api/v1/versamenti/enti/importa` (login, max 2.000 righe, email normalizzate sul server, transazione) e azione d'audit `VERSAMENTI_ENTI_IMPORTATI` senza indirizzi.
+- **Guida CSA**: nella pagina, schema della finestra *Stampa versamenti* con le opzioni da spuntare (ricostruito in HTML, nessuna schermata nel repository).
+- **Audit di sicurezza** (prove d'attacco su un PostgreSQL di prova, 31 casi tutti respinti):
+  - **V-6 (media)** — un carattere NUL nel *nome del file* faceva fallire la scrittura dell'audit **dopo** il commit dell'import: si potevano scrivere email in rubrica senza traccia. Lo stesso NUL in descrizioni, nomi e testi dei modelli e nell'evento di generazione dava errore 500. Ora nomi file, descrizioni e testi si ripuliscono sul server (NUL, controlli, invisibili, override bidi) prima di DB e audit.
+  - **V-7 (media)** — gli indirizzi ammettevano lettere non latine e caratteri invisibili: un dominio *omografo* (con la «і» cirillica) passava per buono, e gli EML con nominativi, codici fiscali e date di nascita sarebbero andati altrove. Ora solo ASCII, nel server e nel client (`xn--` per i domini con accenti); i caratteri strani si mostrano come `\uXXXX` nelle righe scartate.
+  - **V-8 (bassa)** — due caricamenti contemporanei con lo stesso ente nuovo (anche due *sincronizza* dello stesso CSV, gia' dalla 26.10.26) andavano in chiave duplicata → 500. Ora sincronizzazione e import passano in fila (`pg_advisory_xact_lock`); provato con 8 operazioni in parallelo: nessun errore (senza il lucchetto: 4 errori su 8).
+  - Verificato senza modifiche: login obbligatorio (401), controllo dell'Origin sulle richieste che scrivono, limiti (2.001 righe, 6.001 caratteri, 21 indirizzi → 400), campi in piu' ignorati, codici con SQL o percorsi → 400, `__proto__` trattato come testo, ente con email non sovrascritto, nessun indirizzo nell'audit, regex lineare (1.600 righe costruite apposta: ~0,1 s), `audit_log` non cancellabile dall'utente dell'applicazione.
+- Prova sul database del Java (solo conteggi): 81 enti, 40 con email, 39 disabilitati; tutte le righe valide anche con la regola ASCII. Sui 77 enti del 2025, dopo l'import: 36 con email, 35 disabilitati, 6 da controllare.
+- Nessuna migrazione. Test: 3 nuovi nel server (`lib/versamenti.test.ts`), 4 nel client (`versamentiRubrica.test.ts`).
 
 ### 26.10.26.1
 **Versamenti enti: la stampa vera di CSA, con o senza «Suddivisione per mese»**
