@@ -5,17 +5,17 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { versamentiApi, type VersamentoEnteApi } from '../../api/endpoints'
 import { showToast } from '../ToastManager'
-import type { EnteAggregato } from '../../utils/versamentiCsv'
+import { errorePeriodo, espandiMesi, type EnteAggregato, type PropostaPeriodo } from '../../utils/versamentiCsv'
 import { allegatiPer, colonneAttive, ordina } from '../../utils/versamentiAllegati'
-import { fmtEuro, meseLabel, periodoBreve, type ModelloVersamento } from '../../utils/versamentiModelli'
+import { fmtEuro, meseLabel, periodoBreve, periodoFrase, type ModelloVersamento } from '../../utils/versamentiModelli'
 import { scaricaFile } from '../../utils/versamentiEml'
 import type { EmlPronto } from './genera'
 import { IconaDownload, IconaOcchio, btnPrimario, btnSecondario, etichettaCls, inputCls, messaggioErrore } from './ui'
 
 const fmtData = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`
 
-export function Finestra({ titolo, sottotitolo, onChiudi, children, piede, larga }: {
-  titolo: ReactNode; sottotitolo?: ReactNode; onChiudi: () => void; children: ReactNode; piede?: ReactNode; larga?: boolean
+export function Finestra({ titolo, sottotitolo, onChiudi, children, piede, larga, stretta }: {
+  titolo: ReactNode; sottotitolo?: ReactNode; onChiudi: () => void; children: ReactNode; piede?: ReactNode; larga?: boolean; stretta?: boolean
 }) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onChiudi() }
@@ -25,7 +25,7 @@ export function Finestra({ titolo, sottotitolo, onChiudi, children, piede, larga
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true"
       onClick={e => { if (e.target === e.currentTarget) onChiudi() }}>
-      <div className={`bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full ${larga ? 'max-w-5xl' : 'max-w-4xl'} max-h-[88vh] flex flex-col`}>
+      <div className={`bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full ${larga ? 'max-w-5xl' : stretta ? 'max-w-xl' : 'max-w-4xl'} max-h-[88vh] flex flex-col`}>
         <div className="px-6 py-4 border-b border-slate-800 flex items-start gap-3">
           <div className="min-w-0 flex-1">{titolo}{sottotitolo}</div>
           <button type="button" onClick={onChiudi} aria-label="Chiudi" className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800">✕</button>
@@ -236,6 +236,84 @@ export function AnteprimaEmlModal({ ente, rubrica, modelli, override, modelloEla
           </>
         )}
       </div>
+    </Finestra>
+  )
+}
+
+/**
+ * Finestra «mese mancante»: si apre al caricamento di una stampa SENZA
+ * colonna del mese (CSA senza «Suddivisione per mese»). Finche' non si
+ * conferma, il file non e' caricato e nulla va al server.
+ *   · Un mese    → tutte le righe sono di quel mese (come se ci fosse MESE);
+ *   · Un periodo → ogni importo e' la somma del periodo «da … a …».
+ * Senza una proposta dal nome del file i campi restano vuoti e Conferma non
+ * si attiva: niente mesi tirati a indovinare.
+ */
+export function MeseMancanteModal({ nomeFile, righe, iniziale, cambio, onConferma, onAnnulla }: {
+  nomeFile: string
+  righe: number
+  iniziale: { da: string; a: string; fonte: PropostaPeriodo['fonte'] | 'attuale' }
+  /** true: si cambia il periodo di un file gia' caricato. */
+  cambio: boolean
+  onConferma: (da: string, a: string) => void
+  onAnnulla: () => void
+}) {
+  const [modo, setModo] = useState<'mese' | 'periodo'>(iniziale.da && iniziale.a && iniziale.a !== iniziale.da ? 'periodo' : 'mese')
+  const [da, setDa] = useState(iniziale.da)
+  const [a, setA] = useState(iniziale.a || iniziale.da)
+  const fine = modo === 'mese' ? da : a
+  const errore = errorePeriodo(da, fine)
+  const primo = useRef<HTMLInputElement>(null)
+  useEffect(() => { primo.current?.focus() }, [])
+  const conferma = () => { if (!errore) onConferma(da, fine) }
+  const nota = {
+    nome:    <p className="text-xs text-emerald-300">Proposta letta dal nome del file: controlla e conferma.</p>,
+    stima:   <p className="text-xs text-amber-300">Proposta stimata: il mese prima della data di stampa scritta nel nome del file. Controlla prima di confermare.</p>,
+    nessuna: <p className="text-xs text-amber-300">Il nome del file non indica il periodo: inseriscilo tu.</p>,
+    attuale: null,
+  }[iniziale.fonte]
+  const scelta = (k: 'mese' | 'periodo', t: string, d: string) => (
+    <label className={`flex gap-2.5 items-start p-3 rounded-lg border cursor-pointer ${modo === k ? 'border-indigo-500 bg-indigo-950/30' : 'border-slate-700 hover:border-slate-600'}`}>
+      <input type="radio" name="vers-mese-modo" checked={modo === k} onChange={() => setModo(k)} className="accent-indigo-500 mt-0.5" />
+      <span><span className="block text-sm text-slate-100">{t}</span><span className="block text-xs text-slate-500 mt-0.5">{d}</span></span>
+    </label>
+  )
+  return (
+    <Finestra stretta onChiudi={onAnnulla}
+      titolo={<h3 className="text-base font-semibold text-white">{cambio ? 'Cambia il mese dei versamenti' : 'Il file non indica il mese dei versamenti'}</h3>}
+      sottotitolo={<p className="text-xs text-slate-500 mt-1"><span className="font-mono break-all">{nomeFile}</span> · {righe.toLocaleString('it-IT')} righe</p>}
+      piede={<>
+        <button type="button" className={btnSecondario} onClick={onAnnulla}>{cambio ? 'Annulla' : 'Annulla: non caricare il file'}</button>
+        <button type="button" className={btnPrimario} disabled={!!errore} onClick={conferma}>Conferma</button>
+      </>}>
+      <form className="px-6 py-5 flex flex-col gap-4" onSubmit={e => { e.preventDefault(); conferma() }}>
+        <p className="text-sm text-slate-300">La stampa è stata fatta in CSA senza «Suddivisione per mese»: indica a quale mese, o a quale periodo, si riferiscono gli importi.</p>
+        <div className="grid sm:grid-cols-2 gap-2">
+          {scelta('mese', 'Un mese', 'tutte le righe sono di quel mese')}
+          {scelta('periodo', 'Un periodo', 'ogni importo è la somma dei mesi da … a …')}
+        </div>
+        <div className="flex flex-wrap gap-4 items-end">
+          <div className="flex flex-col gap-1.5 w-48">
+            <label htmlFor="vers-mm-da" className={etichettaCls}>{modo === 'mese' ? 'Mese' : 'Da'}</label>
+            <input ref={primo} id="vers-mm-da" type="month" value={da} min="1990-01" max="2100-12"
+              onChange={e => { setDa(e.target.value); if (!a || a < e.target.value) setA(e.target.value) }} className={inputCls} />
+          </div>
+          {modo === 'periodo' && (
+            <div className="flex flex-col gap-1.5 w-48">
+              <label htmlFor="vers-mm-a" className={etichettaCls}>A</label>
+              <input id="vers-mm-a" type="month" value={a} min={da || '1990-01'} max="2100-12" onChange={e => setA(e.target.value)} className={inputCls} />
+            </div>
+          )}
+        </div>
+        {nota}
+        {errore
+          ? (da || fine) && <p className="text-xs text-red-300">{errore}</p>
+          : <p className="text-sm text-slate-300 border border-slate-800 bg-slate-950 rounded-lg px-3 py-2">
+              Nel testo della mail: <span className="text-white">«{periodoFrase(espandiMesi(da, fine))}»</span>
+              {modo === 'periodo' && <span className="text-slate-500"> · {espandiMesi(da, fine).length} mesi</span>}
+            </p>}
+        <button type="submit" className="hidden" aria-hidden="true" tabIndex={-1} />
+      </form>
     </Finestra>
   )
 }

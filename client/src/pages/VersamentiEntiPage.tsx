@@ -18,8 +18,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { versamentiApi, type VersamentoEnteApi } from '../api/endpoints'
 import { showToast } from '../components/ToastManager'
 import {
-  ANNO_PIU_MESE, OPZIONALI, RICHIESTE, aggregaEnti, colonnaMeseAuto, contaFontiNascita,
-  annoDaNomeFile, decodificaCsv, elabora, leggiFile, meseDaNomeFile, periodoDaNomeFile, type EnteAggregato, type FileVersamenti,
+  ANNO_PIU_MESE, OPZIONALI, RICHIESTE, aggregaEnti, colonnaMeseAuto, contaFontiNascita, espandiMesi,
+  annoDaNomeFile, decodificaCsv, elabora, leggiFile, propostaPeriodo, type EnteAggregato, type FileVersamenti, type PropostaPeriodo,
 } from '../utils/versamentiCsv'
 import { completaAllegati } from '../utils/versamentiAllegati'
 import { fmtEuro, meseBreve, modelloPer, periodoBreve, type ModelloVersamento } from '../utils/versamentiModelli'
@@ -31,7 +31,7 @@ import {
 } from '../components/versamenti/ui'
 import RubricaEntiTab from '../components/versamenti/RubricaEntiTab'
 import ModelliMailTab from '../components/versamenti/ModelliMailTab'
-import { AnteprimaEmlModal, DettaglioEnteModal } from '../components/versamenti/Modali'
+import { AnteprimaEmlModal, DettaglioEnteModal, MeseMancanteModal } from '../components/versamenti/Modali'
 import GuidaStampaCsa from '../components/versamenti/GuidaStampaCsa'
 import ConsultazioneTab from '../components/versamenti/ConsultazioneTab'
 
@@ -68,6 +68,11 @@ export default function VersamentiEntiPage() {
   const [anteprima, setAnteprima]     = useState<string | null>(null)
   const [generando, setGenerando]     = useState(false)
   const [trascina, setTrascina]       = useState(false)
+  // Finestra «mese mancante»: un file senza colonna del mese aspetta qui la
+  // conferma del periodo prima di essere caricato (cambio: file gia' caricato).
+  const [attesa, setAttesa] = useState<{
+    letto: FileVersamenti; iniziale: { da: string; a: string; fonte: PropostaPeriodo['fonte'] | 'attuale' }; cambio: boolean
+  } | null>(null)
   const inputFile = useRef<HTMLInputElement>(null)
 
   // ── Rubrica e modelli dal server ──────────────────────────
@@ -122,18 +127,51 @@ export default function VersamentiEntiPage() {
     if (f.size > 50 * 1024 * 1024) { showToast('File troppo grande (oltre 50 MB).', 'error'); return }
     const { testo, codifica } = decodificaCsv(await f.arrayBuffer())
     const letto = leggiFile(f.name, testo, codifica)
+    const col = colonnaMeseAuto(letto.headers)
+    // Senza colonna del mese (stampa CSA senza «Suddivisione per mese») il
+    // periodo si chiede SUBITO, in una finestra: il file si carica solo dopo
+    // la conferma. Se mancano le colonne obbligatorie si carica comunque, per
+    // mostrare quali mancano.
+    if (!col && RICHIESTE.every(c => letto.headers.includes(c))) {
+      setAttesa({ letto, iniziale: propostaPeriodo(f.name), cambio: false })
+      return
+    }
+    carica(letto, col, '', '')
+  }
+
+  function carica(letto: FileVersamenti, col: string, da: string, a: string) {
     setFile(letto)
-    setColMese(colonnaMeseAuto(letto.headers))
-    // Senza colonna del mese: il «da … a …» dal nome del file (GEN_DIC_2025),
-    // altrimenti il mese prima della data di stampa.
-    const pr = periodoDaNomeFile(f.name), m = meseDaNomeFile(f.name)
-    setMeseManuale(pr?.da ?? m)
-    setMeseManualeA(pr?.a ?? m)
-    setAnno(annoDaNomeFile(f.name))
+    setColMese(col)
+    setMeseManuale(da)
+    setMeseManualeA(a)
+    setAnno(annoDaNomeFile(letto.nome))
     setMesiSel(new Set())
     setNuovi(new Set())
     setOverride({})
     sincronizzati.current = ''
+  }
+
+  function confermaPeriodo(da: string, a: string) {
+    if (!attesa) return
+    if (attesa.cambio) { setColMese(''); setMeseManuale(da); setMeseManualeA(a); setMesiSel(new Set()) }
+    else carica(attesa.letto, '', da, a)
+    setAttesa(null)
+  }
+
+  /** Scegliendo «nessuna colonna» a file caricato, il periodo si chiede con la stessa finestra. */
+  function scegliColonnaMese(c: string) {
+    if (c === '' && file) {
+      setAttesa({
+        letto: file, cambio: true,
+        iniziale: meseManuale ? { da: meseManuale, a: meseManualeA || meseManuale, fonte: 'attuale' } : propostaPeriodo(file.nome),
+      })
+      return
+    }
+    setColMese(c); setMesiSel(new Set())
+  }
+  function cambiaPeriodo() {
+    if (!file) return
+    setAttesa({ letto: file, cambio: true, iniziale: { da: meseManuale, a: meseManualeA || meseManuale, fonte: 'attuale' } })
   }
 
   const aggregati = useMemo(() => (esito ? aggregaEnti(esito.righe, mesiSel, esito.periodo) : []), [esito, mesiSel])
@@ -303,10 +341,9 @@ export default function VersamentiEntiPage() {
 
           {file && esito && (
             <>
-              <InfoFile file={file} esito={esito} colMese={colMese} setColMese={c => { setColMese(c); setMesiSel(new Set()) }}
-                meseManuale={meseManuale} setMeseManuale={m => { setMeseManuale(m); setMesiSel(new Set()) }}
-                anno={anno} setAnno={a => { setAnno(a); setMesiSel(new Set()) }}
-                meseManualeA={meseManualeA} setMeseManualeA={m => { setMeseManualeA(m); setMesiSel(new Set()) }} />
+              <InfoFile file={file} esito={esito} colMese={colMese} setColMese={scegliColonnaMese}
+                meseManuale={meseManuale} meseManualeA={meseManualeA} onCambiaPeriodo={cambiaPeriodo}
+                anno={anno} setAnno={a => { setAnno(a); setMesiSel(new Set()) }} />
 
               {!esito.mancanti.length && (
                 <>
@@ -490,6 +527,16 @@ export default function VersamentiEntiPage() {
         </>
       )}
 
+      {attesa && (
+        <MeseMancanteModal
+          nomeFile={attesa.letto.nome} righe={attesa.letto.records.length} iniziale={attesa.iniziale} cambio={attesa.cambio}
+          onConferma={confermaPeriodo}
+          onAnnulla={() => {
+            if (!attesa.cambio) showToast(`${attesa.letto.nome} non caricato: serve il mese dei versamenti.`, 'info')
+            setAttesa(null)
+          }}
+        />
+      )}
       {enteDettaglio && (
         <DettaglioEnteModal
           ente={enteDettaglio} rubrica={entiMap.get(enteDettaglio.codice) ?? null} modello={modelloDi(enteDettaglio.codice)}
@@ -529,17 +576,18 @@ function Riquadro({ k, v, s, cls = 'text-white' }: { k: string; v: string; s: st
   )
 }
 
-function InfoFile({ file, esito, colMese, setColMese, meseManuale, setMeseManuale, anno, setAnno, meseManualeA, setMeseManualeA }: {
+function InfoFile({ file, esito, colMese, setColMese, meseManuale, meseManualeA, onCambiaPeriodo, anno, setAnno }: {
   file: FileVersamenti; esito: ReturnType<typeof elabora>
   colMese: string; setColMese: (c: string) => void
-  meseManuale: string; setMeseManuale: (m: string) => void
+  meseManuale: string; meseManualeA: string; onCambiaPeriodo: () => void
   anno: string; setAnno: (a: string) => void
-  meseManualeA: string; setMeseManualeA: (m: string) => void
 }) {
   const opzioni: Array<[string, string]> = []
   if (file.headers.includes('ANNO') && file.headers.includes('MESE')) opzioni.push([ANNO_PIU_MESE, 'ANNO + MESE'])
-  file.headers.forEach(h => opzioni.push([h, h]))
-  opzioni.push(['', 'nessuna: importi sommati sul periodo'])
+  // Le colonne senza nome (il «;» finale delle stampe CSA) non si offrono:
+  // avrebbero lo stesso valore '' di «nessuna» e la tendina sembrerebbe vuota.
+  file.headers.filter(Boolean).forEach(h => opzioni.push([h, h]))
+  opzioni.push(['', 'nessuna: mese indicato al caricamento'])
   const fonti = contaFontiNascita(esito.righe)
   const req = new Set<string>(RICHIESTE), opz = new Set<string>(OPZIONALI)
   return (
@@ -581,16 +629,17 @@ function InfoFile({ file, esito, colMese, setColMese, meseManuale, setMeseManual
               </select>
             </div>
             {!colMese && (
-              <>
-                <div className="flex flex-col gap-1.5 w-44">
-                  <label htmlFor="vers-mese-man" className={etichettaCls}>Periodo: da</label>
-                  <input id="vers-mese-man" type="month" value={meseManuale} onChange={e => setMeseManuale(e.target.value)} className={inputCls} />
+              <div className="flex flex-col gap-1.5">
+                <span className={etichettaCls}>{meseManualeA && meseManualeA !== meseManuale ? 'Periodo' : 'Mese'}</span>
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm ${meseManuale ? 'text-white' : 'text-amber-400'}`}>
+                    {meseManuale ? periodoBreve(espandiMesi(meseManuale, meseManualeA || meseManuale)) : 'non indicato'}
+                  </span>
+                  <button type="button" onClick={onCambiaPeriodo} className={`${btnPiccolo} bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700`}>
+                    {meseManuale ? 'Cambia' : 'Indica il mese'}
+                  </button>
                 </div>
-                <div className="flex flex-col gap-1.5 w-44">
-                  <label htmlFor="vers-mese-man-a" className={etichettaCls}>a</label>
-                  <input id="vers-mese-man-a" type="month" value={meseManualeA} min={meseManuale} onChange={e => setMeseManualeA(e.target.value)} className={inputCls} />
-                </div>
-              </>
+              </div>
             )}
             {colMese && colMese !== ANNO_PIU_MESE && esito.serveAnno && (
               <div className="flex flex-col gap-1.5 w-40">
@@ -601,7 +650,7 @@ function InfoFile({ file, esito, colMese, setColMese, meseManuale, setMeseManual
             )}
           </div>
           {!colMese && (
-            <p className="text-xs text-slate-500 -mt-2">Il file non ha la colonna del mese (stampa CSA senza «Suddivisione per mese»): gli importi sono la somma del periodo indicato, che finisce nel testo della mail.</p>
+            <p className="text-xs text-slate-500 -mt-2">Il file non ha la colonna del mese (stampa CSA senza «Suddivisione per mese»): il mese o il periodo confermato al caricamento vale per tutte le righe e finisce nel testo della mail. Con un periodo, ogni importo è la somma dei suoi mesi.</p>
           )}
           {colMese && colMese !== ANNO_PIU_MESE && esito.serveAnno && (
             <p className="text-xs text-slate-500 -mt-2">La colonna {colMese} ha solo il numero del mese: l'anno viene dal nome del file{anno ? '' : ' (non trovato: indicalo)'}.</p>

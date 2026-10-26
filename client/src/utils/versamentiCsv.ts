@@ -144,6 +144,35 @@ export function meseDaNomeFile(nome: string): string {
   return ym(a, m) ?? ''
 }
 
+/**
+ * Il periodo da proporre quando il file NON ha la colonna del mese
+ * (finestra «mese mancante» al caricamento):
+ *   · 'nome'    → scritto nel nome del file (…_GEN_DIC_2025);
+ *   · 'stima'   → il mese prima della data di stampa (…_20260706_…): va controllato;
+ *   · 'nessuna' → niente da proporre: lo indica l'utente.
+ */
+export interface PropostaPeriodo { da: string; a: string; fonte: 'nome' | 'stima' | 'nessuna' }
+
+export function propostaPeriodo(nome: string): PropostaPeriodo {
+  const p = periodoDaNomeFile(nome)
+  if (p) return { ...p, fonte: 'nome' }
+  const m = meseDaNomeFile(nome)
+  return m ? { da: m, a: m, fonte: 'stima' } : { da: '', a: '', fonte: 'nessuna' }
+}
+
+/** Massimo cinque anni in un solo periodo: oltre e' quasi certamente un errore di battitura. */
+export const MAX_MESI_PERIODO = 60
+
+/** null se il periodo va bene, altrimenti il motivo da mostrare. */
+export function errorePeriodo(da: string, a: string): string | null {
+  const valido = (x: string) => /^\d{4}-(0[1-9]|1[0-2])$/.test(x) && +x.slice(0, 4) >= 1990 && +x.slice(0, 4) <= 2100
+  if (!valido(da)) return 'Indica il mese.'
+  if (!valido(a)) return 'Indica il mese finale.'
+  if (a < da) return 'Il mese finale viene prima di quello iniziale.'
+  if (espandiMesi(da, a).length > MAX_MESI_PERIODO) return 'Periodo troppo lungo (oltre cinque anni).'
+  return null
+}
+
 // ── Importo ───────────────────────────────────────────────────
 
 /** '1.234,56' | '1234,56' | '1234.56' | '-12,5' → centesimi interi. Non numerico → null. */

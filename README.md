@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.10.26.4-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.10.26.5-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -269,7 +269,7 @@ Menu *Modulo Versamenti → Versamenti enti*, **per tutti gli utenti**. Porting 
 1. **Carica il file** (trascinandolo o con un clic). Colonne obbligatorie: `ENTE`, `ENTE_DESCR`, `VOCE`, `MATRICOLA`, `NOME`, `IMP_TOT`. Facoltative: `DATA_NASC` e `COD_FISC`. Separatore `;`, `,` o TAB, codifica UTF-8 o Windows-1252, campi tra virgolette: tutto riconosciuto da solo. Il riquadro delle colonne le colora: verdi le obbligatorie, viola quelle della data di nascita, azzurra quella del mese, grigie le ignorate.
 2. **Il mese.** Dipende da come e' stata fatta la *Stampa versamenti* in CSA:
    - **con «Suddivisione per mese»** il file ha la colonna `MESE` con il **solo numero** del mese (`01`…`12`): l'**anno** si legge dal nome del file (`STAMPA_VERSAMENTI_20260706_GEN_DIC_2025` → 2025) e compare il campo *Anno* per correggerlo. I chip dei mesi filtrano totali, allegati ed EML; si puo' fare un EML per mese;
-   - **senza «Suddivisione per mese»** la colonna non c'e' e ogni importo e' la **somma del periodo** *da … a …* scelto in CSA: il periodo si legge dal nome del file (`GEN_DIC_2025` → gennaio–dicembre 2025; `NOV_2025` → solo novembre; in mancanza, il mese prima della data di stampa) e si corregge con i campi *Periodo: da / a*. Il testo della mail dice «nei mesi da … a …».
+   - **senza «Suddivisione per mese»** la colonna non c'e': appena caricato il file si apre la finestra **«Il file non indica il mese dei versamenti»** (dalla 26.10.26.5). Si sceglie **un mese** (tutte le righe sono di quel mese; la mail dice «nel mese di …») o **un periodo** *da … a …* (ogni importo e' la somma dei mesi; la mail dice «nei mesi da … a …»). I campi arrivano compilati dal nome del file (`GEN_DIC_2025` → gennaio–dicembre 2025; `NOV_2025` → novembre) o, con la sola data di stampa, con il mese precedente segnato come **stima da controllare**; senza nulla da proporre restano vuoti e *Conferma* non si attiva. Finche' non si conferma il file **non e' caricato** e al server non va niente; *Annulla* (o Esc) lo scarta. Dopo, il riquadro del file mostra il mese o il periodo con **Cambia**, che riapre la stessa finestra; la stessa finestra si apre scegliendo «nessuna» come colonna del mese.
    Riconosciute anche `ANNO`+`MESE` e colonne come `ANNO_MESE`, `COMPETENZA`, `PERIODO`, `MESE_RIF` (formati `202503`, `2025-03`, `03/2025`, `15/03/2025`, `MAR 2025`); la colonna del mese si puo' sempre scegliere a mano.
    Le altre colonne della stampa (IBAN, `ABI`, `CAB`, `CONTO_CORR`, `RUOLO`, `ALIQUOTA`, `PARTI`, `IMPONIBILE`) si ignorano.
 3. **Data di nascita**: prima `DATA_NASC` del CSV (`12/03/1968`, `1968-03-12`, `19680312`); se manca o non si legge, dal **codice fiscale** (omocodia compresa, carattere di controllo verificato; un anno che darebbe meno di 14 anni e' del Novecento). Senza entrambi: «—». Sotto le colonne: quante persone da CSV, quante dal CF, quante senza.
@@ -462,6 +462,14 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.10.26.5
+**Versamenti enti: finestra per il mese quando il CSV non ce l'ha**
+
+- Una stampa CSA fatta **senza «Suddivisione per mese»** non ha la colonna del mese. Ora, appena caricata, si apre una **finestra flottante** che chiede **un mese** o **un periodo da … a …**, gia' compilata dal nome del file quando possibile (con la sola data di stampa: stima segnata da controllare; senza nulla: campi vuoti e *Conferma* spento). Si vede la frase che finira' nella mail. *Conferma* (o Invio) carica il file e l'elaborazione procede da sola; *Annulla* (o Esc) non lo carica. Prima della conferma **al server non va nulla**, nemmeno codice e descrizione degli enti.
+- Nel riquadro del file i due campi *Periodo: da / a* sono sostituiti dal mese o periodo scelto con il pulsante **Cambia**; scegliere «nessuna» come colonna del mese apre la stessa finestra.
+- **Correzione**: la tendina *Colonna del mese* sembrava vuota con le stampe CSA, perche' la colonna senza nome del «;» finale aveva lo stesso valore di «nessuna». Le colonne senza nome non si offrono piu'.
+- Solo client, nessuna migrazione. Nuovo test in `versamentiCsv.test.ts` (proposta del periodo e controlli); provata la pagina vera con le API simulate: sei casi (nome con periodo, mese singolo, cambio con Invio, nome senza periodo con Annulla, sola data di stampa con Esc, file con colonna MESE: nessuna finestra).
 
 ### 26.10.26.4
 **Versamenti enti: via la barra di scorrimento accanto alle schede**

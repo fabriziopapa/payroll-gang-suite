@@ -176,3 +176,17 @@ test('file senza colonna del mese: importi sul periodo «da … a …», scritto
   // con la colonna del mese il periodo e' quello dei mesi
   assert.equal(elabora(leggiFile('x.csv', fileDiProva(), 'UTF-8'), ANNO_PIU_MESE, '').periodo, null)
 })
+
+test('mese mancante: proposta dal nome del file, stima dalla data di stampa, niente', async () => {
+  const { propostaPeriodo, errorePeriodo } = await import('./versamentiCsv.ts')
+  assert.deepEqual(propostaPeriodo('STAMPA_VERSAMENTI_20260706_GEN_DIC_2025.CSV'), { da: '2025-01', a: '2025-12', fonte: 'nome' })
+  assert.deepEqual(propostaPeriodo('STAMPA_VERSAMENTI_20260706_NOV_2025.CSV'), { da: '2025-11', a: '2025-11', fonte: 'nome' })
+  assert.deepEqual(propostaPeriodo('STAMPA_VERSAMENTI_20260706.CSV'), { da: '2026-06', a: '2026-06', fonte: 'stima' })
+  assert.deepEqual(propostaPeriodo('versamenti.csv'), { da: '', a: '', fonte: 'nessuna' })
+  assert.equal(errorePeriodo('2025-03', '2025-03'), null)
+  assert.equal(errorePeriodo('', ''), 'Indica il mese.')
+  assert.equal(errorePeriodo('2025-13', '2025-13'), 'Indica il mese.')
+  assert.equal(errorePeriodo('2025-05', '2025-02'), 'Il mese finale viene prima di quello iniziale.')
+  assert.equal(errorePeriodo('2020-01', '2025-12'), 'Periodo troppo lungo (oltre cinque anni).')
+  assert.equal(errorePeriodo('1989-12', '1989-12'), 'Indica il mese.')
+})
