@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.10.26.3-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.10.26.4-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -462,6 +462,12 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.10.26.4
+**Versamenti enti: via la barra di scorrimento accanto alle schede**
+
+- Accanto alle schede (*Elaborazione · Rubrica enti · Modelli mail · Consultazione*) compariva una piccola barra di scorrimento verticale con le frecce. La causa: la riga delle schede era diventata scorrevole in orizzontale (per i telefoni) e il browser rende scorrevole anche l'asse verticale, dove il bordo attivo sporge di un pixel. Ora la riga va a capo sugli schermi stretti invece di scorrere.
+- Solo client, nessuna migrazione.
 
 ### 26.10.26.3
 **Versamenti enti: scheda Consultazione — cercare, selezionare, sommare, esportare**
