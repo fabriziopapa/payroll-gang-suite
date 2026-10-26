@@ -57,6 +57,15 @@ cedolino_expected.json
 *.bak
 *.sql.gz
 dump.sql
+# Database locali e archivi (26.10.26.3): un sqlite di un programma
+# vecchio (es. GestioneSaldiEnti) o uno ZIP di allegati esportati dalla
+# Consultazione contengono dati personali.
+*.sqlite
+*.sqlite3
+*.db
+*.zip
+*.tgz
+*.tar.gz
 
 # ── File temporanei / junk ───────────────────────────────────
 *.txt

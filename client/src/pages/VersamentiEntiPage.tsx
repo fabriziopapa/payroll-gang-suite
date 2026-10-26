@@ -11,7 +11,7 @@
 // server e non si salvano. Al server vanno codice e descrizione degli
 // enti (per la rubrica) e, alla generazione, i soli conteggi per l'audit.
 //
-// Tre schede: Elaborazione · Rubrica enti · Modelli mail.
+// Quattro schede: Elaborazione · Rubrica enti · Modelli mail · Consultazione.
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -33,8 +33,9 @@ import RubricaEntiTab from '../components/versamenti/RubricaEntiTab'
 import ModelliMailTab from '../components/versamenti/ModelliMailTab'
 import { AnteprimaEmlModal, DettaglioEnteModal } from '../components/versamenti/Modali'
 import GuidaStampaCsa from '../components/versamenti/GuidaStampaCsa'
+import ConsultazioneTab from '../components/versamenti/ConsultazioneTab'
 
-type Scheda = 'elab' | 'rub' | 'mod'
+type Scheda = 'elab' | 'rub' | 'mod' | 'con'
 
 const CHIAVE_MITTENTE = 'pgs.versamenti.mittente'
 function leggiMittente(): string {
@@ -158,7 +159,8 @@ export default function VersamentiEntiPage() {
     return emlPerEnte(a, e.descrizione, e.email, m, modo === 'mese', mittente)
   }
 
-  async function genera(lista: EnteAggregato[]) {
+  /** selezione: EML costruiti con i soli versamenti scelti in Consultazione. */
+  async function genera(lista: EnteAggregato[], selezione = false) {
     if (!file || !lista.length) return
     setGenerando(true)
     try {
@@ -168,7 +170,8 @@ export default function VersamentiEntiPage() {
       // Audit prima del download: se non si registra, non si scarica.
       await versamentiApi.eventoGenerazione({
         file: file.nome, enti: lista.map(a => a.codice), eml: emls.length,
-        righe: emls.reduce((s, x) => s + x.righe, 0), mesi: esito?.periodo ?? [...mesiSel].sort(), modo,
+        righe: emls.reduce((s, x) => s + x.righe, 0), modo, selezione,
+        mesi: esito?.periodo ?? (selezione ? [...new Set(lista.flatMap(a => a.mesi))].sort() : [...mesiSel].sort()),
       })
       for (const x of emls) { scaricaFile(x.nomeFile, x.sorgente, 'message/rfc822'); if (emls.length > 1) await pausa(350) }
       showToast(emls.length === 1 ? `Scaricato ${emls[0]!.nomeFile}` : `Scaricati ${emls.length} EML`, 'success')
@@ -206,7 +209,7 @@ export default function VersamentiEntiPage() {
 
   // ── Render ────────────────────────────────────────────────
   const tabCls = (on: boolean) =>
-    `px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${on ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`
+    `whitespace-nowrap shrink-0 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${on ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`
 
   return (
     <div className="p-6 max-w-6xl mx-auto flex flex-col gap-6">
@@ -218,7 +221,7 @@ export default function VersamentiEntiPage() {
         </p>
       </div>
 
-      <div className="flex gap-1 border-b border-slate-800" role="tablist">
+      <div className="flex gap-1 border-b border-slate-800 overflow-x-auto" role="tablist">
         <button role="tab" aria-selected={scheda === 'elab'} className={tabCls(scheda === 'elab')} onClick={() => setScheda('elab')}>Elaborazione</button>
         <button role="tab" aria-selected={scheda === 'rub'} className={tabCls(scheda === 'rub')} onClick={() => setScheda('rub')}>
           Rubrica enti <span className="ml-1 text-xs text-slate-500">{enti.length}</span>
@@ -226,6 +229,7 @@ export default function VersamentiEntiPage() {
         <button role="tab" aria-selected={scheda === 'mod'} className={tabCls(scheda === 'mod')} onClick={() => setScheda('mod')}>
           Modelli mail <span className="ml-1 text-xs text-slate-500">{modelli.length}</span>
         </button>
+        <button role="tab" aria-selected={scheda === 'con'} className={tabCls(scheda === 'con')} onClick={() => setScheda('con')}>Consultazione</button>
       </div>
 
       {!caricato && <p className="text-sm text-slate-500">Caricamento…</p>}
@@ -235,6 +239,25 @@ export default function VersamentiEntiPage() {
       )}
       {caricato && scheda === 'mod' && (
         <ModelliMailTab modelli={modelli} enti={enti} esempio={esempioModelli} onRicarica={ricaricaModelli} onEntiCambiati={() => versamentiApi.enti().then(r => setEnti(r.enti)).catch(() => {})} />
+      )}
+
+      {/* Consultazione: resta montata (nascosta) per non perdere selezione e filtri cambiando scheda. */}
+      {caricato && scheda === 'con' && !(file && esito && !esito.mancanti.length && esito.righe.length) && (
+        <div className={`${cardCls} p-8 text-center text-sm text-slate-400`}>
+          Carica prima la stampa versamenti nella scheda{' '}
+          <button type="button" className="text-indigo-400 hover:text-indigo-300" onClick={() => setScheda('elab')}>Elaborazione</button>.
+          Qui si cercano, si selezionano e si esportano i versamenti del file, che restano nel browser.
+        </div>
+      )}
+      {caricato && file && esito && !esito.mancanti.length && esito.righe.length > 0 && (
+        <div hidden={scheda !== 'con'}>
+          <ConsultazioneTab
+            file={file.nome} righe={esito.righe} mesi={esito.mesi} periodo={esito.periodo}
+            mesiSel={mesiSel} onMese={cliccaMese} entiMap={entiMap} modelloDi={modelloDi}
+            modo={modo} setModo={setModo} generando={generando}
+            onGeneraEml={lista => genera(lista, true)}
+          />
+        </div>
       )}
 
       {caricato && scheda === 'elab' && (

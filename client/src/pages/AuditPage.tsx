@@ -57,6 +57,7 @@ const AZIONE_META: Record<string, AzioneMeta> = {
   VERSAMENTI_MODELLO_PREDEFINITO:{ label: 'Versamenti: modello predefinito', tono: 'warn' },
   VERSAMENTI_MODELLO_ELIMINATO:  { label: 'Versamenti: modello eliminato', tono: 'danger' },
   VERSAMENTI_EML_GENERATI:       { label: 'Versamenti: EML generati',     tono: 'ok' },
+  VERSAMENTI_ESPORTAZIONE:       { label: 'Versamenti: esportazione',     tono: 'warn' },
 }
 
 const TONO_CLS: Record<Tono, string> = {
@@ -117,7 +118,14 @@ function describeDettagli(azione: string, dettagli: unknown): string {
     case 'VERSAMENTI_EML_GENERATI': {
       const enti = Array.isArray(d.enti) ? d.enti.length : 0
       const mesi = Array.isArray(d.mesi) ? (d.mesi as string[]) : []
-      return [val('file'), `${val('eml')} EML`, `${enti} enti`, `${val('righe')} righe`, mesi.length ? `mesi ${mesi[0]}${mesi.length > 1 ? '…' + mesi[mesi.length - 1] : ''}` : '']
+      return [val('file'), `${val('eml')} EML`, `${enti} enti`, `${val('righe')} righe`, mesi.length ? `mesi ${mesi[0]}${mesi.length > 1 ? '…' + mesi[mesi.length - 1] : ''}` : '',
+        d.selezione === true ? 'solo i selezionati (Consultazione)' : '']
+        .filter(Boolean).join(' · ')
+    }
+    case 'VERSAMENTI_ESPORTAZIONE': {
+      const enti = Array.isArray(d.enti) ? d.enti.length : 0
+      return [val('file'), String(d.formato ?? '').toUpperCase(), d.modo === 'ente' ? `un file per ente (${val('file_generati')} file)` : 'file unico',
+        `${enti} enti`, `${val('righe')} righe`, `${val('persone')} persone`, d.codiceFiscale === true ? 'CON codice fiscale' : 'senza codice fiscale']
         .filter(Boolean).join(' · ')
     }
     case 'LOGIN_FAILED':

@@ -14,7 +14,7 @@ import { IconaDownload, IconaOcchio, btnPrimario, btnSecondario, etichettaCls, i
 
 const fmtData = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`
 
-function Finestra({ titolo, sottotitolo, onChiudi, children, piede, larga }: {
+export function Finestra({ titolo, sottotitolo, onChiudi, children, piede, larga }: {
   titolo: ReactNode; sottotitolo?: ReactNode; onChiudi: () => void; children: ReactNode; piede?: ReactNode; larga?: boolean
 }) {
   useEffect(() => {

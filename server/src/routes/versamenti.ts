@@ -18,7 +18,8 @@
 //   PUT    /modelli/:id                modello                               → { modello }
 //   POST   /modelli/:id/predefinito                                          → { modello }
 //   DELETE /modelli/:id                                                      → { entiRiportati }
-//   POST   /eventi/generazione         { enti[], eml, righe, mesi[], modo }  → { ok }
+//   POST   /eventi/generazione         { enti[], eml, righe, mesi[], modo, selezione? } → { ok }
+//   POST   /eventi/esportazione        { formato, modo, enti[], righe, persone, file_generati, codiceFiscale } → { ok }
 // ============================================================
 
 import type { FastifyInstance, FastifyRequest } from 'fastify'
@@ -204,8 +205,28 @@ export async function versamentiRoutes(app: FastifyInstance): Promise<void> {
       righe: z.number().int().min(0).max(10_000_000),
       mesi:  z.array(MESE).min(1).max(240),
       modo:  z.enum(['unico', 'mese']),
+      // EML costruiti con i soli versamenti scelti nella Consultazione
+      selezione: z.boolean().optional(),
     }).parse(request.body)
     await audit(request, 'VERSAMENTI_EML_GENERATI', b.enti.length === 1 ? b.enti[0] : undefined, b)
+    return reply.send({ ok: true })
+  })
+
+  // Esportazione CSV/PDF dalla Consultazione: anche qui solo l'evento.
+  // I file si costruiscono nel browser; il server registra chi ha esportato
+  // quanto (enti, righe, persone) e se con il codice fiscale.
+  app.post('/eventi/esportazione', auth, async (request, reply) => {
+    const b = z.object({
+      file:          rigaSicura(200),
+      formato:       z.enum(['csv', 'pdf']),
+      modo:          z.enum(['unico', 'ente']),
+      enti:          z.array(CODICE).min(1).max(MAX_ENTI),
+      righe:         z.number().int().min(1).max(10_000_000),
+      persone:       z.number().int().min(1).max(10_000_000),
+      file_generati: z.number().int().min(1).max(MAX_ENTI),
+      codiceFiscale: z.boolean(),
+    }).parse(request.body)
+    await audit(request, 'VERSAMENTI_ESPORTAZIONE', b.enti.length === 1 ? b.enti[0] : undefined, b)
     return reply.send({ ok: true })
   })
 }

@@ -15,9 +15,15 @@ import type { RigaVersamento } from './versamentiCsv'
 import { applica, contesto, fmtEuro, meseLabel, periodoBreve, periodoFile, type Contesto } from './versamentiModelli'
 
 export type ChiaveColonna = 'NOME' | 'DATA_NASCITA' | 'MATRICOLA' | 'COD_FISC' | 'MESE' | 'VOCE' | 'IMPORTO'
+/**
+ * Colonne in piu' per l'esportazione dalla scheda Consultazione, dove un
+ * file puo' contenere piu' enti. Non sono ammesse nei modelli mail (il
+ * server le rifiuta): un allegato e' sempre di un ente solo.
+ */
+export type ChiaveEstesa = ChiaveColonna | 'ENTE' | 'DESCR_ENTE'
 
 export interface ColonnaAllegato {
-  k:          ChiaveColonna
+  k:          ChiaveEstesa
   csv:        string
   pdf:        string
   on:         boolean
@@ -28,7 +34,8 @@ export interface ColonnaAllegato {
 export interface AllegatiConfig {
   nomeEml:      string
   nomeAllegati: string
-  ordine:       'mese' | 'nome' | 'importo'
+  /** 'ente' solo per l'esportazione dalla Consultazione (righe di piu' enti). */
+  ordine:       'mese' | 'nome' | 'importo' | 'ente'
   csv: { attivo: boolean; sep: ';' | ',' | 'tab'; decimali: 'virgola' | 'punto'; codifica: 'w1252' | 'utf8bom'; intestazione: boolean }
   pdf: { attivo: boolean; titolo: string; orient: 'p' | 'l'; subtotali: boolean; totale: boolean }
   colonne:      ColonnaAllegato[]
@@ -36,7 +43,7 @@ export interface AllegatiConfig {
 
 const fmtData = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`
 
-export const COLDEF: Record<ChiaveColonna, {
+export const COLDEF: Record<ChiaveEstesa, {
   nome: string; peso: number; num?: true; pii?: true
   csv: (r: RigaVersamento) => string; pdf?: (r: RigaVersamento) => string
 }> = {
@@ -47,6 +54,8 @@ export const COLDEF: Record<ChiaveColonna, {
   MESE:         { nome: 'Mese',            peso: 1.4, csv: r => r.mese, pdf: r => meseLabel(r.mese) },
   VOCE:         { nome: 'Voce',            peso: 1,   csv: r => r.voce },
   IMPORTO:      { nome: 'Importo',         peso: 1.4, csv: () => '', num: true },
+  ENTE:         { nome: 'Codice ente',     peso: 1,   csv: r => r.ente },
+  DESCR_ENTE:   { nome: 'Ente',            peso: 2.6, csv: r => r.descr || r.ente },
 }
 
 export function allegatiDefault(): AllegatiConfig {
@@ -84,6 +93,8 @@ export function ordina(righe: readonly RigaVersamento[], ordine: AllegatiConfig[
     mese:    (a, b) => a.mese.localeCompare(b.mese) || a.nome.localeCompare(b.nome) || a.voce.localeCompare(b.voce),
     nome:    (a, b) => a.nome.localeCompare(b.nome) || a.mese.localeCompare(b.mese) || a.voce.localeCompare(b.voce),
     importo: (a, b) => b.cents - a.cents || a.nome.localeCompare(b.nome),
+    ente:    (a, b) => (a.descr || a.ente).localeCompare(b.descr || b.ente) || a.ente.localeCompare(b.ente)
+      || a.nome.localeCompare(b.nome) || a.mese.localeCompare(b.mese) || a.voce.localeCompare(b.voce),
   }
   return [...righe].sort(cmp[ordine] ?? cmp.mese)
 }
@@ -167,18 +178,31 @@ export async function pdfBytes(
     doc.setDrawColor(225); doc.line(X0, y + 1.6, X0 + W, y + 1.6)
     y += 5.6
   }
+  // L'etichetta di un totale occupa anche le colonne vuote che la seguono
+  // fino all'importo: «Totale Unione Personale …» non si tronca nella
+  // colonna stretta del codice ente.
   const rigaTotale = (etichetta: string, cents: number) => {
     if (iImp < 0 || !cols.length) return
-    const v = cols.map(() => ''); v[0] = etichetta; v[iImp] = fmtEuro(cents)
-    riga(v, true)
+    if (y > YMAX) { doc.addPage(); y = 18; intestazione() }
+    const largo = cols.slice(0, iImp).reduce((s, c) => s + c.w, 0)
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9)
+    testo(etichetta, X0, largo, false)
+    let x = X0; for (let i = 0; i < iImp; i++) x += cols[i]!.w
+    testo(fmtEuro(cents), x, cols[iImp]!.w, true)
+    doc.setDrawColor(225); doc.line(X0, y + 1.6, X0 + W, y + 1.6)
+    y += 5.6
   }
 
   intestazione()
-  const subtotali = multi && cfg.pdf.subtotali && cfg.ordine === 'mese'
-  let corrente: string | null = null, sub = 0, tot = 0
-  const chiudiMese = () => { if (subtotali && corrente) rigaTotale(`Totale ${meseLabel(corrente)}`, sub) }
+  // Subtotali: per mese negli allegati; per ente nell'esportazione di piu' enti.
+  const perEnte = cfg.ordine === 'ente'
+  const gruppo = (r: RigaVersamento) => (perEnte ? r.ente : r.mese)
+  const etichetta = (r: RigaVersamento) => (perEnte ? r.descr || r.ente : meseLabel(r.mese))
+  const subtotali = perEnte ? new Set(righe.map(r => r.ente)).size > 1 : multi && cfg.pdf.subtotali && cfg.ordine === 'mese'
+  let corrente: string | null = null, nomeGruppo = '', sub = 0, tot = 0
+  const chiudiMese = () => { if (subtotali && corrente) rigaTotale(`Totale ${nomeGruppo}`, sub) }
   for (const r of ordina(righe, cfg.ordine)) {
-    if (subtotali && r.mese !== corrente) { chiudiMese(); corrente = r.mese; sub = 0 }
+    if (subtotali && gruppo(r) !== corrente) { chiudiMese(); corrente = gruppo(r); nomeGruppo = etichetta(r); sub = 0 }
     sub += r.cents; tot += r.cents
     riga(cols.map(c => COLDEF[c.k].num ? fmtEuro(r.cents) : (COLDEF[c.k].pdf ?? COLDEF[c.k].csv)(r)))
   }

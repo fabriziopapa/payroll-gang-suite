@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.10.26.2-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.10.26.3-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -68,6 +68,8 @@ payroll-gang-suite/
 │                                # versamentiModelli.ts / versamentiAllegati.ts / versamentiEml.ts
 │                                #   (+ versamentiDocumenti.test.ts): segnaposto, CSV/PDF allegati, EML per Outlook
 │                                # versamentiRubrica.ts (+ test): import della rubrica enti (es. dal Java), anteprima
+│                                # versamentiConsultazione.ts (+ test): ricerca, persone, selezione, somme, export
+│                                # zipStore.ts (+ test): ZIP senza compressione per «un file per ente»
 ├── server/                      # API REST Fastify
 │   ├── sql/
 │   │   ├── proprieta_postgres.sql  # Proprieta' oggetti al superutente (serve dopo un restore da pannello)
@@ -277,6 +279,20 @@ Menu *Modulo Versamenti → Versamenti enti*, **per tutti gli utenti**. Porting 
 6. **Genera**: «Genera» su un ente o «Scarica tutti gli EML». Opzioni: *uno per ente con tutti i mesi* oppure *uno per ente per ciascun mese*; modello di ciascun ente o uno per tutti; anteprima di ogni EML (testo, allegati, intestazioni) con la possibilita' di cambiare modello solo per quell'ente o *usarlo sempre*. Esclusi da «Scarica tutti»: enti senza email, disabilitati, con totale ≤ 0 (evidenziati in ambra). Clic sulla riga: dettaglio dell'ente con subtotali per mese e *Solo CSV* / *Solo PDF*.
 7. **Outlook**: si apre l'`.eml` scaricato; e' una bozza (`X-Unsent: 1`) con destinatari, oggetto, testo e allegati, da controllare e inviare.
 
+### Consultazione (dalla 26.10.26.3)
+
+Scheda *Consultazione* (`components/versamenti/ConsultazioneTab.tsx`, logica in `utils/versamentiConsultazione.ts`): si cercano, si selezionano e si esportano i versamenti del file caricato. Come il resto del modulo lavora **solo nel browser**.
+
+- **Enti** (colonna a sinistra): ricerca per codice o descrizione, filtri *Abilitati / Con email / Senza email*, *Seleziona i visibili* / *Nessuno*; per ciascuno persone, righe e totale. Nessun ente scelto = tutti.
+- **Persone e versamenti**: ricerca per nominativo, matricola o codice fiscale (piu' parole, senza accenti: «nicolo» trova «NICOLÒ»), mesi (gli stessi dell'Elaborazione), voce. Due viste: **per persona** (matricola, nascita, enti, mesi, versamenti, totale; si espande per vedere e scegliere i singoli versamenti) e **per versamento**. Colonne ordinabili, pagine da 50, codice fiscale nascosto finche' non si spunta *Mostra codice fiscale*.
+- **Selezione**: casella su riga, persona, pagina o *tutti i risultati* (anche delle pagine non visibili). La selezione resta cambiando filtro e scheda; la barra dice quanti selezionati non si vedono con i filtri attuali (*togli*). Cambiando file riparte da zero.
+- **Somme** nella barra in basso: risultati del filtro e selezionati (versamenti, persone, enti, **totale**), in centesimi interi. *Riepilogo*: totali per ente e per mese della selezione.
+- **Esportazione dei soli selezionati**:
+  - **CSV** o **PDF**, **file unico** (righe ordinate per ente; nel PDF il subtotale di ogni ente e il totale) oppure **un file per ente** in uno **ZIP** (`zipStore.ts`, nessuna libreria in piu'). Colonne a scelta in ordine fisso (codice ente, ente, nominativo, data di nascita, matricola, codice fiscale, mese, voce, importo); il **codice fiscale parte spento** e accenderlo mostra un avviso. CSV con separatore e codifica a scelta, protezione dalle formule (F-10) dello stesso motore degli allegati;
+  - **EML dei selezionati**: uno per ente (o uno per ente per mese), col modello dell'ente; testo, totale, CSV e PDF contengono **solo i versamenti scelti**. Esclusi, con il motivo, gli enti disabilitati o senza email.
+- **Audit prima del download** (se non si registra, non si scarica): `VERSAMENTI_ESPORTAZIONE` con nome del file, formato, file unico o per ente, codici degli enti, numero di righe, persone e file, e **se c'era il codice fiscale**; per gli EML il solito `VERSAMENTI_EML_GENERATI` con `selezione: true`. Mai nominativi, matricole o codici fiscali.
+- Sul file reale (89.808 righe, 743 persone, 77 enti): ricerca ~0,1 s dopo la pausa di battitura, selezione di tutto ~0,2 s, CSV unico o ZIP di 77 CSV ~1,3 s.
+
 ### L'EML
 
 `MIME-Version`, `X-Unsent: 1`, `From` solo se indicato (altrimenti Outlook usa l'account di chi apre), `To` con tutti gli indirizzi dell'ente, oggetto in UTF-8 (RFC 2047). Corpo `multipart/alternative` con testo e HTML **uguali** (nel Java l'HTML era vuoto e finiva tra gli allegati), poi gli allegati. Il modello predefinito riproduce oggetto, testo e firma del Java, con «{PERIODO}» al posto di «nel mese scorso» (il testo identico al Java e' il secondo modello iniziale).
@@ -294,7 +310,7 @@ Scheda *Modelli mail*: **piu' messaggi predefiniti**, ognuno con nome, oggetto, 
 | `versamenti_enti` | codice, descrizione, email (elenco, max 20), abilitato, modello (vuoto = predefinito), ultimo file e giorno in cui l'ente e' comparso, chi e quando ha modificato |
 | `versamenti_modelli` | nome (unico), oggetto, testo, allegati (JSON validato), predefinito, chi e quando |
 
-Audit: `VERSAMENTI_ENTI_SINCRONIZZATI` (enti nuovi e descrizioni cambiate), `VERSAMENTI_ENTI_IMPORTATI` (nome del file, righe, codici degli enti nuovi e completati, quanti non toccati e invariati: **nessun indirizzo**), `VERSAMENTI_ENTE_MODIFICATO` (prima → dopo), `VERSAMENTI_MODELLO_CREATO` / `_MODIFICATO` / `_PREDEFINITO` / `_ELIMINATO`, `VERSAMENTI_EML_GENERATI` (solo conteggi).
+Audit: `VERSAMENTI_ENTI_SINCRONIZZATI` (enti nuovi e descrizioni cambiate), `VERSAMENTI_ENTI_IMPORTATI` (nome del file, righe, codici degli enti nuovi e completati, quanti non toccati e invariati: **nessun indirizzo**), `VERSAMENTI_ENTE_MODIFICATO` (prima → dopo), `VERSAMENTI_MODELLO_CREATO` / `_MODIFICATO` / `_PREDEFINITO` / `_ELIMINATO`, `VERSAMENTI_EML_GENERATI` (solo conteggi; `selezione: true` se dalla Consultazione), `VERSAMENTI_ESPORTAZIONE` (CSV/PDF dalla Consultazione: formato, enti, righe, persone, file, codice fiscale sì/no).
 
 **Regole di sicurezza della rubrica** (audit 26.10.26.2). Gli indirizzi si accettano **solo in ASCII** (parte locale RFC 5322, dominio `[A-Za-z0-9-]`, un dominio con accenti si scrive `xn--…`): niente spazi, a capo, caratteri di controllo o invisibili, e niente **omografi** (una «і» cirillica che fa sembrare giusto un dominio sbagliato: gli EML portano dati personali). Nomi file, descrizioni e testi dei modelli si **ripuliscono** sul server da NUL, caratteri di controllo, invisibili e override bidirezionali prima di finire nel database o nell'audit. Sincronizzazione e import scrivono la rubrica **in fila** (lucchetto di transazione `pg_advisory_xact_lock`), cosi' due caricamenti contemporanei dello stesso ente nuovo non vanno in errore.
 
@@ -446,6 +462,19 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.10.26.3
+**Versamenti enti: scheda Consultazione — cercare, selezionare, sommare, esportare**
+
+- **Nuova scheda *Consultazione***: enti a sinistra (ricerca, filtri, selezione), persone e versamenti a destra (ricerca per nominativo, matricola o codice fiscale, mesi, voce), vista **per persona** e **per versamento**, colonne ordinabili, pagine da 50. Dettagli in *Sezione Versamenti enti → Consultazione*.
+- **Selezione e somme**: righe, persone, pagine o tutti i risultati; barra fissa con i totali del filtro e della selezione e il riepilogo per ente e per mese.
+- **Esportazione dei soli selezionati** in **CSV** o **PDF**, file unico (ordinato per ente, subtotali per ente nel PDF) o **uno per ente in uno ZIP**; **EML dei soli selezionati**, uno per ente o per ente e mese, col modello dell'ente.
+- Allegati: colonne *Codice ente* ed *Ente* (solo per l'esportazione: il server continua a rifiutarle nei modelli), ordine *per ente*, etichette dei totali nel PDF non piu' troncate nella prima colonna.
+- **Server**: nuova rotta `POST /api/v1/versamenti/eventi/esportazione` (login, schema stretto, solo conteggi) → audit `VERSAMENTI_ESPORTAZIONE`; `eventi/generazione` accetta `selezione: true`. Nessuna migrazione.
+- **`.gitignore`**: esclusi anche `*.sqlite`, `*.sqlite3`, `*.db`, `*.zip`, `*.tgz`, `*.tar.gz` (database di programmi vecchi e ZIP di esportazioni contengono dati personali).
+- **Audit di sicurezza**: 15 prove nuove sulla rotta (senza login 401; formato, modo, numeri, enti, codice fiscale non validi 400; campi in piu' — anche nominativi aggiunti a mano — **non entrano** nell'audit; NUL nel nome file ripulito), piu' le 31 della 26.10.26.2: 46 su 46 respinte. Il codice fiscale si vede e si esporta solo su scelta esplicita; l'audit dice se e' stato esportato.
+- Prova sul file reale (solo tempi e conteggi, file esportati cancellati subito): 89.808 righe, 743 persone, 77 enti; selezione di tutto e CSV unico con **30.081.644,58 €**, uguale alla somma della barra; ZIP di 77 CSV con tutte le 89.808 righe.
+- Test: 5 nuovi in `versamentiConsultazione.test.ts`, 2 in `zipStore.test.ts` (client 91, server 116).
 
 ### 26.10.26.2
 **Versamenti enti: import della rubrica, guida di CSA, audit di sicurezza**

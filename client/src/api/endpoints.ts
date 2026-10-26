@@ -1231,8 +1231,17 @@ export const versamentiApi = {
   eliminaModello: (id: string) =>
     apiFetch<{ entiRiportati: number }>(`/versamenti/modelli/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
-  eventoGenerazione: (body: { file: string; enti: string[]; eml: number; righe: number; mesi: string[]; modo: 'unico' | 'mese' }) =>
+  eventoGenerazione: (body: { file: string; enti: string[]; eml: number; righe: number; mesi: string[]; modo: 'unico' | 'mese'; selezione?: boolean }) =>
     apiFetch<{ ok: true }>('/versamenti/eventi/generazione', {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+
+  /** Esportazione CSV/PDF dalla Consultazione: solo conteggi, mai nomi o codici fiscali. */
+  eventoEsportazione: (body: {
+    file: string; formato: 'csv' | 'pdf'; modo: 'unico' | 'ente'; enti: string[]
+    righe: number; persone: number; file_generati: number; codiceFiscale: boolean
+  }) =>
+    apiFetch<{ ok: true }>('/versamenti/eventi/esportazione', {
       method: 'POST', body: JSON.stringify(body),
     }),
 }
