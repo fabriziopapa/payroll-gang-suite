@@ -38,6 +38,7 @@ export type PageId =
   | 'pdf-region-templates'
   | 'pdf-region-editor'
   | 'emolumenti'
+  | 'versamenti'
 
 /** Struttura salvata nel campo `dati` JSONB della bozza */
 export interface BozzaDati {

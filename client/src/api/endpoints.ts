@@ -1165,3 +1165,69 @@ export const tipiContoApi = {
   archivia: (id: string) =>
     apiFetch<void>(`/emolumenti/tipi-conto/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }
+
+// ── Versamenti enti (rubrica e modelli mail) ─────────────────
+// Le righe della stampa versamenti NON passano di qui: si elaborano nel
+// browser. Il server riceve solo codici e descrizioni degli enti.
+
+export interface VersamentoEnteApi {
+  codice:      string
+  descrizione: string
+  email:       string[]
+  abilitato:   boolean
+  modelloId:   string | null
+  ultimoFile:  string | null
+  ultimoVisto: string | null
+}
+
+export interface VersamentoModelloApi {
+  id:          string
+  nome:        string
+  oggetto:     string
+  testo:       string
+  allegati:    import('../utils/versamentiAllegati').AllegatiConfig
+  predefinito: boolean
+}
+
+export type VersamentoModelloBody = Pick<VersamentoModelloApi, 'nome' | 'oggetto' | 'testo' | 'allegati'>
+
+export const versamentiApi = {
+  enti: () =>
+    apiFetch<{ enti: VersamentoEnteApi[] }>('/versamenti/enti'),
+
+  sincronizza: (body: { file: string; enti: Array<{ codice: string; descrizione: string }> }) =>
+    apiFetch<{ enti: VersamentoEnteApi[]; nuovi: string[] }>('/versamenti/enti/sincronizza', {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+
+  aggiornaEnte: (codice: string, body: { email?: string; abilitato?: boolean; modelloId?: string | null }) =>
+    apiFetch<{ ente: VersamentoEnteApi }>(`/versamenti/enti/${encodeURIComponent(codice)}`, {
+      method: 'PATCH', body: JSON.stringify(body),
+    }),
+
+  modelli: () =>
+    apiFetch<{ modelli: VersamentoModelloApi[] }>('/versamenti/modelli'),
+
+  creaModello: (body: VersamentoModelloBody) =>
+    apiFetch<{ modello: VersamentoModelloApi }>('/versamenti/modelli', {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+
+  aggiornaModello: (id: string, body: VersamentoModelloBody) =>
+    apiFetch<{ modello: VersamentoModelloApi }>(`/versamenti/modelli/${encodeURIComponent(id)}`, {
+      method: 'PUT', body: JSON.stringify(body),
+    }),
+
+  predefinito: (id: string) =>
+    apiFetch<{ modello: VersamentoModelloApi }>(`/versamenti/modelli/${encodeURIComponent(id)}/predefinito`, {
+      method: 'POST', body: JSON.stringify({}),
+    }),
+
+  eliminaModello: (id: string) =>
+    apiFetch<{ entiRiportati: number }>(`/versamenti/modelli/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  eventoGenerazione: (body: { file: string; enti: string[]; eml: number; righe: number; mesi: string[]; modo: 'unico' | 'mese' }) =>
+    apiFetch<{ ok: true }>('/versamenti/eventi/generazione', {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+}

@@ -49,6 +49,13 @@ const AZIONE_META: Record<string, AzioneMeta> = {
   BOZZA_LIQUIDAZIONE_INFO:       { label: 'Dati liquidazione aggiornati', tono: 'info' },
   BOZZA_RIPRISTINATA:            { label: 'Liquidazione ripristinata',    tono: 'warn' },
   BOZZA_ELIMINATA:               { label: 'Liquidazione eliminata',       tono: 'danger' },
+  VERSAMENTI_ENTI_SINCRONIZZATI: { label: 'Versamenti: enti dal file',    tono: 'info' },
+  VERSAMENTI_ENTE_MODIFICATO:    { label: 'Versamenti: ente modificato',  tono: 'info' },
+  VERSAMENTI_MODELLO_CREATO:     { label: 'Versamenti: modello creato',   tono: 'ok' },
+  VERSAMENTI_MODELLO_MODIFICATO: { label: 'Versamenti: modello modificato', tono: 'info' },
+  VERSAMENTI_MODELLO_PREDEFINITO:{ label: 'Versamenti: modello predefinito', tono: 'warn' },
+  VERSAMENTI_MODELLO_ELIMINATO:  { label: 'Versamenti: modello eliminato', tono: 'danger' },
+  VERSAMENTI_EML_GENERATI:       { label: 'Versamenti: EML generati',     tono: 'ok' },
 }
 
 const TONO_CLS: Record<Tono, string> = {
@@ -69,6 +76,7 @@ const ENTITA_LABEL: Record<string, string> = {
   templato_certificato: 'Template certificato',
   bozze:                'Liquidazione',
   'verifica-liquidato': 'Verifica liquidato',
+  versamenti:           'Versamenti enti',
 }
 
 function metaFor(azione: string): AzioneMeta {
@@ -82,6 +90,31 @@ function describeDettagli(azione: string, dettagli: unknown): string {
   const val = (k: string) => (d[k] == null ? '' : String(d[k]))
 
   switch (azione) {
+    case 'VERSAMENTI_ENTI_SINCRONIZZATI': {
+      const nuovi = Array.isArray(d.nuovi) ? (d.nuovi as unknown[]) : []
+      const descr = Array.isArray(d.descrizioni) ? d.descrizioni.length : 0
+      return [val('file'), nuovi.length ? `${nuovi.length} enti nuovi (${nuovi.slice(0, 8).join(', ')}${nuovi.length > 8 ? '…' : ''})` : '', descr ? `${descr} descrizioni aggiornate` : '']
+        .filter(Boolean).join(' · ')
+    }
+    case 'VERSAMENTI_ENTE_MODIFICATO': {
+      const c = (d.cambi ?? {}) as Record<string, { prima: unknown; dopo: unknown }>
+      const fmt = (v: unknown) => Array.isArray(v) ? (v.length ? v.join(', ') : '—') : v === true ? 'sì' : v === false ? 'no' : v == null ? 'predefinito' : String(v)
+      const parti = Object.entries(c).map(([k, x]) => `${k}: ${fmt(x.prima)} → ${fmt(x.dopo)}`)
+      return [`${val('codice')} ${val('descrizione')}`.trim(), ...parti].join(' · ')
+    }
+    case 'VERSAMENTI_MODELLO_CREATO':
+    case 'VERSAMENTI_MODELLO_ELIMINATO':
+      return [val('nome'), d.entiRiportati ? `${val('entiRiportati')} enti tornati al predefinito` : ''].filter(Boolean).join(' · ')
+    case 'VERSAMENTI_MODELLO_MODIFICATO':
+      return [val('nome'), Array.isArray(d.campi) && d.campi.length ? `cambiati: ${(d.campi as unknown[]).join(', ')}` : ''].filter(Boolean).join(' · ')
+    case 'VERSAMENTI_MODELLO_PREDEFINITO':
+      return d.prima ? `${val('prima')} → ${val('nome')}` : val('nome')
+    case 'VERSAMENTI_EML_GENERATI': {
+      const enti = Array.isArray(d.enti) ? d.enti.length : 0
+      const mesi = Array.isArray(d.mesi) ? (d.mesi as string[]) : []
+      return [val('file'), `${val('eml')} EML`, `${enti} enti`, `${val('righe')} righe`, mesi.length ? `mesi ${mesi[0]}${mesi.length > 1 ? '…' + mesi[mesi.length - 1] : ''}` : '']
+        .filter(Boolean).join(' · ')
+    }
     case 'LOGIN_FAILED':
       return d.reason ? `Motivo: ${val('reason')}` : ''
     case 'CSV_SEPARATORE_DECIMALE':

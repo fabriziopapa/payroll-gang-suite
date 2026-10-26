@@ -810,6 +810,66 @@ export interface IPdfRegionTemplatesRepository {
 }
 
 // ------------------------------------------------------------
+// Versamenti enti (migrazione 0021) — rubrica e modelli mail
+// Nessun dato personale: solo enti, indirizzi istituzionali e testi.
+// ------------------------------------------------------------
+
+export interface VersamentoEnteRow {
+  codice:      string
+  descrizione: string
+  email:       string[]
+  abilitato:   boolean
+  modelloId:   string | null
+  ultimoFile:  string | null
+  ultimoVisto: string | null
+  updatedAt:   Date
+}
+
+export interface VersamentoModelloRow {
+  id:          string
+  nome:        string
+  oggetto:     string
+  testo:       string
+  allegati:    unknown
+  predefinito: boolean
+  updatedAt:   Date
+}
+
+export interface VersamentoModelloInput {
+  nome:     string
+  oggetto:  string
+  testo:    string
+  allegati: unknown
+}
+
+export interface EsitoSincronizzaEnti {
+  nuovi:        string[]
+  descrizioni:  Array<{ codice: string; prima: string; dopo: string }>
+}
+
+export interface IVersamentiRepository {
+  enti(): Promise<VersamentoEnteRow[]>
+  ente(codice: string): Promise<VersamentoEnteRow | null>
+  /**
+   * In una transazione: inserisce gli enti mai visti (abilitati, senza email),
+   * aggiorna la descrizione di quelli cambiati, e per tutti ultimo_file e
+   * ultimo_visto (oggi). Restituisce cosa e' cambiato, per l'audit.
+   */
+  sincronizzaEnti(enti: Array<{ codice: string; descrizione: string }>, file: string, userId: string | null): Promise<EsitoSincronizzaEnti>
+  aggiornaEnte(codice: string, patch: { email?: string[]; abilitato?: boolean; modelloId?: string | null }, userId: string | null): Promise<VersamentoEnteRow | null>
+
+  modelli(): Promise<VersamentoModelloRow[]>
+  modello(id: string): Promise<VersamentoModelloRow | null>
+  /** 'nome-duplicato' se esiste gia' un modello con lo stesso nome (senza distinguere maiuscole). */
+  creaModello(m: VersamentoModelloInput, userId: string | null): Promise<VersamentoModelloRow | 'nome-duplicato'>
+  aggiornaModello(id: string, m: VersamentoModelloInput, userId: string | null): Promise<VersamentoModelloRow | 'nome-duplicato' | null>
+  /** Toglie il predefinito a tutti e lo da' a `id`, in una transazione. */
+  impostaPredefinito(id: string, userId: string | null): Promise<VersamentoModelloRow | null>
+  /** Elimina un modello NON predefinito; gli enti che lo usavano tornano al predefinito. */
+  eliminaModello(id: string): Promise<{ esito: 'fatto'; entiRiportati: number } | { esito: 'predefinito' } | { esito: 'non-trovato' }>
+}
+
+// ------------------------------------------------------------
 // Factory type — punto di accesso unico al DB layer
 // ------------------------------------------------------------
 

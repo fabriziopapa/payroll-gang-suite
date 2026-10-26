@@ -1,6 +1,6 @@
 {
   "name": "@payroll-gang/client",
-  "version": "26.10.20.1",
+  "version": "26.10.26",
   "private": true,
   "type": "module",
   "scripts": {

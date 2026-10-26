@@ -1,0 +1,218 @@
+// ============================================================
+// PAYROLL GANG SUITE — Versamenti enti · dettaglio ente e anteprima EML
+// ============================================================
+
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { versamentiApi, type VersamentoEnteApi } from '../../api/endpoints'
+import { showToast } from '../ToastManager'
+import type { EnteAggregato } from '../../utils/versamentiCsv'
+import { allegatiPer, colonneAttive, ordina } from '../../utils/versamentiAllegati'
+import { fmtEuro, meseLabel, periodoBreve, type ModelloVersamento } from '../../utils/versamentiModelli'
+import { scaricaFile } from '../../utils/versamentiEml'
+import type { EmlPronto } from './genera'
+import { IconaDownload, IconaOcchio, btnPrimario, btnSecondario, etichettaCls, inputCls, messaggioErrore } from './ui'
+
+const fmtData = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`
+
+function Finestra({ titolo, sottotitolo, onChiudi, children, piede, larga }: {
+  titolo: ReactNode; sottotitolo?: ReactNode; onChiudi: () => void; children: ReactNode; piede?: ReactNode; larga?: boolean
+}) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onChiudi() }
+    document.addEventListener('keydown', h)
+    return () => document.removeEventListener('keydown', h)
+  }, [onChiudi])
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true"
+      onClick={e => { if (e.target === e.currentTarget) onChiudi() }}>
+      <div className={`bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full ${larga ? 'max-w-5xl' : 'max-w-4xl'} max-h-[88vh] flex flex-col`}>
+        <div className="px-6 py-4 border-b border-slate-800 flex items-start gap-3">
+          <div className="min-w-0 flex-1">{titolo}{sottotitolo}</div>
+          <button type="button" onClick={onChiudi} aria-label="Chiudi" className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800">✕</button>
+        </div>
+        <div className="overflow-auto flex-1">{children}</div>
+        {piede && <div className="px-6 py-4 border-t border-slate-800 flex flex-wrap gap-2 justify-end">{piede}</div>}
+      </div>
+    </div>
+  )
+}
+
+export function DettaglioEnteModal({ ente, rubrica, modello, perMese, generando, onChiudi, onAnteprima, onGenera }: {
+  ente: EnteAggregato; rubrica: VersamentoEnteApi | null; modello: ModelloVersamento | null; perMese: boolean; generando: boolean
+  onChiudi: () => void; onAnteprima: () => void; onGenera: () => void
+}) {
+  const righe = ordina(ente.righe, 'mese')
+  const multi = ente.mesi.length > 1
+  const ok = !!rubrica?.abilitato && !!rubrica.email.length
+  const descr = rubrica?.descrizione ?? ente.descr
+
+  async function solo(tipo: 'csv' | 'pdf') {
+    if (!modello) return
+    const [x] = await allegatiPer(ente.codice, descr, ente.righe, ente.mesi, modello.allegati, perMese, tipo)
+    if (x) scaricaFile(x.nome, x.bytes, x.tipo)
+  }
+
+  const corpo: ReactNode[] = []
+  let corrente: string | null = null, sub = 0
+  const chiudi = () => {
+    if (multi && corrente) corpo.push(
+      <tr key={`t-${corrente}`} className="bg-slate-800/50">
+        <td colSpan={4} className="px-5 py-1.5 text-xs font-semibold text-slate-300">Totale {meseLabel(corrente)}</td>
+        <td className="px-5 py-1.5 text-right tabular-nums text-xs font-semibold text-slate-200">{fmtEuro(sub)}</td>
+      </tr>,
+    )
+  }
+  righe.forEach((r, i) => {
+    if (r.mese !== corrente) { chiudi(); corrente = r.mese; sub = 0 }
+    sub += r.cents
+    corpo.push(
+      <tr key={i} className="border-t border-slate-800">
+        <td className="px-5 py-1.5 text-slate-200">{r.nome}</td>
+        <td className={`px-3 py-1.5 tabular-nums whitespace-nowrap ${r.nascita.ok ? 'text-slate-300' : 'text-amber-400'}`}
+          title={r.nascita.ok ? (r.nascita.fonte === 'csv' ? 'Da DATA_NASC del CSV' : 'DATA_NASC assente: ricavata dal codice fiscale') : `Data di nascita: ${r.nascita.motivo}`}>
+          {r.nascita.ok ? <>{fmtData(r.nascita.iso)}{r.nascita.fonte === 'cf' && <span className="ml-1 text-[10px] text-violet-300">da CF</span>}</> : `— ${r.nascita.motivo}`}
+        </td>
+        <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{meseLabel(r.mese)}</td>
+        <td className="px-3 py-1.5 font-mono text-xs text-slate-400">{r.voce}</td>
+        <td className="px-5 py-1.5 text-right tabular-nums text-slate-200">{fmtEuro(r.cents)}</td>
+      </tr>,
+    )
+  })
+  chiudi()
+
+  return (
+    <Finestra
+      onChiudi={onChiudi}
+      titolo={<><p className="font-mono text-xs text-slate-500">{ente.codice}</p><h3 className="text-base font-semibold text-white">{descr}</h3></>}
+      sottotitolo={<p className="text-xs text-slate-500 mt-0.5">{periodoBreve(ente.mesi)} · {righe.length} righe · totale <span className="text-slate-200 tabular-nums">{fmtEuro(ente.cents)} €</span></p>}
+      piede={<>
+        <button type="button" className={btnSecondario} disabled={!modello} onClick={() => void solo('csv')}><IconaDownload /> Solo CSV</button>
+        <button type="button" className={btnSecondario} disabled={!modello} onClick={() => void solo('pdf')}><IconaDownload /> Solo PDF</button>
+        <button type="button" className={btnSecondario} disabled={!ok} onClick={onAnteprima}><IconaOcchio /> Anteprima EML</button>
+        <button type="button" className={btnPrimario} disabled={!ok || generando} title={ok ? '' : 'Ente disabilitato o senza email'} onClick={onGenera}><IconaDownload /> Genera EML</button>
+      </>}
+    >
+      <table className="w-full text-sm">
+        <thead className="sticky top-0 bg-slate-900"><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500">
+          <th className="px-5 py-2 font-semibold">Nominativo</th><th className="px-3 py-2 font-semibold">Data di nascita</th>
+          <th className="px-3 py-2 font-semibold">Mese</th><th className="px-3 py-2 font-semibold">Voce</th><th className="px-5 py-2 font-semibold text-right">Importo €</th>
+        </tr></thead>
+        <tbody>
+          {corpo}
+          <tr className="border-t-2 border-slate-700">
+            <td colSpan={4} className="px-5 py-2 font-semibold text-white">Totale</td>
+            <td className="px-5 py-2 text-right tabular-nums font-semibold text-white">{fmtEuro(ente.cents)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </Finestra>
+  )
+}
+
+export function AnteprimaEmlModal({ ente, rubrica, modelli, override, modelloElab, prepara, chiave, generando, onOverride, onEnteAggiornato, onChiudi, onGenera }: {
+  ente: EnteAggregato; rubrica: VersamentoEnteApi | null; modelli: ModelloVersamento[]
+  override: string; modelloElab: string
+  prepara: () => Promise<EmlPronto[]>
+  /** Cambia quando cambia cio' che finisce nell'EML: allora l'anteprima si rifa'. */
+  chiave: string; generando: boolean
+  onOverride: (id: string) => void; onEnteAggiornato: (e: VersamentoEnteApi) => void
+  onChiudi: () => void; onGenera: () => void
+}) {
+  const [emls, setEmls] = useState<EmlPronto[] | null>(null)
+  const [errore, setErrore] = useState<string | null>(null)
+  const preparaRef = useRef(prepara)
+  preparaRef.current = prepara
+  useEffect(() => {
+    let vivo = true
+    setEmls(null); setErrore(null)
+    preparaRef.current().then(x => { if (vivo) setEmls(x) }).catch(() => { if (vivo) setErrore('Anteprima non disponibile.') })
+    return () => { vivo = false }
+  }, [chiave])
+
+  const x = emls?.[0]
+  const predefinito = modelli.find(m => m.predefinito)
+  const delEnte = modelli.find(m => m.id === rubrica?.modelloId) ?? predefinito
+  const kb = (n: number) => `${(n / 1024).toLocaleString('it-IT', { maximumFractionDigits: 1 })} KB`
+
+  async function usaSempre() {
+    if (!rubrica || !override) return
+    try {
+      const { ente: e } = await versamentiApi.aggiornaEnte(rubrica.codice, { modelloId: override })
+      onEnteAggiornato(e)
+      showToast(`D'ora in poi ${e.descrizione} usa «${modelli.find(m => m.id === override)?.nome ?? ''}»`, 'success')
+    } catch (err) { showToast(messaggioErrore(err), 'error') }
+  }
+
+  const riga = (k: string, v: string, mono = false) => (
+    <tr className="border-t border-slate-800 first:border-t-0">
+      <td className="py-1.5 pr-4 text-[11px] uppercase tracking-wider text-slate-500 whitespace-nowrap align-top">{k}</td>
+      <td className={`py-1.5 ${mono ? 'font-mono text-xs' : ''} text-slate-200 break-all`}>{v}</td>
+    </tr>
+  )
+
+  return (
+    <Finestra
+      onChiudi={onChiudi}
+      titolo={<><p className="text-[11px] uppercase tracking-wider text-slate-500">Anteprima · {ente.codice} {rubrica?.descrizione ?? ente.descr}</p><h3 className="font-mono text-sm text-white break-all">{x?.nomeFile ?? '…'}</h3></>}
+      sottotitolo={emls && emls.length > 1 && x ? <p className="text-xs text-amber-300 mt-1">In modalità «per mese» questo ente produce {emls.length} EML: qui vedi il primo ({meseLabel(x.mesi[0] ?? '')}).</p> : null}
+      piede={<>
+        <button type="button" className={btnSecondario} onClick={onChiudi}>Chiudi</button>
+        <button type="button" className={btnPrimario} disabled={!emls?.length || generando} onClick={onGenera}><IconaDownload /> Genera {emls && emls.length > 1 ? `${emls.length} EML` : 'EML'}</button>
+      </>}
+    >
+      <div className="px-6 py-4 flex flex-col gap-5">
+        <div className="flex flex-wrap items-end gap-3 bg-slate-950/60 border border-slate-800 rounded-lg px-4 py-3">
+          <div className="flex flex-col gap-1.5 min-w-[240px] flex-1">
+            <label htmlFor="vers-ant-modello" className={etichettaCls}>Modello per questo ente</label>
+            <select id="vers-ant-modello" value={override} onChange={e => onOverride(e.target.value)} className={inputCls}>
+              <option value="">Come da rubrica: {delEnte?.nome ?? '—'}</option>
+              {modelli.map(m => <option key={m.id} value={m.id}>{m.nome}</option>)}
+            </select>
+          </div>
+          {override && override !== rubrica?.modelloId && (
+            <button type="button" className={`${btnSecondario} !text-xs`} onClick={() => void usaSempre()}>Usalo sempre per questo ente</button>
+          )}
+          <p className="text-xs text-slate-500 w-full">
+            La scelta vale per questa elaborazione; con «Usalo sempre» finisce nella rubrica.
+            {modelloElab && !override ? ` Ora è attivo «per tutti: ${modelli.find(m => m.id === modelloElab)?.nome ?? ''}».` : ''}
+          </p>
+        </div>
+
+        {errore && <p className="text-sm text-red-300">{errore}</p>}
+        {!x && !errore && <p className="text-sm text-slate-500">Preparo l'anteprima…</p>}
+        {x && (
+          <>
+            <table className="w-full text-sm"><tbody>
+              {riga('Modello', x.modello.nome)}
+              {riga('X-Unsent', '1 · Outlook la apre come bozza da inviare')}
+              {riga('Da', x.da || '(assente: Outlook usa il tuo account)', true)}
+              {riga('A', x.a.join(', '), true)}
+              {riga('Oggetto', x.oggetto)}
+            </tbody></table>
+            <div className="flex flex-col gap-2">
+              <p className={etichettaCls}>Testo (uguale nella parte HTML)</p>
+              <pre className="bg-white text-slate-900 rounded-lg p-4 text-[13px] leading-relaxed whitespace-pre-wrap" style={{ fontFamily: 'Calibri, Arial, sans-serif' }}>{x.testo}</pre>
+            </div>
+            <div className="flex flex-col gap-2">
+              <p className={etichettaCls}>Allegati</p>
+              <div className="flex flex-wrap gap-2">
+                {x.allegati.length ? x.allegati.map(a => (
+                  <button key={a.nome} type="button" className={`${btnSecondario} !text-xs font-mono`} onClick={() => scaricaFile(a.nome, a.bytes, a.tipo)}>
+                    <IconaDownload /> {a.nome} <span className="text-slate-500">{kb(a.bytes.length)}</span>
+                  </button>
+                )) : <span className="text-xs text-amber-300">Questo modello non allega file.</span>}
+              </div>
+              <p className="text-xs text-slate-500">{x.righe} righe · colonne: {colonneAttive(x.modello.allegati, x.mesi.length > 1).map(c => c.pdf).join(', ')}</p>
+            </div>
+            <details>
+              <summary className="text-xs text-slate-400 cursor-pointer select-none">Intestazioni dell'EML</summary>
+              <pre className="mt-2 bg-slate-950 border border-slate-800 rounded-lg p-3 text-[11px] font-mono text-slate-400 whitespace-pre overflow-auto max-h-72">
+                {x.sorgente.split('\r\n\r\n')[0]}
+              </pre>
+            </details>
+          </>
+        )}
+      </div>
+    </Finestra>
+  )
+}

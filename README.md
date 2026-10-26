@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.10.20.1-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.10.26-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -48,12 +48,14 @@ payroll-gang-suite/
 │       ├── components/          # Componenti React (ConfirmDialog, ToastManager, Layout,
 │       │                        #   ModaleContiCsa, PaesiContoCard, TipiContoPage, …)
 │       │   ├── editor/          #   DettaglioCard, DettaglioFormModal, ComunicazioneModal
+│       │   ├── versamenti/      #   Versamenti enti: RubricaEntiTab, ModelliMailTab, Modali
+│       │   │                    #   (dettaglio ente, anteprima EML), genera.ts, ui.tsx
 │       │   └── certificatoTemplate/  # Editor template certificato
 │       ├── constants/           # csvDefaults, scorporoCoefficients, palette gruppi
 │       ├── hooks/               # useDebounce, usePdfDocument, …
 │       ├── pages/               # Dashboard, Editor, Viewer, Ricerca, Anagrafiche, Voci,
 │       │                        # Capitoli, Certificati, Emolumenti (EmolumentiArea: due schede), PdfRegionEditor,
-│       │                        # Impostazioni, Utenti
+│       │                        # Impostazioni, Utenti, VersamentiEnti (stampa versamenti → EML per ente)
 │       ├── store/               # Stato globale Zustand (useStore.ts)
 │       ├── types/               # Interfacce TypeScript + APP_VERSION
 │       └── utils/               # CSV / PDF / EML builder, calcoli scorporo (biz.ts),
@@ -62,28 +64,32 @@ payroll-gang-suite/
 │                                #   e pillola «liquidazione …» (mese scelto o, in mancanza, dalla data)
 │                                # csvDecimale.test.ts: separatore decimale dei file HR (virgola/punto)
 │                                # provvedimento.ts (+ test): ID e estremi del provvedimento, salvataggio vs CSV HR
+│                                # versamentiCsv.ts (+ test): lettura STAMPA_VERSAMENTI (mesi, importi, data di nascita)
+│                                # versamentiModelli.ts / versamentiAllegati.ts / versamentiEml.ts
+│                                #   (+ versamentiDocumenti.test.ts): segnaposto, CSV/PDF allegati, EML per Outlook
 ├── server/                      # API REST Fastify
 │   ├── sql/
 │   │   ├── proprieta_postgres.sql  # Proprieta' oggetti al superutente (serve dopo un restore da pannello)
 │   │   ├── permessi.sql            # Privilegi + autoverifica: rilanciato da pgs-migra.sh dopo ogni migrazione
 │   │   └── setup.sql            # ★ Setup DB CONSOLIDATO: unico file per installazione da zero
-│   │                            #   (ruolo + database + 18 tabelle + indici + grants + proprieta + seed)
+│   │                            #   (ruolo + database + tutte le tabelle + indici + grants + proprieta + seed)
 │   └── src/
 │       ├── config/              # env.ts — variabili ambiente validate Zod (fail-fast)
 │       ├── auth/                # TOTP (RFC 6238) + JWT ES256 + refresh rotante Argon2id
 │       ├── db/
 │       │   ├── schema.ts        # ★ Schema Drizzle — fonte di verità del DB
-│       │   ├── migrations/      # 0001…0019 — applicate da ./pgs-migra.sh, registrate in schema_migrations
+│       │   ├── migrations/      # 0001…0021 — applicate da ./pgs-migra.sh, registrate in schema_migrations
 │       │   │                    #   (già incluse in setup.sql: NON eseguire su install nuova)
 │       │   └── repositories/    # Repository pattern (PgBozze, PgUsers, PgCertificati, …)
 │       ├── lib/                 # clientIp.ts (IP reale dietro Cloudflare) ·
 │       │                        # turnstile.ts (verifica Turnstile con motivo del rifiuto, con test) ·
 │       │                        # areaConto.ts (regola IT/SEPA/EXTRA_UE — elenco EPC v8.0, con test;
-│       │                        #   unica fonte dell'area del conto, anche per GET /area-conto)
+│       │                        #   unica fonte dell'area del conto, anche per GET /area-conto) ·
+│       │                        # versamenti.ts (email degli enti, schema dei modelli mail, con test)
 │       ├── middleware/          # authenticate.ts (JWT preHandler)
 │       ├── routes/              # /api/v1: auth, bozze, anagrafiche, voci, capitoli,
 │       │                        # settings, users, certificati, emolumenti, emolumenti/tipi-conto (tipiConto.ts),
-│       │                        # pdf-region, cineca, area-conto (areaConto.ts)
+│       │                        # pdf-region, cineca, area-conto (areaConto.ts), versamenti (versamenti.ts)
 │       ├── schemas/             # Zod validazione (BozzaDatiSchema, …)
 │       └── services/            # cryptoService, importService, mailerService, cinecaService
 │           ├── emolumenti/      #   risoluzione nominativi → matricole, testate CSA → conto
@@ -126,6 +132,7 @@ payroll-gang-suite/
 - **Certificati giuridico-stipendiali** — **doppia sorgente**: (a) upload cedolino Cineca (PDF) → parsing dinamico per-sezione; (b) **Recupera cedolino da API** (anno/mese/matricola) → costruzione dagli aggregati del liquidato CINECA. In entrambi i casi ricalcolo per categoria (verificato al centesimo) → generazione DOCX con stampa unione (segnaposto `{{path}}`, tag genere `[[m|f]]`), protocollo progressivo atomico per anno, template editabili (CRUD)
 - **Verifica liquidato** *(admin)* — confronto del liquidato CINECA (`/liquidazioni/liquidato/dettaglio`) con gli invii PGS ricostruiti (join per `matricola|voce|capitolo|dataCompVoce|riferimento`), classificazione NUOVO / CONGUAGLIO / STORNO / RETTIFICA; ogni lettura è auditata
 - **Dottorandi e borse (area Emolumenti)** *(admin)* — elenco lavorazioni con bozze/archiviate, caricamento nominativi per incollato o ricerca in anagrafica, lettura di cio' che e' **gia' in CSA** (i mesi presenti non sono selezionabili: la competenza doppia non nasce), abbinamenti d'ufficio tipo→voce→capitolo (DR `09834`/`000601`, BS `09947`/`000706`, BE `09766`/`000602`), export CSV per HR Suite e **TXT matricole divise per area del conto**
+- **Versamenti enti** (dalla 26.10.26) — porting strutturato del Java *GestioneSaldiEnti*: si carica la stampa versamenti di CSA (`STAMPA_VERSAMENTI_*.CSV`, anche con **piu' mesi**), e per ogni ente si scarica l'**EML da aprire in Outlook** (bozza `X-Unsent`) con CSV e PDF di dettaglio, ora con la **data di nascita**. Il file si elabora **solo nel browser**: PGS salva soltanto la rubrica degli enti (email anche multiple, abilitato, modello) e i **modelli mail** con i loro allegati personalizzabili. Vedi *Sezione Versamenti enti*
 - **PDF Region Editor** *(in rollout, kill-switch off)* — strumento admin: disegno regioni di riconoscimento layout direttamente sul cedolino renderizzato (canvas), template versionati e immutabili riusabili per l'estrazione automatica delle voci
 
 ---
@@ -246,6 +253,40 @@ psql -d <database> -X -c "SELECT (naz_iban IS NOT NULL) AS con_nazione, count(*)
 - **Riclassifica da CSA** rilegge lo stesso mese e sostituisce le righe (l'elaborazione torna in anteprima). Se CSA non restituisce piu' nulla, le righe salvate non si toccano.
 - **DA CHIARIRE**: accanto alla riga si vede, **solo come suggerimento**, la nazione dell'anagrafica PGS in vigore l'ultimo giorno del mese. La nazione si inserisce a mano con una nota obbligatoria: la riga prende il badge *manuale*, il tipo si calcola con la regola, e l'elaborazione torna in anteprima. Una nazione manuale sopravvive alla riclassifica finche' CSA continua a non darla. Le righe classificate da CSA non si correggono a mano.
 - **Privacy**: delle testate restano matricola, progressivi e due lettere di nazione; nessun IBAN arriva al database o al client.
+
+## Sezione Versamenti enti
+
+Menu *Modulo Versamenti → Versamenti enti*, **per tutti gli utenti**. Porting strutturato del programma Java desktop *GestioneSaldiEnti* (stesso EML, migliorato). Rotte `/api/v1/versamenti` (`routes/versamenti.ts`, audit **awaited**); tabelle `versamenti_enti` e `versamenti_modelli` (migrazione `0021`).
+
+**Privacy, prima di tutto.** La stampa versamenti si legge e si elabora **nel browser**: nominativi, matricole, codici fiscali, date di nascita e importi **non arrivano al server e non si salvano**. Al server vanno solo codice e descrizione degli enti (per la rubrica) e, quando si generano gli EML, i **conteggi** per l'audit (enti, EML, righe, mesi). Il mittente facoltativo resta nel browser della postazione (`localStorage`), non in PGS.
+
+### Guida
+
+1. **Carica il file** (trascinandolo o con un clic). Colonne obbligatorie: `ENTE`, `ENTE_DESCR`, `VOCE`, `MATRICOLA`, `NOME`, `IMP_TOT`. Facoltative: `DATA_NASC` e `COD_FISC`. Separatore `;`, `,` o TAB, codifica UTF-8 o Windows-1252, campi tra virgolette: tutto riconosciuto da solo. Il riquadro delle colonne le colora: verdi le obbligatorie, viola quelle della data di nascita, azzurra quella del mese, grigie le ignorate.
+2. **Il mese.** PGS cerca `ANNO`+`MESE`, oppure una colonna come `ANNO_MESE`, `COMPETENZA`, `PERIODO`, `MESE_RIF`… (formati `202503`, `2025-03`, `03/2025`, `15/03/2025`, `MAR 2025`). La si puo' scegliere a mano; per un file di un solo mese senza colonna si indica il mese (proposto: il mese prima della data nel nome del file). I chip dei mesi filtrano totali, allegati ed EML.
+3. **Data di nascita**: prima `DATA_NASC` del CSV (`12/03/1968`, `1968-03-12`, `19680312`); se manca o non si legge, dal **codice fiscale** (omocodia compresa, carattere di controllo verificato; un anno che darebbe meno di 14 anni e' del Novecento). Senza entrambi: «—». Sotto le colonne: quante persone da CSV, quante dal CF, quante senza.
+4. **Enti nuovi**: al caricamento gli enti mai visti entrano in rubrica **abilitati, senza email** (come nel Java). Il riquadro **«Da controllare»** mostra gli enti abilitati senza indirizzo: si scrivono le email (**piu' indirizzi separati da virgola** o punto e virgola) oppure si disabilita l'ente. Ogni modifica si salva subito.
+5. **Genera**: «Genera» su un ente o «Scarica tutti gli EML». Opzioni: *uno per ente con tutti i mesi* oppure *uno per ente per ciascun mese*; modello di ciascun ente o uno per tutti; anteprima di ogni EML (testo, allegati, intestazioni) con la possibilita' di cambiare modello solo per quell'ente o *usarlo sempre*. Esclusi da «Scarica tutti»: enti senza email, disabilitati, con totale ≤ 0 (evidenziati in ambra). Clic sulla riga: dettaglio dell'ente con subtotali per mese e *Solo CSV* / *Solo PDF*.
+6. **Outlook**: si apre l'`.eml` scaricato; e' una bozza (`X-Unsent: 1`) con destinatari, oggetto, testo e allegati, da controllare e inviare.
+
+### L'EML
+
+`MIME-Version`, `X-Unsent: 1`, `From` solo se indicato (altrimenti Outlook usa l'account di chi apre), `To` con tutti gli indirizzi dell'ente, oggetto in UTF-8 (RFC 2047). Corpo `multipart/alternative` con testo e HTML **uguali** (nel Java l'HTML era vuoto e finiva tra gli allegati), poi gli allegati. Il modello predefinito riproduce oggetto, testo e firma del Java, con «{PERIODO}» al posto di «nel mese scorso» (il testo identico al Java e' il secondo modello iniziale).
+
+### Modelli mail
+
+Scheda *Modelli mail*: **piu' messaggi predefiniti**, ognuno con nome, oggetto, testo e configurazione degli allegati; uno e' il **predefinito** (indice unico parziale: uno solo, lo garantisce il database). Segnaposto in oggetto, testo e titolo PDF: `{DESCRIZIONE_ENTE}`, `{CODICE_ENTE}`, `{PERIODO}` («nei mesi da gennaio a dicembre 2025»), `{PERIODO_BREVE}`, `{TOTALE}`, `{RIGHE}`; nei nomi dei file solo `{CODICE_ENTE}` e `{PERIODO_FILE}`. Un segnaposto sconosciuto blocca il salvataggio (client e server, `lib/versamenti.ts`). Il modello di ogni ente si sceglie in *Rubrica enti* (vuoto = predefinito); eliminando un modello, gli enti che lo usavano tornano al predefinito.
+
+**Allegati personalizzabili** (per modello): CSV e/o PDF; nome dell'EML e degli allegati; colonne *Nominativo, Data di nascita, Matricola, Codice fiscale, Mese, Voce, Importo* con ordine e intestazioni CSV/PDF proprie (il mese, di default, solo se l'EML copre piu' mesi; il codice fiscale spento, con avviso se lo si accende); ordine delle righe; CSV con separatore, decimali (virgola/punto), codifica Windows-1252 come il Java o UTF-8 con BOM, riga d'intestazione; PDF con titolo, A4 verticale/orizzontale, subtotali per mese e totale. Nel CSV le celle di testo che inizierebbero con `= + - @` sono neutralizzate con l'apostrofo (F-10). Nell'editor: anteprima con un ente del file, nomi dei file e prime righe del CSV, *CSV di prova* e *PDF di prova*.
+
+### Cosa salva PGS
+
+| tabella | contenuto |
+|---|---|
+| `versamenti_enti` | codice, descrizione, email (elenco, max 20), abilitato, modello (vuoto = predefinito), ultimo file e giorno in cui l'ente e' comparso, chi e quando ha modificato |
+| `versamenti_modelli` | nome (unico), oggetto, testo, allegati (JSON validato), predefinito, chi e quando |
+
+Audit: `VERSAMENTI_ENTI_SINCRONIZZATI` (enti nuovi e descrizioni cambiate), `VERSAMENTI_ENTE_MODIFICATO` (prima → dopo), `VERSAMENTI_MODELLO_CREATO` / `_MODIFICATO` / `_PREDEFINITO` / `_ELIMINATO`, `VERSAMENTI_EML_GENERATI` (solo conteggi).
 
 ## Sezione PDF Region Editor
 
@@ -395,6 +436,20 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.10.26
+**Versamenti enti: la stampa versamenti di CSA diventa una mail per ente, senza salvare i dati delle persone**
+
+- **Nuovo modulo** *Modulo Versamenti → Versamenti enti*, per tutti gli utenti: porting strutturato del Java *GestioneSaldiEnti*. Si carica `STAMPA_VERSAMENTI_*.CSV`, anche **con piu' mesi**, e per ogni ente si scarica l'**EML da aprire in Outlook** con CSV e PDF di dettaglio. Guida in *Sezione Versamenti enti*.
+- **Elaborazione solo nel browser**: nominativi, matricole, codici fiscali, date di nascita e importi non arrivano al server. Il server tiene la **rubrica degli enti** e i **modelli mail**, e registra nell'audit chi ha fatto cosa (per la generazione: solo conteggi).
+- **Data di nascita** negli allegati: da `DATA_NASC` del CSV, altrimenti dal codice fiscale (omocodia e carattere di controllo).
+- **Rubrica**: gli enti nuovi entrano **abilitati, senza email**; il riquadro *Da controllare* chiede le email (anche piu' d'una, separate da virgola) o la disabilitazione. Email validate e normalizzate lato server.
+- **Piu' modelli mail**: oggetto e testo con segnaposto, un predefinito, modello per ente in rubrica, modello per tutti o per un solo ente dall'anteprima. Due modelli iniziali: *Standard con periodo* (predefinito) e *Testo del Java («nel mese scorso»)*.
+- **Allegati personalizzabili per modello**: quali file, nomi, colonne (ordine e intestazioni), CSV (separatore, decimali, codifica, intestazione) e PDF (titolo, orientamento, subtotali, totale).
+- **EML migliorato rispetto al Java**: testo e HTML in `multipart/alternative` (prima l'HTML era vuoto), UTF-8 e oggetto RFC 2047, `From` facoltativo, importi sempre con due decimali (niente `100.0` o notazione scientifica), CSV con campi tra virgolette e celle anti-formula (F-10).
+- **Migrazione 0021** (`versamenti_enti`, `versamenti_modelli`, due modelli iniziali), gia' consolidata in `setup.sql`. Nessuna dipendenza nuova.
+- **Audit di sicurezza del rilascio**: accesso solo autenticato, controllo Origin sulle scritture, input validati con Zod (codici ente, email, schema dei modelli e degli allegati, segnaposto ammessi), query parametrizzate, nessun dato personale sul server ne' nei log, intestazioni EML senza a capo iniettabili, nomi file ripuliti, celle CSV anti-formula, ricerche nei modelli protette dal prototipo (`Object.hasOwn`).
+- Test: 9 server (`lib/versamenti.test.ts`), 25 client (`versamentiCsv.test.ts`, `versamentiDocumenti.test.ts`).
 
 ### 26.10.20.1
 **Emolumenti: la pillola del mese di liquidazione usa anche la data di liquidazione**

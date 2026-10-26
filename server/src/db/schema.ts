@@ -571,3 +571,38 @@ export const tipiContoRighe = pgTable('emolumenti_tipiconto_righe', {
 }, (t) => [
   primaryKey({ columns: [t.elabId, t.matricola] }),
 ])
+
+// ------------------------------------------------------------
+// VERSAMENTI ENTI (migrazione 0021)
+// Rubrica degli enti della stampa versamenti CSA e modelli mail.
+// Nessun dato personale: le righe del CSV si elaborano nel browser.
+// ------------------------------------------------------------
+export const versamentiModelli = pgTable('versamenti_modelli', {
+  id:          uuid('id').primaryKey().defaultRandom(),
+  nome:        varchar('nome', { length: 80 }).notNull(),
+  oggetto:     varchar('oggetto', { length: 200 }).notNull(),
+  testo:       text('testo').notNull(),
+  /** Configurazione degli allegati (lib/versamenti.ts → AllegatiConfig). */
+  allegati:    jsonb('allegati').notNull(),
+  predefinito: boolean('predefinito').notNull().default(false),
+  createdBy:   uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedBy:   uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('versamenti_modelli_un_predefinito').on(t.predefinito).where(sql`predefinito`),
+])
+
+export const versamentiEnti = pgTable('versamenti_enti', {
+  codice:      varchar('codice', { length: 20 }).primaryKey(),
+  descrizione: varchar('descrizione', { length: 200 }).notNull(),
+  email:       text('email').array().notNull().default(sql`'{}'::text[]`),
+  abilitato:   boolean('abilitato').notNull().default(true),
+  modelloId:   uuid('modello_id').references(() => versamentiModelli.id, { onDelete: 'set null' }),
+  ultimoFile:  varchar('ultimo_file', { length: 200 }),
+  ultimoVisto: date('ultimo_visto'),
+  createdBy:   uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedBy:   uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
