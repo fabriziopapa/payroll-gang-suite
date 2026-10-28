@@ -606,3 +606,178 @@ export const versamentiEnti = pgTable('versamenti_enti', {
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+// ------------------------------------------------------------
+// MODULO CRAL (migrazione 0022)
+// Soci, sedi, eventi, magazzino biglietti, quote associative.
+// Nessun codice fiscale: cognome, nome, data di nascita.
+// I dettagli degli eventi e delle scelte sono JSONB validati in lib/cral.ts.
+// ------------------------------------------------------------
+export const cralSedi = pgTable('cral_sedi', {
+  id:        varchar('id', { length: 12 }).primaryKey(),
+  nome:      varchar('nome', { length: 120 }).notNull(),
+  attiva:    boolean('attiva').notNull().default(true),
+  ordine:    integer('ordine').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const cralParametri = pgTable('cral_parametri', {
+  id:              smallint('id').primaryKey().default(1),
+  tesseraFormato:  varchar('tessera_formato', { length: 4 }).notNull().default('NUM'),
+  tesseraPrefisso: varchar('tessera_prefisso', { length: 10 }).notNull().default('CRAL-'),
+  tesseraCifre:    smallint('tessera_cifre').notNull().default(4),
+  tesseraProssimo: integer('tessera_prossimo').notNull().default(1),
+  riammissione:    varchar('riammissione', { length: 8 }).notNull().default('NUOVO'),
+  suffissoSep:     varchar('suffisso_sep', { length: 1 }).notNull().default('/'),
+  suffissoCifre:   smallint('suffisso_cifre').notNull().default(2),
+  extProssimo:     integer('ext_prossimo').notNull().default(1),
+  famProssimo:     integer('fam_prossimo').notNull().default(1),
+  updatedBy:       uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt:       timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const cralTipi = pgTable('cral_tipi', {
+  id:         varchar('id', { length: 10 }).primaryKey(),
+  nome:       varchar('nome', { length: 60 }).notNull(),
+  colore:     char('colore', { length: 7 }).notNull().default('#6366F1'),
+  aPagamento: boolean('a_pagamento').notNull().default(false),
+  modo:       varchar('modo', { length: 10 }),
+  attivo:     boolean('attivo').notNull().default(true),
+  ordine:     integer('ordine').notNull().default(0),
+})
+
+export const cralTipologieProdotto = pgTable('cral_tipologie_prodotto', {
+  id:     varchar('id', { length: 10 }).primaryKey(),
+  nome:   varchar('nome', { length: 80 }).notNull(),
+  attiva: boolean('attiva').notNull().default(true),
+  ordine: integer('ordine').notNull().default(0),
+})
+
+export const cralSoci = pgTable('cral_soci', {
+  id:           varchar('id', { length: 12 }).primaryKey(),
+  tipo:         varchar('tipo', { length: 3 }).notNull(),
+  matricola:    varchar('matricola', { length: 10 }),
+  cognome:      varchar('cognome', { length: 100 }).notNull(),
+  nome:         varchar('nome', { length: 100 }).notNull().default(''),
+  nascita:      date('nascita'),
+  email:        varchar('email', { length: 254 }),
+  sedeId:       varchar('sede_id', { length: 12 }).references(() => cralSedi.id, { onDelete: 'set null', onUpdate: 'cascade' }),
+  tessera:      varchar('tessera', { length: 30 }),
+  riammissioni: smallint('riammissioni').notNull().default(0),
+  stato:        varchar('stato', { length: 12 }).notNull().default('DA_VALIDARE'),
+  iscrittoIl:   date('iscritto_il').notNull().default(sql`CURRENT_DATE`),
+  cessatoIl:    date('cessato_il'),
+  provenienza:  varchar('provenienza', { length: 200 }),
+  atipico:      boolean('atipico').notNull().default(false),
+  note:         varchar('note', { length: 1000 }).notNull().default(''),
+  creatoDa:     uuid('creato_da').references(() => users.id, { onDelete: 'set null' }),
+  creatoIl:     timestamp('creato_il', { withTimezone: true }).notNull().defaultNow(),
+  validatoDa:   uuid('validato_da').references(() => users.id, { onDelete: 'set null' }),
+  validatoIl:   timestamp('validato_il', { withTimezone: true }),
+  modificatoDa: uuid('modificato_da').references(() => users.id, { onDelete: 'set null' }),
+  modificatoIl: timestamp('modificato_il', { withTimezone: true }),
+})
+
+export const cralFamiliariLegami = pgTable('cral_familiari_legami', {
+  familiareId: varchar('familiare_id', { length: 12 }).notNull().references(() => cralSoci.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+  socioId:     varchar('socio_id', { length: 12 }).notNull().references(() => cralSoci.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+  relazione:   varchar('relazione', { length: 8 }).notNull(),
+}, (t) => [primaryKey({ columns: [t.familiareId, t.socioId] })])
+
+export const cralSociTessere = pgTable('cral_soci_tessere', {
+  id:      serial('id').primaryKey(),
+  socioId: varchar('socio_id', { length: 12 }).notNull().references(() => cralSoci.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+  tessera: varchar('tessera', { length: 30 }).notNull(),
+  dal:     date('dal'),
+  al:      date('al').notNull(),
+})
+
+export const cralIniziative = pgTable('cral_iniziative', {
+  id:           uuid('id').primaryKey().defaultRandom(),
+  tipoId:       varchar('tipo_id', { length: 10 }).notNull().references(() => cralTipi.id, { onUpdate: 'cascade' }),
+  titolo:       varchar('titolo', { length: 160 }).notNull(),
+  anno:         smallint('anno').notNull(),
+  data:         date('data').notNull(),
+  scadenza:     date('scadenza'),
+  stato:        varchar('stato', { length: 8 }).notNull().default('BOZZA'),
+  modalita:     varchar('modalita', { length: 10 }).notNull(),
+  partecipanti: varchar('partecipanti', { length: 7 }).notNull().default('GRUPPI'),
+  gruppi:       text('gruppi').array().notNull().default(sql`'{}'::text[]`),
+  sedi:         text('sedi').array().notNull().default(sql`'{}'::text[]`),
+  predefinita:  varchar('predefinita', { length: 20 }),
+  fornitore:    varchar('fornitore', { length: 160 }).notNull().default(''),
+  pagamento:    varchar('pagamento', { length: 300 }).notNull().default(''),
+  note:         varchar('note', { length: 1000 }).notNull().default(''),
+  quotaCent:    integer('quota_cent').notNull().default(0),
+  config:       jsonb('config').notNull().default(sql`'{}'::jsonb`),
+  archiviata:   boolean('archiviata').notNull().default(false),
+  archiviataDa: uuid('archiviata_da').references(() => users.id, { onDelete: 'set null' }),
+  archiviataIl: timestamp('archiviata_il', { withTimezone: true }),
+  createdBy:    uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedBy:    uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:    timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const cralIniziativePartecipanti = pgTable('cral_iniziative_partecipanti', {
+  iniziativaId: uuid('iniziativa_id').notNull().references(() => cralIniziative.id, { onDelete: 'cascade' }),
+  socioId:      varchar('socio_id', { length: 12 }).notNull().references(() => cralSoci.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+}, (t) => [primaryKey({ columns: [t.iniziativaId, t.socioId] })])
+
+export const cralScelte = pgTable('cral_scelte', {
+  iniziativaId: uuid('iniziativa_id').notNull().references(() => cralIniziative.id, { onDelete: 'cascade' }),
+  socioId:      varchar('socio_id', { length: 12 }).notNull().references(() => cralSoci.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+  dati:         jsonb('dati').notNull().default(sql`'{}'::jsonb`),
+  fonte:        varchar('fonte', { length: 12 }).notNull().default('manuale'),
+  updatedBy:    uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt:    timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.iniziativaId, t.socioId] })])
+
+export const cralCarichi = pgTable('cral_carichi', {
+  id:           uuid('id').primaryKey().defaultRandom(),
+  iniziativaId: uuid('iniziativa_id').notNull().references(() => cralIniziative.id, { onDelete: 'cascade' }),
+  articolo:     varchar('articolo', { length: 20 }).notNull(),
+  quantita:     integer('quantita').notNull(),
+  data:         date('data').notNull(),
+  note:         varchar('note', { length: 300 }).notNull().default(''),
+  createdBy:    uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const cralRichieste = pgTable('cral_richieste', {
+  id:            uuid('id').primaryKey().defaultRandom(),
+  iniziativaId:  uuid('iniziativa_id').notNull().references(() => cralIniziative.id, { onDelete: 'cascade' }),
+  socioId:       varchar('socio_id', { length: 12 }).notNull().references(() => cralSoci.id, { onUpdate: 'cascade' }),
+  articolo:      varchar('articolo', { length: 20 }).notNull(),
+  quantita:      integer('quantita').notNull(),
+  dataRichiesta: date('data_richiesta').notNull(),
+  stato:         varchar('stato', { length: 10 }).notNull().default('ATTESA'),
+  dataConsegna:  date('data_consegna'),
+  modo:          varchar('modo', { length: 5 }).notNull().default('MANO'),
+  pagato:        boolean('pagato').notNull().default(false),
+  sconto:        jsonb('sconto'),
+  note:          varchar('note', { length: 300 }).notNull().default(''),
+  createdBy:     uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedBy:     uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const cralQuoteAnno = pgTable('cral_quote_anno', {
+  anno:        smallint('anno').primaryKey(),
+  importoCent: integer('importo_cent').notNull(),
+  updatedBy:   uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const cralQuote = pgTable('cral_quote', {
+  anno:      smallint('anno').notNull().references(() => cralQuoteAnno.anno, { onDelete: 'cascade' }),
+  socioId:   varchar('socio_id', { length: 12 }).notNull().references(() => cralSoci.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+  modo:      varchar('modo', { length: 10 }).notNull(),
+  mesi:      boolean('mesi').array().notNull(),
+  pagataIl:  date('pagata_il'),
+  note:      varchar('note', { length: 300 }).notNull().default(''),
+  updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.anno, t.socioId] })])

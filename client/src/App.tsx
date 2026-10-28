@@ -42,6 +42,8 @@ import VersamentiEntiPage from './pages/VersamentiEntiPage'
 // — code-split dedicato, niente nel bundle principale finché un admin non apre
 // lo strumento di disegno regioni (uso saltuario, costo di caricamento accettabile).
 const PdfRegionEditorPage = lazy(() => import('./pages/PdfRegionEditorPage'))
+// Lazy anche il Modulo CRAL: solo admin, caricato quando si apre la voce di menu.
+const CralPage = lazy(() => import('./pages/CralPage').then(m => ({ default: m.CralPage })))
 
 function PdfEditorLoadingFallback() {
   return (
@@ -280,6 +282,11 @@ export default function App() {
       {currentPage === 'pdf-region-templates' && <PdfRegionTemplatesPage />}
       {currentPage === 'emolumenti'   && user?.isAdmin && <EmolumentiArea />}
       {currentPage === 'versamenti'   && <VersamentiEntiPage />}
+      {currentPage === 'cral'         && user?.isAdmin && (
+        <Suspense fallback={<div className="p-6 text-sm text-slate-400">Caricamento del modulo CRAL…</div>}>
+          <CralPage />
+        </Suspense>
+      )}
       {currentPage === 'pdf-region-editor' && user?.isAdmin && (
         <Suspense fallback={<PdfEditorLoadingFallback />}>
           <PdfRegionEditorPage />

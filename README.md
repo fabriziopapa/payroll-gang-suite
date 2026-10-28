@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.10.26.5-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.10.28-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -50,12 +50,17 @@ payroll-gang-suite/
 │       │   ├── editor/          #   DettaglioCard, DettaglioFormModal, ComunicazioneModal
 │       │   ├── versamenti/      #   Versamenti enti: RubricaEntiTab, ModelliMailTab, Modali
 │       │   │                    #   (dettaglio ente, anteprima EML), genera.ts, ui.tsx
+│       │   ├── cral/            #   Modulo CRAL: schede Soci, Sedi, Importazione, Da validare, Eventi
+│       │   │                    #   (Turni, Magazzino, Sconti, ImportEvento), Quote, Report, Guide, Parametri;
+│       │   │                    #   tipi.ts (modello), logica.ts (+ test: conti, sconti, turni, quote),
+│       │   │                    #   report.ts (CSV/PDF nel browser), ui.tsx (contesto e componenti)
 │       │   └── certificatoTemplate/  # Editor template certificato
 │       ├── constants/           # csvDefaults, scorporoCoefficients, palette gruppi
 │       ├── hooks/               # useDebounce, usePdfDocument, …
 │       ├── pages/               # Dashboard, Editor, Viewer, Ricerca, Anagrafiche, Voci,
 │       │                        # Capitoli, Certificati, Emolumenti (EmolumentiArea: due schede), PdfRegionEditor,
-│       │                        # Impostazioni, Utenti, VersamentiEnti (stampa versamenti → EML per ente)
+│       │                        # Impostazioni, Utenti, VersamentiEnti (stampa versamenti → EML per ente),
+│       │                        # CralPage (Modulo CRAL, solo admin, caricata a richiesta)
 │       ├── store/               # Stato globale Zustand (useStore.ts)
 │       ├── types/               # Interfacce TypeScript + APP_VERSION
 │       └── utils/               # CSV / PDF / EML builder, calcoli scorporo (biz.ts),
@@ -81,22 +86,26 @@ payroll-gang-suite/
 │       ├── auth/                # TOTP (RFC 6238) + JWT ES256 + refresh rotante Argon2id
 │       ├── db/
 │       │   ├── schema.ts        # ★ Schema Drizzle — fonte di verità del DB
-│       │   ├── migrations/      # 0001…0021 — applicate da ./pgs-migra.sh, registrate in schema_migrations
+│       │   ├── migrations/      # 0001…0022 — applicate da ./pgs-migra.sh, registrate in schema_migrations
 │       │   │                    #   (già incluse in setup.sql: NON eseguire su install nuova)
 │       │   └── repositories/    # Repository pattern (PgBozze, PgUsers, PgCertificati, …)
 │       ├── lib/                 # clientIp.ts (IP reale dietro Cloudflare) ·
 │       │                        # turnstile.ts (verifica Turnstile con motivo del rifiuto, con test) ·
 │       │                        # areaConto.ts (regola IT/SEPA/EXTRA_UE — elenco EPC v8.0, con test;
 │       │                        #   unica fonte dell'area del conto, anche per GET /area-conto) ·
-│       │                        # versamenti.ts (email degli enti, schema dei modelli mail, con test)
+│       │                        # versamenti.ts (email degli enti, schema dei modelli mail, con test) ·
+│       │                        # cral.ts (config degli eventi, scelte, sconti, tessera, abbinamento
+│       │                        #   del libro soci all'anagrafica, con test)
 │       ├── middleware/          # authenticate.ts (JWT preHandler)
 │       ├── routes/              # /api/v1: auth, bozze, anagrafiche, voci, capitoli,
 │       │                        # settings, users, certificati, emolumenti, emolumenti/tipi-conto (tipiConto.ts),
-│       │                        # pdf-region, cineca, area-conto (areaConto.ts), versamenti (versamenti.ts)
+│       │                        # pdf-region, cineca, area-conto (areaConto.ts), versamenti (versamenti.ts),
+│       │                        # cral (cral.ts, solo admin)
 │       ├── schemas/             # Zod validazione (BozzaDatiSchema, …)
 │       └── services/            # cryptoService, importService, mailerService, cinecaService
 │           ├── emolumenti/      #   risoluzione nominativi → matricole, testate CSA → conto
 │           │                    #   per matricola, tipi conto → TXT (logica pura + test)
+│           ├── cral/            #   fogli.ts: lettura xlsx/xls/csv del libro soci e dei file degli eventi
 │           ├── cedolino/        #   parser PDF cedolino + calculator
 │           ├── certificato/     #   stampa unione DOCX (+ assets)
 │           └── pdfRegion/       #   estrazione via template regioni
@@ -136,6 +145,7 @@ payroll-gang-suite/
 - **Verifica liquidato** *(admin)* — confronto del liquidato CINECA (`/liquidazioni/liquidato/dettaglio`) con gli invii PGS ricostruiti (join per `matricola|voce|capitolo|dataCompVoce|riferimento`), classificazione NUOVO / CONGUAGLIO / STORNO / RETTIFICA; ogni lettura è auditata
 - **Dottorandi e borse (area Emolumenti)** *(admin)* — elenco lavorazioni con bozze/archiviate, caricamento nominativi per incollato o ricerca in anagrafica, lettura di cio' che e' **gia' in CSA** (i mesi presenti non sono selezionabili: la competenza doppia non nasce), abbinamenti d'ufficio tipo→voce→capitolo (DR `09834`/`000601`, BS `09947`/`000706`, BE `09766`/`000602`), export CSV per HR Suite e **TXT matricole divise per area del conto**
 - **Versamenti enti** (dalla 26.10.26) — porting strutturato del Java *GestioneSaldiEnti*: si carica la stampa versamenti di CSA (`STAMPA_VERSAMENTI_*.CSV`, anche con **piu' mesi**), e per ogni ente si scarica l'**EML da aprire in Outlook** (bozza `X-Unsent`) con CSV e PDF di dettaglio, ora con la **data di nascita**. Il file si elabora **solo nel browser**: PGS salva soltanto la rubrica degli enti (email anche multiple, abilitato, modello) e i **modelli mail** con i loro allegati personalizzabili. Vedi *Sezione Versamenti enti*
+- **Modulo CRAL** (dalla 26.10.28) *(admin)* — soci dipendenti, soci esterni, esterni e familiari; import annuale del **libro soci** abbinato all'anagrafica PGS per nominativo (mai il codice fiscale); eventi con scelta, consegna, **ordini a pagamento**, **campi estivi a settimane** e **biglietti a magazzino**; sconti per tipologia e personali; **quote associative** per anno solare; report CSV/PDF. Vedi *Sezione Modulo CRAL*
 - **PDF Region Editor** *(in rollout, kill-switch off)* — strumento admin: disegno regioni di riconoscimento layout direttamente sul cedolino renderizzato (canvas), template versionati e immutabili riusabili per l'estrazione automatica delle voci
 
 ---
@@ -314,6 +324,53 @@ Audit: `VERSAMENTI_ENTI_SINCRONIZZATI` (enti nuovi e descrizioni cambiate), `VER
 
 **Regole di sicurezza della rubrica** (audit 26.10.26.2). Gli indirizzi si accettano **solo in ASCII** (parte locale RFC 5322, dominio `[A-Za-z0-9-]`, un dominio con accenti si scrive `xn--…`): niente spazi, a capo, caratteri di controllo o invisibili, e niente **omografi** (una «і» cirillica che fa sembrare giusto un dominio sbagliato: gli EML portano dati personali). Nomi file, descrizioni e testi dei modelli si **ripuliscono** sul server da NUL, caratteri di controllo, invisibili e override bidirezionali prima di finire nel database o nell'audit. Sincronizzazione e import scrivono la rubrica **in fila** (lucchetto di transazione `pg_advisory_xact_lock`), cosi' due caricamenti contemporanei dello stesso ente nuovo non vanno in errore.
 
+## Sezione Modulo CRAL
+
+Menu *Modulo CRAL → Soci e iniziative*, **solo amministratori** (voce di menu nascosta e rotte respinte per gli altri). Rotte `/api/v1/cral` (`routes/cral.ts`, audit **awaited**: se non si registra, l'operazione risponde errore); regole pure in `lib/cral.ts` (con test); lettura dei file in `services/cral/fogli.ts`; repository `PgCralRepository`; migrazione `0022_cral.sql` (14 tabelle `cral_*`, gia' inclusa in `setup.sql`). Client in `components/cral/` e `pages/CralPage.tsx` (caricata a richiesta).
+
+**Privacy.** Il modulo **non raccoglie il codice fiscale**: le persone si distinguono con **cognome, nome e data di nascita**. La colonna *CODICE FISCALE* del libro soci si ignora e non si salva. L'audit registra solo ID e conteggi, mai nominativi.
+
+### Le persone
+
+| tipologia | ID | cosa e' |
+|---|---|---|
+| Socio dipendente (SD) | matricola PGS | dipendente iscritto al CRAL, nome e nascita dall'anagrafica PGS |
+| Socio esterno (SE) | `EXT-nnnn` | iscritto non dipendente; entra **da validare** |
+| Esterno (EST) | `EXT-nnnn` o matricola | non socio; con la matricola e' un **dipendente non socio** |
+| Familiare (FAM) | `FAM-nnnn` | coniuge o figlio/figlia di **uno o piu'** soci (SD o SE); vale finche' almeno uno e' attivo |
+
+- *Soci*: elenco di soci ed esterni, i familiari come sottovoce del loro socio; scheda della persona (tipologia, tessera, sede, email, nascita, familiari, storico tessere, cessazione e riammissione).
+- *Sedi*: chi ritira dove; «Esterni» e' una sede come le altre.
+- *Da validare*: soci esterni ed esterni si correggono (tipologia, sede, **tessera dal libro soci**, nominativo, nascita, email) e si validano o rifiutano; **«Trova in anagrafica PGS»** da' la matricola: il socio esterno diventa socio dipendente, l'esterno resta esterno; scelte, ordini e familiari seguono il nuovo ID.
+- **Tessera** (*Parametri*): solo progressivo (default, `0042`) o parte testuale + progressivo (`CRAL-0042`); chi rientra dopo la cessazione prende un **numero nuovo** (default) oppure lo stesso con un suffisso (`0042/01`). Deve essere unica. La validazione non la assegna: viene dal libro soci o si scrive a mano.
+- **ATIPICO** del libro soci: per ora solo un'etichetta.
+
+### Importazione del libro soci (tracciato T1)
+
+Il foglio *LIBRO SOCI* va al server, che lo legge (`.xlsx`, `.xls`, `.csv`, max 5 MB) e abbina ogni riga all'anagrafica PGS (cessati compresi): prima la **matricola**, se c'e', poi il **nominativo** con la regola di Emolumenti (`risolviNominativo`, mai indovinare). Esiti: *trovato*, *da verificare* (un solo candidato con nomi in piu'), *omonimi* (scegli tu; la **data di nascita** del file decide fra gli omonimi e si segnala se e' diversa da PGS), *non in anagrafica* (nuovo socio esterno da validare). Riga di titolo sopra l'intestazione e intestazione ripetuta a meta' foglio si saltano. `N.ISCR.SOCIO` diventa la tessera; un numero diverso da quello in PGS si segnala e, con l'interruttore, si prende quello del file. Colonna `ESTERNI`: vuota = socio da cercare in PGS, `ESTERNO` = socio esterno, `ATIPICO` = etichetta.
+
+**Soci assenti dal file**: per ogni socio attivo che il file non trova si decide a mano *Cessato*, *Resta attivo* o *È nel file come…* (nome scritto male: si associa la riga giusta, proposta per stesso numero d'iscrizione o nome simile). Finche' non si decide, e finche' ci sono omonimi aperti o tessere doppie, la conferma e' bloccata. La conferma scrive tutto in **una transazione**. Gli altri tracciati (T2 risposte del modulo, T3 ordini anche senza intestazione, T4 partecipanti, T5 iscrizioni ai campi) sono nella scheda *Guide* con esempio e modello CSV; T4 e T5 sono provvisori.
+
+### Eventi
+
+Cinque modalita': **Scelta** di un'opzione (con opzione predefinita per chi non risponde, da contare nel riepilogo o da assegnare alla chiusura), **Nessuna scelta** (solo consegna), **Ordine a pagamento** (prodotti per tipologia con prezzo, vendita al pezzo, a cassetta o al kg, contenuto lt/kg, massimo a testa; quantita' per sede, ordine al fornitore con subtotali), **Turni a quota fissa** (campi estivi: settimane *Prenotata / Frequentata / Tolta*, quota piena a settimana, versato e saldo; prima il socio o dipendente di riferimento, sotto i suoi iscritti, con il totale della famiglia) e **Magazzino** (biglietti cinema: carichi con data, richieste con data servite in ordine, consegna a mano o via email che scala la giacenza, registro di magazzino). Partecipanti **per gruppi** (tipologie e sedi) o **singoli** (da file o uno per uno, anche persone nuove). Un evento si archivia (si chiude e diventa di sola lettura) e si ripristina.
+
+**Sconti** in ogni attivita' con un prezzo: regola per tipologia (soci dipendenti, soci esterni, dipendenti non soci, esterni, familiari; percentuale o euro a ordine / a settimana / a biglietto) e **sconto personale** sulla persona o sulla richiesta (percentuale, importo fisso o «nessuno», con il motivo), che sostituisce la regola. Nei campi conta la persona di riferimento, con la categoria **bloccata il giorno dell'iscrizione**. Nell'import ordini l'importo del file e' solo un controllo: se e' piu' basso, la differenza diventa uno sconto personale.
+
+### Quote associative
+
+Quota per **anno solare** (es. 60,00 €, parametrizzabile anno per anno), dovuta **per intero** anche da chi entra a novembre o recede prima. Pagamento in un'unica soluzione, mensile o con **trattenuta in busta paga** (solo con matricola; «Registra la trattenuta del mese»). Esterni e familiari non la pagano. Il confronto con le trattenute dei cedolini e' **tra i lavori da fare** (voci stipendiali da individuare): il report *Quote associative* e' la base.
+
+### Report
+
+Elenco soci, quote associative e, per ogni evento, riepilogo per sede, scelte/ordini/consegne per persona, ordine al fornitore, iscritti e quote per famiglia, elenco per settimana (foglio presenze), giacenze, richieste e registro di magazzino. Interruttori per colonna (tessera, firma, note, pagato, consegnato, **età**: a oggi per gli elenchi, alla data dell'evento o della richiesta per gli eventi), raggruppamento per sede, una pagina per sede. **CSV** (`;`, UTF-8 con BOM) e **PDF** A4 generati nel browser.
+
+### Cosa salva PGS
+
+`cral_sedi`, `cral_parametri` (tessera e progressivi), `cral_tipi`, `cral_tipologie_prodotto`, `cral_soci` (nessun codice fiscale), `cral_familiari_legami`, `cral_soci_tessere`, `cral_iniziative` (config in JSON validato dal server), `cral_iniziative_partecipanti`, `cral_scelte` (dati in JSON validato contro la config), `cral_carichi`, `cral_richieste`, `cral_quote_anno`, `cral_quote`. Importi in centesimi interi.
+
+Audit (entita' `cral`): `CRAL_FILE_LETTO`, `CRAL_IMPORT_ABBINAMENTO`, `CRAL_IMPORT_CONFERMATO`, `CRAL_PERSONA_CREATA` / `_MODIFICATA`, `CRAL_LEGAMI_FAMILIARE`, `CRAL_PERSONE_VALIDA` / `_RIFIUTA` / `_RIMETTI` / `_CESSA` / `_RIATTIVA`, `CRAL_SOCIO_RIAMMESSO`, `CRAL_TROVATO_IN_PGS`, `CRAL_SEDE_ASSEGNATA`, `CRAL_SEDE_*`, `CRAL_TIPO_*`, `CRAL_TIPOLOGIA_*`, `CRAL_PARAMETRI_TESSERA`, `CRAL_EVENTO_CREATO` / `_MODIFICATO` / `_ARCHIVIATO` / `_RIPRISTINATO`, `CRAL_PARTECIPANTI`, `CRAL_SCELTA`, `CRAL_SCELTE_IN_BLOCCO`, `CRAL_CARICO`, `CRAL_RICHIESTA` / `_MODIFICATA`, `CRAL_QUOTA_ANNO`, `CRAL_QUOTA_SOCIO`, `CRAL_TRATTENUTA_MESE`.
+
 ## Sezione PDF Region Editor
 
 *(in rollout — dietro kill-switch, non ancora attivo in produzione)*
@@ -462,6 +519,19 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.10.28
+**Modulo CRAL: soci, eventi, quote associative e report (solo admin)**
+
+- **Nuovo modulo** *Modulo CRAL → Soci e iniziative*, solo per gli amministratori. Quattro tipologie di persona (socio dipendente con la matricola PGS, socio esterno `EXT-nnnn` da validare, esterno, familiare `FAM-nnnn` legato a uno o piu' soci). **Nessun codice fiscale**: nominativo e data di nascita. Dettagli in *Sezione Modulo CRAL*.
+- **Libro soci (T1)**: il server legge il file e abbina i nominativi all'anagrafica PGS con la regola di Emolumenti (matricola, poi nominativo; la data di nascita decide fra gli omonimi). Tessera dal numero d'iscrizione, tessere diverse segnalate, **soci assenti dal file** da decidere uno per uno (cessato, resta attivo, «è nel file come…»), conferma in una transazione.
+- **Eventi** in cinque modalita' (scelta, consegna, ordine a pagamento, turni dei campi estivi, magazzino dei biglietti), partecipanti per gruppi o singoli, archiviazione. **Sconti** per tipologia e personali in ogni attivita' a pagamento; nei campi la categoria si blocca all'iscrizione. Importazioni T2–T5 (risposte del modulo, ordini anche da fogli senza intestazione, partecipanti, iscrizioni).
+- **Quote associative** per anno solare (dovute per intero), unica soluzione, mensile o trattenuta in busta paga; confronto con i cedolini tra i lavori da fare.
+- **Report** CSV e PDF con colonne a scelta (anche l'età), una pagina per sede; scheda **Guide** con i tracciati T1–T5 e l'equivalente manuale di ogni importazione.
+- **Server**: rotte `/api/v1/cral` (solo admin, zod stretto, audit awaited con soli ID e conteggi), `lib/cral.ts`, `services/cral/fogli.ts`, `PgCralRepository`. **Migrazione `0022_cral.sql`** (14 tabelle `cral_*`, dati iniziali: sedi, tipi di evento, tipologie di prodotto, quota 2026 a 60,00 €), gia' consolidata in `setup.sql`. L'archiviazione di un evento lo chiude anche.
+- **Client**: `pages/CralPage.tsx` caricata a richiesta (il bundle principale non cresce), `components/cral/`.
+- Test: 10 nuovi in `lib/cral.test.ts` (server 127) e 10 in `components/cral/logica.test.ts` (client 102). Provato end-to-end con dati inventati: soci, familiari, import del libro soci con omonimi e assenti, validazione, panettoni con predefinita, ordini (anche il foglio delle mele), campo estivo, cinema, quote, report CSV e PDF, nessun errore in console.
+- Domande ancora aperte: rate mancanti di chi entra a meta' anno; report degli sconti concessi per evento.
 
 ### 26.10.26.5
 **Versamenti enti: finestra per il mese quando il CSV non ce l'ha**

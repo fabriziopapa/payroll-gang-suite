@@ -883,6 +883,128 @@ export interface IVersamentiRepository {
 }
 
 // ------------------------------------------------------------
+// MODULO CRAL (migrazione 0022)
+// ------------------------------------------------------------
+
+export interface CralSedeRow { id: string; nome: string; attiva: boolean; ordine: number }
+export interface CralTipoRow { id: string; nome: string; colore: string; pagamento: boolean; modo: string | null; attivo: boolean; ordine: number }
+export interface CralTipologiaRow { id: string; nome: string; attiva: boolean; ordine: number }
+export interface CralTesseraParam {
+  formato: 'NUM' | 'PREF'; prefisso: string; cifre: number; prossimo: number
+  riammissione: 'NUOVO' | 'SUFFISSO'; sepSuffisso: '' | '/' | '-' | '.'; cifreSuffisso: number
+}
+export interface CralParametriRow { tessera: CralTesseraParam; extProssimo: number; famProssimo: number }
+
+export interface CralSocioRow {
+  id: string; tipo: 'SD' | 'SE' | 'EST' | 'FAM'; origine: 'PGS' | 'EST'; matricola: string | null
+  cognome: string; nome: string; nascita: string | null; email: string; sede: string | null
+  tessera: string; riammissioni: number
+  stato: 'ATTIVO' | 'DA_VALIDARE' | 'RIFIUTATO' | 'CESSATO'
+  iscrittoIl: string; cessatoIl: string | null; provenienza: string | null; atipico: boolean; note: string
+  creatoDa: string | null; creatoIl: string; validatoDa: string | null; validatoIl: string | null
+  modificatoDa: string | null; modificatoIl: string | null
+  legami: Array<{ socio: string; relazione: 'CONIUGE' | 'FIGLIO' }>
+  storicoTessere: Array<{ tessera: string; dal: string | null; al: string }>
+}
+
+export interface CralCaricoRow { id: string; art: string; qta: number; data: string; note: string }
+export interface CralRichiestaRow {
+  id: string; persona: string; art: string; qta: number; dataRich: string
+  stato: 'ATTESA' | 'CONSEGNATA' | 'ANNULLATA'; dataCons: string | null; modo: 'MANO' | 'EMAIL'
+  pagato: boolean; sconto: unknown; note: string
+}
+export interface CralIniziativaRow {
+  id: string; tipo: string; titolo: string; anno: number; data: string; scadenza: string | null
+  stato: 'BOZZA' | 'APERTA' | 'CHIUSA'; modalita: 'SCELTA' | 'NESSUNA' | 'ORDINE' | 'TURNI' | 'MAGAZZINO'
+  modoPart: 'GRUPPI' | 'SINGOLI'; gruppi: string[]; sedi: string[]; predefinita: string | null
+  fornitore: string; pagamento: string; note: string; quota: number; config: unknown
+  archiviata: boolean; archiviataDa: string | null; archiviataIl: string | null
+  partecipanti: string[]
+  /** socio → dati della scelta (JSON validato) + fonte */
+  scelte: Record<string, Record<string, unknown>>
+  carichi: CralCaricoRow[]
+  richieste: CralRichiestaRow[]
+}
+export interface CralQuotaRow { modo: 'UNICA' | 'MENSILE' | 'TRATTENUTA'; mesi: boolean[]; pagataIl: string | null; note: string }
+export interface CralStato {
+  sedi: CralSedeRow[]; tipi: CralTipoRow[]; tipologie: CralTipologiaRow[]; parametri: CralParametriRow
+  soci: CralSocioRow[]; iniziative: CralIniziativaRow[]
+  quoteAnno: Array<{ anno: number; importo: number }>
+  quote: Record<string, Record<string, CralQuotaRow>>
+}
+
+/** Riga dell'anagrafica PGS per l'abbinamento e la ricerca: nessun codice fiscale. */
+export interface CralAnagraficaRow {
+  matricola: string; cognNome: string | null; cognome: string | null; nome: string | null
+  ruolo: string | null; druolo: string | null; idAb: number | null; nascita: string | null; finRap: string | null
+}
+
+export interface CralNuovaPersona {
+  tipo: 'SD' | 'SE' | 'EST' | 'FAM'
+  /** Dall'anagrafica PGS: socio dipendente o esterno con matricola. */
+  matricola?: string
+  cognome: string; nome: string; nascita: string | null; email: string; sede: string | null
+  tessera: string; note: string; atipico?: boolean; provenienza?: string
+  legami?: Array<{ socio: string; relazione: 'CONIUGE' | 'FIGLIO' }>
+  stato: 'ATTIVO' | 'DA_VALIDARE'
+  perIniziativa?: string
+}
+export interface CralModificaPersona {
+  tipo?: 'SD' | 'SE' | 'EST'; cognome?: string; nome?: string; nascita?: string | null; email?: string
+  sede?: string | null; tessera?: string; note?: string; atipico?: boolean
+}
+export type CralOperazioneImport =
+  | { op: 'aggiorna'; socio: string; sede?: string | null; tessera?: string; atipico?: boolean; nota?: string }
+  | { op: 'nuovoPgs'; matricola: string; tipo: 'SD' | 'EST'; cognome: string; nome: string; nascita: string | null; email: string; sede: string | null; tessera: string; atipico: boolean; nota: string }
+  | { op: 'nuovoEsterno'; tipo: 'SE' | 'EST'; cognome: string; nome: string; nascita: string | null; email: string; sede: string | null; tessera: string; atipico: boolean; nota: string }
+  | { op: 'cessa'; socio: string; nota?: string }
+export interface CralEsitoImport { nuoviPgs: number; nuoviEsterni: number; aggiornati: number; tessere: number; cessati: number }
+
+export type CralErrore =
+  | 'TESSERA_DOPPIA' | 'MATRICOLA_GIA_SOCIO' | 'SOCIO_NON_TROVATO' | 'SEDE_SCONOSCIUTA'
+  | 'LEGAME_NON_VALIDO' | 'STATO_NON_VALIDO' | 'SUFFISSI_ESAURITI' | 'NOME_GIA_USATO' | 'TIPO_SCONOSCIUTO'
+
+export interface ICralRepository {
+  stato(): Promise<CralStato>
+  anagrafica(): Promise<CralAnagraficaRow[]>
+  cercaAnagrafica(q: string, limite: number): Promise<CralAnagraficaRow[]>
+  parametri(): Promise<CralParametriRow>
+  salvaTessera(t: CralTesseraParam, userId: string | null): Promise<void>
+
+  creaSede(nome: string): Promise<CralSedeRow | 'NOME_GIA_USATO'>
+  aggiornaSede(id: string, patch: { nome?: string; attiva?: boolean }): Promise<CralSedeRow | 'NOME_GIA_USATO' | null>
+  creaTipo(t: { nome: string; colore: string; pagamento: boolean; modo: string | null }): Promise<CralTipoRow>
+  aggiornaTipo(id: string, patch: { nome?: string; colore?: string; pagamento?: boolean; attivo?: boolean }): Promise<CralTipoRow | null>
+  creaTipologia(nome: string): Promise<CralTipologiaRow>
+  aggiornaTipologia(id: string, patch: { nome?: string; attiva?: boolean }): Promise<CralTipologiaRow | null>
+
+  socio(id: string): Promise<CralSocioRow | null>
+  creaPersona(p: CralNuovaPersona, userId: string | null): Promise<CralSocioRow | CralErrore>
+  modificaPersona(id: string, patch: CralModificaPersona, userId: string | null): Promise<CralSocioRow | CralErrore>
+  impostaLegami(id: string, legami: Array<{ socio: string; relazione: 'CONIUGE' | 'FIGLIO' }>, userId: string | null): Promise<CralSocioRow | CralErrore>
+  cambiaStato(ids: string[], azione: 'valida' | 'rifiuta' | 'rimetti' | 'cessa' | 'riattiva', userId: string | null): Promise<number>
+  riammetti(id: string, userId: string | null): Promise<CralSocioRow | CralErrore>
+  collegaPgs(id: string, a: CralAnagraficaRow, userId: string | null): Promise<CralSocioRow | CralErrore>
+  spostaSede(ids: string[], sede: string | null, userId: string | null): Promise<number>
+  importaLibroSoci(ops: CralOperazioneImport[], file: string, userId: string | null): Promise<CralEsitoImport | CralErrore>
+
+  iniziativa(id: string): Promise<CralIniziativaRow | null>
+  usiIniziativa(id: string): Promise<{ opz: Set<string>; prodotti: Set<string>; periodi: Set<string>; articoli: Set<string> }>
+  salvaIniziativa(id: string | null, i: Omit<CralIniziativaRow, 'id' | 'archiviata' | 'archiviataDa' | 'archiviataIl' | 'partecipanti' | 'scelte' | 'carichi' | 'richieste'>, userId: string | null): Promise<CralIniziativaRow | 'TIPO_SCONOSCIUTO' | null>
+  archivia(id: string, archiviata: boolean, userId: string | null): Promise<boolean>
+  partecipanti(id: string, aggiungi: string[], togli: string[]): Promise<number>
+  scelte(id: string, soci: string[]): Promise<Map<string, { dati: Record<string, unknown>; fonte: string }>>
+  salvaScelte(id: string, voci: Array<{ socio: string; dati: Record<string, unknown>; fonte: string }>, userId: string | null): Promise<number>
+  creaCarico(id: string, c: { art: string; qta: number; data: string; note: string }, userId: string | null): Promise<CralCaricoRow>
+  creaRichiesta(id: string, r: { persona: string; art: string; qta: number; dataRich: string; modo: 'MANO' | 'EMAIL'; note: string }, userId: string | null): Promise<CralRichiestaRow>
+  aggiornaRichiesta(id: string, rid: string, patch: Partial<Pick<CralRichiestaRow, 'stato' | 'dataCons' | 'modo' | 'pagato' | 'sconto' | 'note'>>, userId: string | null): Promise<CralRichiestaRow | null>
+
+  salvaQuotaAnno(anno: number, importo: number, userId: string | null): Promise<void>
+  salvaQuota(anno: number, socio: string, patch: Partial<CralQuotaRow>, modoPredefinito: CralQuotaRow['modo'], userId: string | null): Promise<CralQuotaRow | null>
+  registraTrattenuta(anno: number, mese: number, soci: string[], userId: string | null): Promise<number>
+}
+
+// ------------------------------------------------------------
 // Factory type — punto di accesso unico al DB layer
 // ------------------------------------------------------------
 

@@ -4,6 +4,10 @@
 
 import { apiFetch } from './client'
 import type { AppSettings, VoceConfig } from '../types'
+import type {
+  AnagraficaPgs, Carico, Iniziativa, Legame, ParametriTessera, PatchScelta, Persona, QuotaSocio, Richiesta,
+  ScontoPers, Sede, StatoApi, TipoEvento, Tipologia,
+} from '../components/cral/tipi'
 
 // ── Tipi risposta dal server ──────────────────────────────────
 
@@ -1244,4 +1248,84 @@ export const versamentiApi = {
     apiFetch<{ ok: true }>('/versamenti/eventi/esportazione', {
       method: 'POST', body: JSON.stringify(body),
     }),
+}
+
+// ── Modulo CRAL (solo admin) ──────────────────────────────────
+// Tipi del modello in components/cral/tipi.ts: qui solo le chiamate.
+
+export interface CralAbbinamentoApi {
+  i: number
+  esito: 'trovato' | 'parziale' | 'ambiguo' | 'non-trovato'
+  via: 'matricola' | 'nominativo' | 'nominativo e data di nascita'
+  candidati: AnagraficaPgs[]
+  matricolaIgnota?: string
+  nascitaDiversa?: string
+}
+export type CralOperazioneApi =
+  | { op: 'aggiorna'; socio: string; sede?: string | null; tessera?: string; atipico?: boolean; nota?: string }
+  | { op: 'nuovoPgs'; matricola: string; tipo: 'SD' | 'EST'; cognome: string; nome: string; nascita: string | null; email: string; sede: string | null; tessera: string; atipico: boolean; nota: string }
+  | { op: 'nuovoEsterno'; tipo: 'SE' | 'EST'; cognome: string; nome: string; nascita: string | null; email: string; sede: string | null; tessera: string; atipico: boolean; nota: string }
+  | { op: 'cessa'; socio: string; nota?: string }
+export interface CralNuovaPersonaApi {
+  tipo: 'SD' | 'SE' | 'EST' | 'FAM'; matricola?: string; cognome?: string; nome?: string; nascita?: string | null
+  email?: string; sede?: string | null; tessera?: string; note?: string; legami?: Legame[]; perIniziativa?: string
+}
+export type CralIniziativaBody = Pick<Iniziativa, 'tipo' | 'titolo' | 'anno' | 'data' | 'scadenza' | 'stato' | 'modalita' | 'modoPart' | 'gruppi' | 'sedi' | 'predefinita' | 'fornitore' | 'pagamento' | 'note' | 'quota'> & {
+  config: Pick<Iniziativa, 'opzioni' | 'prodotti' | 'periodi' | 'articoli' | 'sconti'>
+}
+
+const corpo = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) })
+const enc = encodeURIComponent
+
+export const cralApi = {
+  stato: () => apiFetch<StatoApi>('/cral/stato'),
+  anagrafica: (q: string) => apiFetch<{ risultati: AnagraficaPgs[] }>(`/cral/anagrafica?q=${enc(q)}`),
+  leggiFile: (nome: string, base64: string) =>
+    apiFetch<{ fogli: Record<string, string[][]> }>('/cral/file/leggi', corpo('POST', { nome, base64 }), 60_000),
+  abbina: (righe: Array<{ i: number; nominativo: string; matricola?: string; nascita?: string }>) =>
+    apiFetch<{ esiti: CralAbbinamentoApi[] }>('/cral/import/abbina', corpo('POST', { righe }), 60_000),
+  confermaImport: (file: string, operazioni: CralOperazioneApi[]) =>
+    apiFetch<{ esito: { nuoviPgs: number; nuoviEsterni: number; aggiornati: number; tessere: number; cessati: number } }>(
+      '/cral/import/conferma', corpo('POST', { file, operazioni }), 60_000),
+
+  creaSede: (nome: string) => apiFetch<{ sede: Sede }>('/cral/sedi', corpo('POST', { nome })),
+  aggiornaSede: (id: string, p: { nome?: string; attiva?: boolean }) => apiFetch<{ sede: Sede }>(`/cral/sedi/${enc(id)}`, corpo('PATCH', p)),
+  creaTipo: (t: { nome: string; colore: string; pagamento: boolean }) => apiFetch<{ tipo: TipoEvento }>('/cral/tipi', corpo('POST', t)),
+  aggiornaTipo: (id: string, p: { nome?: string; colore?: string; pagamento?: boolean; attivo?: boolean }) =>
+    apiFetch<{ tipo: TipoEvento }>(`/cral/tipi/${enc(id)}`, corpo('PATCH', p)),
+  creaTipologia: (nome: string) => apiFetch<{ tipologia: Tipologia }>('/cral/tipologie', corpo('POST', { nome })),
+  aggiornaTipologia: (id: string, p: { nome?: string; attiva?: boolean }) =>
+    apiFetch<{ tipologia: Tipologia }>(`/cral/tipologie/${enc(id)}`, corpo('PATCH', p)),
+  salvaTessera: (t: ParametriTessera) => apiFetch<unknown>('/cral/parametri/tessera', corpo('PUT', t)),
+
+  creaPersona: (p: CralNuovaPersonaApi) => apiFetch<{ socio: Persona }>('/cral/soci', corpo('POST', p)),
+  modificaPersona: (id: string, p: Partial<Pick<Persona, 'cognome' | 'nome' | 'nascita' | 'email' | 'sede' | 'tessera' | 'note' | 'atipico'>> & { tipo?: 'SD' | 'SE' | 'EST' }) =>
+    apiFetch<{ socio: Persona }>(`/cral/soci/${enc(id)}`, corpo('PATCH', p)),
+  legami: (id: string, legami: Legame[]) => apiFetch<{ socio: Persona }>(`/cral/soci/${enc(id)}/legami`, corpo('PUT', { legami })),
+  cambiaStato: (ids: string[], azione: 'valida' | 'rifiuta' | 'rimetti' | 'cessa' | 'riattiva') =>
+    apiFetch<{ fatte: number }>('/cral/soci/stato', corpo('POST', { ids, azione })),
+  riammetti: (id: string) => apiFetch<{ socio: Persona }>(`/cral/soci/${enc(id)}/riammetti`, corpo('POST', {})),
+  collega: (id: string, matricola: string) => apiFetch<{ socio: Persona }>(`/cral/soci/${enc(id)}/collega`, corpo('POST', { matricola })),
+  sposta: (ids: string[], sede: string | null) => apiFetch<{ fatte: number }>('/cral/soci/sposta', corpo('POST', { ids, sede })),
+
+  creaIniziativa: (b: CralIniziativaBody) => apiFetch<{ iniziativa: { id: string } }>('/cral/iniziative', corpo('POST', b)),
+  salvaIniziativa: (id: string, b: CralIniziativaBody) => apiFetch<{ iniziativa: { id: string } }>(`/cral/iniziative/${enc(id)}`, corpo('PUT', b)),
+  archivia: (id: string, archiviata: boolean) => apiFetch<{ ok: true }>(`/cral/iniziative/${enc(id)}/archivia`, corpo('POST', { archiviata })),
+  partecipanti: (id: string, aggiungi: string[], togli: string[] = []) =>
+    apiFetch<{ fatte: number }>(`/cral/iniziative/${enc(id)}/partecipanti`, corpo('POST', { aggiungi, togli })),
+  scelta: (id: string, socio: string, dati: PatchScelta, fonte: 'manuale' | 'modulo' | 'predefinita' = 'manuale') =>
+    apiFetch<{ dati: Record<string, unknown> }>(`/cral/iniziative/${enc(id)}/scelte/${enc(socio)}`, corpo('PATCH', { dati, fonte })),
+  scelteInBlocco: (id: string, voci: Array<{ socio: string; dati: PatchScelta; sostituisci?: boolean }>, fonte: 'manuale' | 'modulo' | 'predefinita') =>
+    apiFetch<{ fatte: number }>(`/cral/iniziative/${enc(id)}/scelte`, corpo('POST', { voci, fonte }), 60_000),
+  carico: (id: string, c: Omit<Carico, 'id'>) => apiFetch<{ carico: Carico }>(`/cral/iniziative/${enc(id)}/carichi`, corpo('POST', c)),
+  richiesta: (id: string, r: Pick<Richiesta, 'persona' | 'art' | 'qta' | 'dataRich' | 'modo' | 'note'>) =>
+    apiFetch<{ richiesta: Richiesta }>(`/cral/iniziative/${enc(id)}/richieste`, corpo('POST', r)),
+  aggiornaRichiesta: (id: string, rid: string, p: { stato?: Richiesta['stato']; dataCons?: string | null; modo?: Richiesta['modo']; pagato?: boolean; sconto?: ScontoPers | null; note?: string }) =>
+    apiFetch<{ richiesta: Richiesta }>(`/cral/iniziative/${enc(id)}/richieste/${enc(rid)}`, corpo('PATCH', p)),
+
+  quotaAnno: (anno: number, importo: number) => apiFetch<{ ok: true }>(`/cral/quote-anno/${anno}`, corpo('PUT', { importo })),
+  quota: (anno: number, socio: string, p: Partial<QuotaSocio>) =>
+    apiFetch<{ quota: QuotaSocio }>(`/cral/quote/${anno}/${enc(socio)}`, corpo('PATCH', p)),
+  trattenuta: (anno: number, mese: number, soci: string[]) =>
+    apiFetch<{ fatte: number }>(`/cral/quote/${anno}/trattenuta`, corpo('POST', { mese, soci })),
 }
