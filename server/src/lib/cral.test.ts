@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   abbina, applicaSconto, baseTessera, configSchema, erroreDati, erroreIniziativa, formatTessera, iniziativaSchema,
-  numeroTessera, prossimoDopo, sceltaSchema, spezzaNominativo, tesseraDaFile, tesseraRiammissione, unisciDati, usiTolti,
+  numeroTessera, prossimoDopo, quotaDopoModifica, rataMese, sceltaSchema, versato, spezzaNominativo, tesseraDaFile, tesseraRiammissione, unisciDati, usiTolti,
   type AnagraficaCral, type ParametriTessera,
 } from './cral.js'
 
@@ -112,4 +112,17 @@ test('abbinamento: matricola, esatto, parziale, omonimi, data di nascita', () =>
   assert.equal(abbina({ i: 0, nominativo: 'VERDI CARLA' }, ANAG, PM).esito, 'non-trovato')
   const ign = abbina({ i: 0, nominativo: 'ROSSI LUCA', matricola: '099999' }, ANAG, PM)
   assert.equal(ign.matricolaIgnota, '099999'); assert.equal(ign.esito, 'trovato')
+})
+
+test('quota a mano (0024): accendere un mese registra la rata, spegnerlo la azzera; unica soluzione', () => {
+  const q0 = { modo: 'MENSILE' as const, mesi: Array<boolean>(12).fill(false), importi: Array<number>(12).fill(0), pagataIl: null, versatoUnica: null, note: '' }
+  const q1 = quotaDopoModifica(q0, { mesi: [true, true, ...Array<boolean>(10).fill(false)] }, 6000)
+  assert.deepEqual(q1.importi.slice(0, 3), [500, 500, 0]); assert.equal(versato(q1), 1000)
+  const q2 = quotaDopoModifica({ ...q1, importi: [700, 500, ...Array<number>(10).fill(0)] }, { mesi: [true, false, ...Array<boolean>(10).fill(false)] }, 6000)
+  assert.deepEqual(q2.importi.slice(0, 2), [700, 0], 'un importo maggiore della rata resta')
+  const q3 = quotaDopoModifica(q0, { pagataIl: '2026-03-01' }, 6000)
+  assert.equal(q3.versatoUnica, 6000); assert.equal(quotaDopoModifica(q3, { pagataIl: null }, 6000).versatoUnica, null)
+  assert.equal(rataMese(6001, 11), 6001 - 11 * 500)
+  const q4 = quotaDopoModifica(q0, { importi: [6000, ...Array<number>(11).fill(0)] }, 6000)
+  assert.ok(q4.mesi.every(Boolean), 'un versamento della quota annua copre tutto l\'anno')
 })

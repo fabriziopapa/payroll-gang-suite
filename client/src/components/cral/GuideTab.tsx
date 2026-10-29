@@ -1,6 +1,6 @@
 // ============================================================
 // PAYROLL GANG SUITE — Modulo CRAL · scheda Guide
-// Tracciato record di ogni importazione (T1–T6), con un esempio CSV, il
+// Tracciato record di ogni importazione (T1–T7), con un esempio CSV, il
 // modello da scaricare e l'equivalente manuale; l'archivio fra ambienti.
 // In fondo, i lavori da fare.
 // ============================================================
@@ -109,6 +109,37 @@ const TRACCIATI: Tracciato[] = [
     note: ['* Serve almeno un criterio di aggancio: ID, tessera o nominativo.', 'Cella vuota = il campo non cambia. «-» = svuota il campo.', 'Si applicano solo le colonne spuntate (di default sede, email e note): le altre si accendono a mano.', 'Persone non agganciate: si scelgono a mano o si ignorano. Una persona in più righe: vale la prima.', 'Il lotto resta in «Da validare» finché non è tutto deciso: si può applicare una parte e riprendere più tardi.'],
     esempio: 'ID;Tipologia;Stato;Data stato;Cognome;Nome;Data di nascita;Email;Sede;Tessera;Note\n090123;Socio dipendente;Attivo;;ROSSI;MARIA;;maria.rossi@ateneo.example;ACT;;\nEXT-0004;Socio esterno;Cessato;31/12/2026;BIANCHI;GIULIA;12/05/1961;;CD;0108;\nFAM-0002;;;;FERRARI;MATTEO;;;-;;sede svuotata con il trattino',
     mano: [['Sede di molte persone', 'Soci › seleziona › Sede di consegna › Applica', 'soci'], ['Stato o tipologia di molte persone', 'Soci › seleziona › Cessa / Elimina / Ripristina, Tipologia', 'soci'], ['Una persona', 'Soci › clic sulla riga', 'soci']],
+  },  {
+    id: 'T7', titolo: 'Quote versate · una riga per socio', dove: 'Importazione › Quote versate (T7)', scheda: 'import',
+    cosa: 'Carica, aggiorna e corregge in massa le quote associative versate, in attesa della lettura delle trattenute da CINECA. È la forma di «Quote associative › Esporta Excel»: si esporta l\'anno, si scrivono gli importi e si ricarica. Si registra l\'importo davvero versato: se copre la rata il mese è pagato, se un versamento copre la quota dell\'anno è pagato tutto l\'anno, un importo minore resta registrato e il mese «da completare». Nasce un lotto prima → dopo da validare.',
+    campi: [
+      ['ID', 'Sì*', 'Matricola o EXT-nnnn', '090123', 'Primo criterio di aggancio (anche l\'ex matricola di chi è passato a socio esterno).'],
+      ['Tessera · Cognome · Nome · Data di nascita', 'No*', 'Testo, gg/mm/aaaa', 'ROSSI · MARIA', 'Se manca l\'ID: tessera, poi nominativo (la data di nascita decide fra gli omonimi).'],
+      ['Anno', 'No', 'aaaa', '2026', 'Se manca vale l\'anno scelto a video. L\'anno deve essere impostato in Parametri.'],
+      ['Modalità', 'No', 'Unica soluzione · Mensile · Trattenuta in busta paga', 'Mensile', 'La trattenuta solo per chi ha la matricola.'],
+      ['Gen … Dic', 'No', 'Euro (5 · 5,00 · 4,50) oppure X / SI', '5,00', 'Importo versato nel mese. X = la rata intera. Vuoto = non cambia. Un importo pari alla quota annua paga tutto l\'anno.'],
+      ['Unica', 'No', 'Euro oppure X', '60,00', 'Versato in unica soluzione. X = la quota dell\'anno.'],
+      ['Pagata il', 'No', 'gg/mm/aaaa', '15/02/2026', 'Data dell\'unica soluzione (da sola vale «Unica = X»).'],
+      ['Versato · Saldo', '—', 'Euro', '15,00', 'Solo da leggere nell\'export: all\'import si ignorano.'],
+      ['Note', 'No', 'Testo', 'arretrati 2025', 'Nota della quota.'],
+    ],
+    note: ['* Serve almeno un criterio di aggancio: ID, tessera o nominativo.', 'Le rate già pagate NON si tolgono da file (un «-» si ignora, un importo minore su un mese pagato si segnala e si salta): si tolgono solo a mano, con un clic sul mese in Quote associative.', 'Importo diverso dalla rata: si registra con un avviso e si conferma una per una.', 'Bloccati: chi in quell\'anno non deve la quota (esterni, familiari, eliminati dall\'anno dell\'eliminazione, iscritti dopo), anno non impostato, lo stesso mese con importi diversi nel file.', 'Quando arriveranno le trattenute da CINECA useranno la stessa strada (una riga per versamento) e lo stesso lotto da validare.'],
+    esempio: 'ID;Tessera;Cognome;Nome;Data di nascita;Anno;Modalità;Gen;Feb;Mar;Apr;Mag;Giu;Lug;Ago;Set;Ott;Nov;Dic;Unica;Pagata il;Note\n090123;0001;ROSSI;MARIA;;2026;Trattenuta in busta paga;5;5;5;5;5;4,50;;;;;;;;;\nEXT-0004;0108;BIANCHI;GIULIA;;2026;Unica soluzione;;;;;;;;;;;;;60,00;15/02/2026;\n;;FERRARI;MATTEO;02/02/1975;2026;Mensile;X;X;;;;;;;;;;;;;',
+    mano: [['Una rata', 'Quote associative › clic sul mese (accende o toglie la rata)', 'quote'], ['L\'unica soluzione', 'Quote associative › casella «pagata il»', 'quote'], ['La trattenuta del mese a tutti', 'Quote associative › Registra la trattenuta del mese', 'quote']],
+  },
+  {
+    id: 'T7-V', titolo: 'Quote versate · una riga per versamento', dove: 'Importazione › Quote versate (T7)', scheda: 'import',
+    cosa: 'Stesso tracciato T7 in forma di elenco: una riga per ogni versamento, come gli elenchi delle trattenute in busta paga. Si riconosce dalla colonna «Mese». Più righe dello stesso socio e anno si uniscono in una sola variazione.',
+    campi: [
+      ['ID · Tessera · Nominativo', 'Sì*', 'Come nella forma per socio', '090123', 'Aggancio del socio.'],
+      ['Anno', 'No', 'aaaa', '2026', 'Se manca vale l\'anno scelto a video.'],
+      ['Mese', 'Sì', '1–12, nome del mese oppure UNICA', '3', 'UNICA = versamento in unica soluzione.'],
+      ['Importo', 'No', 'Euro', '5,00', 'Vuoto = la rata intera (o la quota per UNICA).'],
+      ['Data versamento', 'No', 'gg/mm/aaaa', '27/03/2026', 'Si salva come data dell\'unica soluzione.'],
+    ],
+    note: ['* Serve almeno un criterio di aggancio.', 'Lo stesso mese due volte con importi diversi blocca la variazione: va corretto il file.', 'Stesse regole della forma per socio: si aggiunge, non si toglie; avvisi per importi diversi dalla rata.'],
+    esempio: 'MATRICOLA;NOMINATIVO;ANNO;MESE;IMPORTO;DATA VERSAMENTO\n090123;;2026;1;5,00;27/01/2026\n090123;;2026;2;5,00;27/02/2026\n;BIANCHI GIULIA;2026;UNICA;60,00;15/02/2026',
+    mano: [['Una rata', 'Quote associative › clic sul mese', 'quote'], ['La trattenuta del mese a tutti', 'Quote associative › Registra la trattenuta del mese', 'quote']],
   },
 ]
 
@@ -165,8 +196,8 @@ export function GuideTab() {
       <section className="rounded-xl border border-sky-800/70 bg-sky-950/10 p-5 flex flex-col gap-2">
         <h3 className="text-white font-semibold">Lavori da fare</h3>
         <ul className="list-disc ml-5 text-sm text-slate-300 space-y-1 max-w-[80ch]">
-          <li><b>Confronto quote associative ↔ trattenute in busta paga.</b> Da fare quando saranno individuate le voci stipendiali interessate. Base pronta: il report «Quote associative» con mesi pagati e modalità «Trattenuta in busta paga».</li>
-          <li>Import delle trattenute dal cedolino al posto della registrazione mese per mese.</li>
+          <li><b>Confronto quote associative ↔ trattenute in busta paga.</b> Da fare quando saranno individuate le voci stipendiali interessate. Base pronta: il report «Quote associative» e gli importi versati per rata.</li>
+          <li>Lettura delle trattenute da CINECA: produrrà righe del T7 (una per versamento) e passerà dallo stesso lotto da validare. Intanto si caricano con il T7.</li>
           <li>Tracciati T4 (partecipanti singoli) e T5 (iscrizioni ai campi): da allineare ai file reali.</li>
           <li>Casi particolari di campi estivi e cinema (settimane annullate, liste d'attesa, rettifiche di magazzino): da analizzare.</li>
         </ul>

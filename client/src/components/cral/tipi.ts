@@ -87,7 +87,11 @@ export interface Iniziativa {
   richieste: Richiesta[]
 }
 
-export interface QuotaSocio { modo: 'UNICA' | 'MENSILE' | 'TRATTENUTA'; mesi: boolean[]; pagataIl: string | null; note: string }
+export interface QuotaSocio {
+  modo: 'UNICA' | 'MENSILE' | 'TRATTENUTA'; mesi: boolean[]; pagataIl: string | null; note: string
+  /** Centesimi versati per mese e in unica soluzione (0024): il versato è la loro somma. */
+  importi: number[]; versatoUnica: number | null
+}
 
 export interface Db {
   sedi: Sede[]; tipi: TipoEvento[]; tipologie: Tipologia[]
@@ -121,7 +125,7 @@ export interface AnagraficaPgs {
 // ── Lotti di variazioni da validare ──────────────────────────
 export type SezioneLotto = 'sedi' | 'tabelle' | 'soci' | 'quote' | 'eventi'
 export interface Lotto {
-  id: string; origine: 'T6' | 'ARCHIVIO'; file: string; ambiente: string; esportato: string | null; sezioni: SezioneLotto[]
+  id: string; origine: 'T6' | 'T7' | 'ARCHIVIO'; file: string; ambiente: string; esportato: string | null; sezioni: SezioneLotto[]
   stato: 'APERTO' | 'CHIUSO' | 'SCARTATO'; riepilogo: Record<string, unknown>
   creatoDa: string | null; creatoIl: string; chiusoDa: string | null; chiusoIl: string | null
   conteggi?: Record<string, number>

@@ -37,6 +37,8 @@
 //   GET    /export/archivio?sezioni=           archivio JSON per un altro ambiente
 //   POST   /lotti/archivio                     { file, archivio, sezioni } → lotto da validare
 //   POST   /lotti/t6                           { file, righe } → lotto da validare
+//   POST   /lotti/t7                           { file, righe } quote versate → lotto da validare
+//   POST   /export/quote                       { anno, ids } → Excel delle quote (stesse colonne del T7)
 //   GET    /lotti | GET /lotti/:id             lotti e variazioni
 //   PATCH  /lotti/:id                          accetta/scarta (voci o intera sezione)
 //   POST   /lotti/:id/applica | /scarta        applica le accettate | scarta il lotto
@@ -53,9 +55,9 @@ import {
   unisciDati, usiTolti, type AnagraficaCral, type DatiScelta, type ConfigEvento,
 } from '../lib/cral.js'
 import { leggiFogli, MAX_BYTE_FILE } from '../services/cral/fogli.js'
-import { foglioSoci } from '../services/cral/esporta.js'
+import { foglioQuote, foglioSoci } from '../services/cral/esporta.js'
 import {
-  SEZIONI, archivioDaStato, archivioSchema, confrontaArchivio, confrontaT6, conteggi, personaDaRiga, rigaT6Schema, type Sezione,
+  SEZIONI, archivioDaStato, archivioSchema, confrontaArchivio, confrontaT6, confrontaT7, conteggi, personaDaRiga, rigaT6Schema, rigaT7Schema, type Sezione,
 } from '../lib/cralLotti.js'
 import { readFileSync } from 'node:fs'
 
@@ -331,6 +333,19 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ambiente: ambienteDi(request), base64: buf.toString('base64') })
   })
 
+  app.post('/export/quote', admin, async (request, reply) => {
+    const b = z.object({ anno: ANNO, ids: z.array(ID_PERSONA).max(50_000) }).parse(request.body)
+    const st = await repo.stato()
+    const imp = st.quoteAnno.find(a => a.anno === b.anno)?.importo
+    if (!imp) return reply.code(404).send({ error: 'ANNO_NON_IMPOSTATO' })
+    const scelti = new Set(b.ids)
+    const righe = st.soci.filter(s => scelti.has(s.id)).map(s => ({
+      s, q: st.quote[String(b.anno)]?.[s.id] ?? { modo: s.matricola ? 'TRATTENUTA' as const : 'UNICA' as const, mesi: Array<boolean>(12).fill(false), importi: Array<number>(12).fill(0), pagataIl: null, versatoUnica: null, note: '' },
+    }))
+    await audit(request, 'CRAL_EXPORT_QUOTE', String(b.anno), { soci: righe.length, ambiente: ambienteDi(request) })
+    return reply.send({ ambiente: ambienteDi(request), base64: foglioQuote(b.anno, imp, righe).toString('base64') })
+  })
+
   app.get('/export/archivio', admin, async (request, reply) => {
     const q = z.object({ sezioni: z.string().max(100).default(SEZIONI.join(',')) }).parse(request.query)
     const sezioni = [...new Set(q.sezioni.split(',').map(x => x.trim()))].filter((x): x is Sezione => (SEZIONI as readonly string[]).includes(x))
@@ -373,6 +388,19 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     const riepilogo = { variazioni: conteggi(variazioni), righe: b.righe.length }
     const id = await repo.creaLotto({ origine: 'T6', file: b.file, ambiente: ambienteDi(request), esportato: null, sezioni: ['soci'], riepilogo }, variazioni, uid(request))
     await audit(request, 'CRAL_LOTTO_T6', id, { file: b.file, righe: b.righe.length, variazioni: variazioni.length })
+    return reply.code(201).send({ id, variazioni: variazioni.length })
+  })
+
+  app.post('/lotti/t7', { ...admin, bodyLimit: 20 * 1024 * 1024 }, async (request, reply) => {
+    const b = z.object({ file: riga(200, 1), righe: z.array(rigaT7Schema).min(1).max(MAX_IDS * 12) }).parse(request.body)
+    const st = await repo.stato()
+    const oggi = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Rome' }).format(new Date())
+    const quote = Object.entries(st.quote).flatMap(([anno, perSocio]) => Object.entries(perSocio).map(([socio, q]) => ({ anno: +anno, socio, ...q })))
+    const variazioni = confrontaT7(b.righe, st.soci.map(personaDaRiga), quote, new Map(st.quoteAnno.map(a => [a.anno, a.importo])), oggi)
+    if (!variazioni.length) return reply.send({ id: null, variazioni: 0 })
+    const riepilogo = { variazioni: conteggi(variazioni), righe: b.righe.length }
+    const id = await repo.creaLotto({ origine: 'T7', file: b.file, ambiente: ambienteDi(request), esportato: null, sezioni: ['quote'], riepilogo }, variazioni, uid(request))
+    await audit(request, 'CRAL_LOTTO_T7', id, { file: b.file, righe: b.righe.length, variazioni: variazioni.length })
     return reply.code(201).send({ id, variazioni: variazioni.length })
   })
 

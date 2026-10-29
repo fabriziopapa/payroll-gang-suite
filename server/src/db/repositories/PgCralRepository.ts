@@ -16,7 +16,7 @@ import type {
   CralNuovaPersona, CralModificaPersona, CralOperazioneImport, CralEsitoImport, CralErrore, CralAzioneStato,
   CralLottoRow, CralVariazioneRow, CralEsitoApplica,
 } from '../IRepository.js'
-import { baseTessera, erroreDati, prossimoDopo, tesseraRiammissione, usiTolti, type ConfigEvento } from '../../lib/cral.js'
+import { baseTessera, erroreDati, prossimoDopo, quotaDopoModifica, rataMese, tesseraRiammissione, usiTolti, type ConfigEvento } from '../../lib/cral.js'
 import {
   ORDINE_SEZIONI, anniEsentiDopoRipristino, personaDaRiga, statoDi, uguale, valorePersona,
   type CampoVar, type EventoArch, type PersonaArch, type QuotaArch, type SedeArch, type StatoComposto, type TipoArch, type TipologiaArch,
@@ -47,7 +47,7 @@ class Annulla extends Error { constructor(readonly codice: CralErrore) { super(c
 class Salta extends Error {}
 
 interface CtxApplica {
-  userId: string | null; ambiente: string; origine: 'T6' | 'ARCHIVIO'
+  userId: string | null; ambiente: string; origine: 'T6' | 'T7' | 'ARCHIVIO'
   /** username → id degli utenti di qui */
   utenti: Map<string, string>
   /** ID dell'archivio → ID di qui (chi entra con un nuovo ID); resta nel lotto fra un'applicazione e l'altra */
@@ -640,44 +640,39 @@ export class PgCralRepository implements ICralRepository {
   }
 
   async salvaQuota(anno: number, socio: string, patch: Partial<CralQuotaRow>, modoPredefinito: CralQuotaRow['modo'], userId: string | null): Promise<CralQuotaRow | null> {
-    const [a] = await this.db.select({ anno: schema.cralQuoteAnno.anno }).from(schema.cralQuoteAnno).where(eq(schema.cralQuoteAnno.anno, anno))
-    if (!a) return null
-    const vuoto = Array<boolean>(12).fill(false)
-    const ora = new Date()
-    const [r] = await this.db.insert(schema.cralQuote).values({
-      anno, socioId: socio, modo: patch.modo ?? modoPredefinito, mesi: patch.mesi ?? vuoto, pagataIl: patch.pagataIl ?? null,
-      note: patch.note ?? '', updatedBy: userId, updatedAt: ora,
-    }).onConflictDoUpdate({
-      target: [schema.cralQuote.anno, schema.cralQuote.socioId],
-      set: {
-        ...(patch.modo !== undefined ? { modo: patch.modo } : {}),
-        ...(patch.mesi !== undefined ? { mesi: patch.mesi } : {}),
-        ...(patch.pagataIl !== undefined ? { pagataIl: patch.pagataIl } : {}),
-        ...(patch.note !== undefined ? { note: patch.note } : {}),
-        updatedBy: userId, updatedAt: ora,
-      },
-    }).returning()
-    return r ? toQuota(r) : null
+    return this.db.transaction(async tx => {
+      const [a] = await tx.select({ imp: schema.cralQuoteAnno.importoCent }).from(schema.cralQuoteAnno).where(eq(schema.cralQuoteAnno.anno, anno))
+      if (!a) return null
+      const [cur] = await tx.select().from(schema.cralQuote).where(and(eq(schema.cralQuote.anno, anno), eq(schema.cralQuote.socioId, socio))).for('update')
+      const base = cur ? toQuota(cur) : quotaVuota(modoPredefinito)
+      const q = quotaDopoModifica(base, patch, a.imp)
+      const valori = { modo: q.modo, mesi: q.mesi, importi: q.importi, pagataIl: q.pagataIl, versatoUnica: q.versatoUnica, note: q.note, updatedBy: userId, updatedAt: new Date() }
+      const [r] = cur
+        ? await tx.update(schema.cralQuote).set(valori).where(and(eq(schema.cralQuote.anno, anno), eq(schema.cralQuote.socioId, socio))).returning()
+        : await tx.insert(schema.cralQuote).values({ anno, socioId: socio, ...valori }).returning()
+      return r ? toQuota(r) : null
+    })
   }
 
-  /** Segna pagata la rata di `mese` (1–12) per i soci indicati: modalità trattenuta. */
+  /** Segna pagata la rata di `mese` (1–12) per i soci indicati: modalità trattenuta. L'importo e' la rata (o resta quello registrato, se maggiore). */
   async registraTrattenuta(anno: number, mese: number, soci: string[], userId: string | null): Promise<number> {
     if (!soci.length) return 0
     return this.db.transaction(async tx => {
+      const [a] = await tx.select({ imp: schema.cralQuoteAnno.importoCent }).from(schema.cralQuoteAnno).where(eq(schema.cralQuoteAnno.anno, anno))
+      const rata = a ? rataMese(a.imp, mese - 1) : 0
       const vuoto = Array<boolean>(12).fill(false)
       await tx.insert(schema.cralQuote).values(soci.map(s => ({ anno, socioId: s, modo: 'TRATTENUTA', mesi: vuoto, updatedBy: userId })))
         .onConflictDoNothing()
-      const r = await tx.update(schema.cralQuote)
-        .set({ mesi: sql`array_cat(array_cat(mesi[1:${mese - 1}], ARRAY[true]), mesi[${mese + 1}:12])`, updatedBy: userId, updatedAt: new Date() })
-        .where(and(eq(schema.cralQuote.anno, anno), inArray(schema.cralQuote.socioId, soci), eq(schema.cralQuote.modo, 'TRATTENUTA')))
-        .returning({ s: schema.cralQuote.socioId })
-      return r.length
+      const r = await tx.execute(sql`
+        UPDATE cral_quote SET mesi[${mese}] = true, importi[${mese}] = GREATEST(importi[${mese}], ${rata}::int), updated_by = ${userId}, updated_at = now()
+        WHERE anno = ${anno} AND socio_id IN ${soci} AND modo = 'TRATTENUTA' RETURNING socio_id`)
+      return (r as unknown as unknown[]).length
     })
   }
 
   // ── Lotti di variazioni (0023) ─────────────────────────────
   async creaLotto(
-    l: { origine: 'T6' | 'ARCHIVIO'; file: string; ambiente: string; esportato: string | null; sezioni: string[]; riepilogo: Record<string, unknown> },
+    l: { origine: 'T6' | 'T7' | 'ARCHIVIO'; file: string; ambiente: string; esportato: string | null; sezioni: string[]; riepilogo: Record<string, unknown> },
     vs: Variazione[], userId: string | null,
   ): Promise<string> {
     return this.db.transaction(async tx => {
@@ -803,7 +798,7 @@ export class PgCralRepository implements ICralRepository {
       const utenti = new Map((await tx.select({ id: schema.users.id, username: schema.users.username }).from(schema.users)).map(u => [u.username, u.id]))
       const rie = l.riepilogo as { mappaId?: Record<string, string>; daRimappare?: string[] }
       const ctx: CtxApplica = {
-        userId, ambiente: l.ambiente, origine: l.origine as 'T6' | 'ARCHIVIO', utenti, oggi: oggi(),
+        userId, ambiente: l.ambiente, origine: l.origine as 'T6' | 'T7' | 'ARCHIVIO', utenti, oggi: oggi(),
         idMap: new Map(Object.entries(rie.mappaId ?? {})), vietati: new Set(rie.daRimappare ?? []),
       }
       const esito: CralEsitoApplica = { applicate: 0, errori: 0, campiSaltati: 0, chiuso: false }
@@ -1065,12 +1060,19 @@ export class PgCralRepository implements ICralRepository {
     const modo = (m: string) => (m === 'TRATTENUTA' && !s.matricola ? (saltati.push('trattenuta senza matricola: mensile'), 'MENSILE') : m)
     if (tipo !== 'MODIFICA') {
       if (cur) throw new Salta('la quota c\'è già: reimporta per vedere le differenze')
-      await tx.insert(schema.cralQuote).values({ anno: q.anno, socioId: socio, modo: modo(q.modo), mesi: q.mesi, pagataIl: q.pagataIl, note: q.note, updatedBy: c.userId })
+      await tx.insert(schema.cralQuote).values({
+        anno: q.anno, socioId: socio, modo: modo(q.modo), mesi: q.mesi, importi: q.importi, pagataIl: q.pagataIl, versatoUnica: q.versatoUnica, note: q.note, updatedBy: c.userId,
+      })
       return { fatti: 1, saltati }
     }
     if (!cur) throw new Salta('la quota non c\'è più')
-    const r = await this.aggiornaCampi(campi, toQuota(cur) as unknown as Record<string, unknown>, set => {
+    const qc = toQuota(cur)
+    // T7: i versamenti (mesi + importi) e l'unica soluzione (data + importo) vanno a coppie
+    const attuale = { ...qc, versamenti: { mesi: qc.mesi, importi: qc.importi }, unica: { pagataIl: qc.pagataIl, versatoUnica: qc.versatoUnica } }
+    const r = await this.aggiornaCampi(campi, attuale as unknown as Record<string, unknown>, set => {
       if (set['modo']) set['modo'] = modo(set['modo'] as string)
+      if (set['versamenti']) { Object.assign(set, set['versamenti']); delete set['versamenti'] }
+      if (set['unica']) { Object.assign(set, set['unica']); delete set['unica'] }
       return tx.update(schema.cralQuote).set({ ...set, updatedBy: c.userId, updatedAt: new Date() }).where(and(eq(schema.cralQuote.anno, q.anno), eq(schema.cralQuote.socioId, socio)))
     })
     return { fatti: r.fatti, saltati: [...r.saltati, ...saltati] }
@@ -1245,8 +1247,10 @@ function toRichiesta(r: typeof schema.cralRichieste.$inferSelect, _u: Map<string
   }
 }
 function toQuota(r: typeof schema.cralQuote.$inferSelect): CralQuotaRow {
-  return { modo: r.modo as CralQuotaRow['modo'], mesi: r.mesi, pagataIl: r.pagataIl, note: r.note }
+  return { modo: r.modo as CralQuotaRow['modo'], mesi: r.mesi, pagataIl: r.pagataIl, note: r.note, importi: r.importi ?? Array<number>(12).fill(0), versatoUnica: r.versatoUnica ?? null }
 }
+const quotaVuota = (modo: CralQuotaRow['modo']): CralQuotaRow =>
+  ({ modo, mesi: Array<boolean>(12).fill(false), importi: Array<number>(12).fill(0), pagataIl: null, versatoUnica: null, note: '' })
 function toIniz(
   i: RigaIniz, part: Array<typeof schema.cralIniziativePartecipanti.$inferSelect>, sce: Array<typeof schema.cralScelte.$inferSelect>,
   car: Array<typeof schema.cralCarichi.$inferSelect>, ric: Array<typeof schema.cralRichieste.$inferSelect>, utenti: Map<string, string>,

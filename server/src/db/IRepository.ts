@@ -928,7 +928,11 @@ export interface CralIniziativaRow {
   carichi: CralCaricoRow[]
   richieste: CralRichiestaRow[]
 }
-export interface CralQuotaRow { modo: 'UNICA' | 'MENSILE' | 'TRATTENUTA'; mesi: boolean[]; pagataIl: string | null; note: string }
+export interface CralQuotaRow {
+  modo: 'UNICA' | 'MENSILE' | 'TRATTENUTA'; mesi: boolean[]; pagataIl: string | null; note: string
+  /** 0024: centesimi versati per mese e in unica soluzione; il versato e' la loro somma. */
+  importi: number[]; versatoUnica: number | null
+}
 export interface CralStato {
   sedi: CralSedeRow[]; tipi: CralTipoRow[]; tipologie: CralTipologiaRow[]; parametri: CralParametriRow
   soci: CralSocioRow[]; iniziative: CralIniziativaRow[]
@@ -972,7 +976,7 @@ export type CralAzioneStato = 'valida' | 'rifiuta' | 'rimetti' | 'cessa' | 'riat
 
 /** Lotto di variazioni da validare (0023). */
 export interface CralLottoRow {
-  id: string; origine: 'T6' | 'ARCHIVIO'; file: string; ambiente: string; esportato: string | null; sezioni: string[]
+  id: string; origine: 'T6' | 'T7' | 'ARCHIVIO'; file: string; ambiente: string; esportato: string | null; sezioni: string[]
   stato: 'APERTO' | 'CHIUSO' | 'SCARTATO'; riepilogo: Record<string, unknown>
   creatoDa: string | null; creatoIl: string; chiusoDa: string | null; chiusoIl: string | null
   /** Conteggi per esito (solo nell'elenco). */

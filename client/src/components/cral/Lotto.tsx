@@ -20,6 +20,7 @@ import {
 
 export const NOMI_SEZIONI: Record<SezioneLotto, string> = { sedi: 'Sedi', tabelle: 'Parametri e tabelle', soci: 'Soci e familiari', quote: 'Quote associative', eventi: 'Eventi' }
 const TIPI: Record<Variazione['tipo'], [string, Tono]> = { NUOVO: ['Nuovo', 'nuovo'], MODIFICA: ['Modificato', 'cyan'], CONFLITTO: ['Conflitto', 'err'] }
+const ORIGINI: Record<Lotto['origine'], string> = { T6: 'Aggiornamento dati (T6)', T7: 'Quote versate (T7)', ARCHIVIO: 'Archivio' }
 const ESITI: Record<Variazione['esito'], [string, Tono]> = {
   ATTESA: ['Da decidere', 'warn'], ACCETTATA: ['Accettata', 'ok'], SCARTATA: ['Scartata', 'neutro'], APPLICATA: ['Applicata', 'ok'], ERRORE: ['Errore', 'err'],
 }
@@ -38,6 +39,14 @@ export function fmtValore(db: Db, campo: string, v: unknown): string {
     return o.stato === 'CESSATO' ? `${st} il ${fmtData(o.cessatoIl)}` : o.stato === 'ELIMINATO' ? `${st} il ${fmtData(o.eliminatoIl)}` : st
   }
   if (campo === 'sede') return sedeNome(db, String(v))
+  if (campo === 'versamenti') {
+    const o = v as { mesi: boolean[]; importi: number[] }
+    const r = o.importi.flatMap((x, k) => (x ? [`${MESI[k]} ${fmtEuro(x)}${o.mesi[k] ? '' : ' (parz.)'}`] : o.mesi[k] ? [`${MESI[k]} ✓`] : []))
+    return r.length ? r.join(' · ') : 'nessuno'
+  }
+  if (campo === 'unica') { const o = v as { pagataIl: string | null; versatoUnica: number | null }; return o.versatoUnica ? `${fmtEuro(o.versatoUnica)}${o.pagataIl ? ` il ${fmtData(o.pagataIl)}` : ' (da completare)'}` : '—' }
+  if (campo === 'importi' && Array.isArray(v)) { const r = (v as number[]).flatMap((x, k) => (x ? [`${MESI[k]} ${fmtEuro(x)}`] : [])); return r.length ? r.join(' · ') : 'nessuno' }
+  if (campo === 'versatoUnica') return fmtEuro(Number(v))
   if (campo === 'tipo' && typeof v === 'string' && v in TIPOLOGIE) return TIPOLOGIE[v as keyof typeof TIPOLOGIE][0]
   if (campo === 'modo' && typeof v === 'string' && v in MODI_QUOTA) return MODI_QUOTA[v as keyof typeof MODI_QUOTA]
   if (campo === 'mesi' && Array.isArray(v)) { const m = (v as boolean[]).flatMap((x, k) => (x ? [MESI[k]] : [])); return m.length ? m.join(' ') : 'nessuno' }
@@ -100,7 +109,7 @@ export function LottoView({ id, onChiuso }: { id: string; onChiuso?: () => void 
     try {
       const r = await cralApi.decidi(id, { sezione: corrente, azione })
       await carica()
-      avviso(azione === 'accettaTutte' ? `${r.fatte} variazioni accettate${diSez.some(v => v.esito === 'ATTESA' && v.delicata) ? ' · le delicate restano da guardare una per una' : ''}` : `${r.fatte} variazioni aggiornate`, 'info')
+      avviso(azione === 'accettaTutte' ? `${r.fatte} ${r.fatte === 1 ? 'variazione accettata' : 'variazioni accettate'}${diSez.some(v => v.esito === 'ATTESA' && v.delicata) ? ' · le delicate restano da guardare una per una' : ''}` : `${r.fatte} variazioni aggiornate`, 'info')
     } catch (e) { avviso(messaggioErrore(e), 'error') }
     setOccupato(false)
   }
@@ -109,7 +118,7 @@ export function LottoView({ id, onChiuso }: { id: string; onChiuso?: () => void 
     try {
       const { esito } = await cralApi.applicaLotto(id)
       await Promise.all([carica(), ricarica()])
-      avviso(`Applicate ${esito.applicate} variazioni${esito.errori ? ` · ${esito.errori} in errore (vedi «In errore»)` : ''}${esito.campiSaltati ? ` · ${esito.campiSaltati} campi saltati` : ''}${esito.chiuso ? ' · lotto chiuso' : ''}`, esito.errori ? 'warning' : 'success')
+      avviso(`Applicate: ${esito.applicate}${esito.errori ? ` · ${esito.errori} in errore (vedi «In errore»)` : ''}${esito.campiSaltati ? ` · ${esito.campiSaltati} campi saltati` : ''}${esito.chiuso ? ' · lotto chiuso' : ''}`, esito.errori ? 'warning' : 'success')
       if (esito.chiuso) onChiuso?.()
     } catch (e) { avviso(messaggioErrore(e), 'error') }
     setOccupato(false)
@@ -121,7 +130,7 @@ export function LottoView({ id, onChiuso }: { id: string; onChiuso?: () => void 
       <div className={`${cardCls} p-5 flex flex-wrap gap-4 items-start`}>
         <div className="w-10 h-10 rounded-lg bg-indigo-600/20 text-indigo-400 flex items-center justify-center shrink-0"><Ico d={D.doc} cls="w-5 h-5" /></div>
         <div className="flex-1 min-w-[240px]">
-          <p className="text-white font-medium">{lotto.origine === 'T6' ? 'Aggiornamento dati (T6)' : `Archivio da «${lotto.ambiente}»`} · <span className="font-mono text-sm text-slate-300">{lotto.file}</span></p>
+          <p className="text-white font-medium">{lotto.origine === 'ARCHIVIO' ? `Archivio da «${lotto.ambiente}»` : ORIGINI[lotto.origine]} · <span className="font-mono text-sm text-slate-300">{lotto.file}</span></p>
           <p className="text-xs text-slate-500 mt-0.5">
             Caricato il {fmtData(lotto.creatoIl)}{lotto.creatoDa ? ` da ${lotto.creatoDa}` : ''}{lotto.esportato ? ` · esportato il ${fmtData(lotto.esportato)}` : ''}
             {lotto.stato !== 'APERTO' && ` · ${lotto.stato === 'CHIUSO' ? 'chiuso' : 'scartato'} il ${fmtData(lotto.chiusoIl)}${lotto.chiusoDa ? ` da ${lotto.chiusoDa}` : ''}`}</p>
@@ -230,8 +239,8 @@ export function ElencoLotti() {
     const c = l.conteggi ?? {}
     return (
       <button key={l.id} onClick={() => setAperto(aperto === l.id ? null : l.id)} className={`w-full text-left px-5 py-3 hover:bg-slate-800/40 flex flex-wrap items-center gap-3 ${aperto === l.id ? 'bg-slate-800/40' : ''}`}>
-        <Pill tono={l.origine === 'T6' ? 'cyan' : 'nuovo'}>{l.origine === 'T6' ? 'T6' : 'Archivio'}</Pill>
-        <span className="text-sm text-slate-100 flex-1 min-w-[200px]">{l.origine === 'T6' ? 'Aggiornamento dati' : `Da «${l.ambiente}»`} · <span className="font-mono text-xs text-slate-400">{l.file}</span></span>
+        <Pill tono={l.origine === 'ARCHIVIO' ? 'nuovo' : l.origine === 'T7' ? 'ok' : 'cyan'}>{l.origine === 'ARCHIVIO' ? 'Archivio' : l.origine}</Pill>
+        <span className="text-sm text-slate-100 flex-1 min-w-[200px]">{l.origine === 'ARCHIVIO' ? `Da «${l.ambiente}»` : ORIGINI[l.origine]} · <span className="font-mono text-xs text-slate-400">{l.file}</span></span>
         <span className="text-xs text-slate-500 tabular-nums">{fmtData(l.creatoIl)}{l.creatoDa ? ` · ${l.creatoDa}` : ''}</span>
         {l.stato === 'APERTO'
           ? <span className="text-xs text-slate-400">{c['ATTESA'] ? <span className="text-amber-400">{c['ATTESA']} da decidere</span> : 'tutto deciso'}{c['ACCETTATA'] ? ` · ${c['ACCETTATA']} da applicare` : ''}{c['ERRORE'] ? <span className="text-red-300"> · {c['ERRORE']} in errore</span> : ''}</span>
@@ -243,7 +252,7 @@ export function ElencoLotti() {
     <section className={`${cardCls} overflow-hidden`}>
       <div className="px-5 py-4 border-b border-slate-800">
         <div className="flex items-center gap-2"><h3 className="text-white font-semibold">Lotti di variazioni da validare</h3><span className="text-xs text-slate-500 tabular-nums">{aperti.length}</span></div>
-        <p className="text-xs text-slate-400 mt-1 max-w-[80ch]">Arrivano dall'aggiornamento massivo (T6) e dagli archivi esportati da un altro ambiente (Importazione). Nulla si scrive finché non accetti e applichi. Si può validare una parte, chiudere e riprendere più tardi.</p>
+        <p className="text-xs text-slate-400 mt-1 max-w-[80ch]">Arrivano dall'aggiornamento massivo (T6), dalle quote versate (T7) e dagli archivi esportati da un altro ambiente (Importazione). Nulla si scrive finché non accetti e applichi. Si può validare una parte, chiudere e riprendere più tardi.</p>
       </div>
       <div className="divide-y divide-slate-800/70">
         {aperti.map(riga)}

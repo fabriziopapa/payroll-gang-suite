@@ -783,6 +783,9 @@ export const cralQuote = pgTable('cral_quote', {
   modo:      varchar('modo', { length: 10 }).notNull(),
   mesi:      boolean('mesi').array().notNull(),
   pagataIl:  date('pagata_il'),
+  // 0024: centesimi versati per ogni mese e in unica soluzione
+  importi:      integer('importi').array().notNull().default(sql`ARRAY[0,0,0,0,0,0,0,0,0,0,0,0]`),
+  versatoUnica: integer('versato_unica'),
   note:      varchar('note', { length: 300 }).notNull().default(''),
   updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

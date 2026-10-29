@@ -16,6 +16,7 @@ import {
   eSocio, fmtData, leggiData, nominativo, norm, numBase, oggi, risolvi, simNome, spezzaNominativo, tesseraDaTesto, trovaIntestazione,
 } from './logica'
 import { ImportArchivio, ImportT6 } from './ImportDati'
+import { ImportT7 } from './ImportQuote'
 import {
   Campo, D, Ico, Interruttore, Origine, Pill, PersonaPgs, avviso, chipCls, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario, cardCls,
   etichettaCls, fileBase64, inputCls, inputW, messaggioErrore, thCls, useCral, type Tono,
@@ -64,10 +65,11 @@ function mappaSede(db: Db, testo: string): string | null | undefined {
   return s ? s.id : undefined // undefined = testo presente ma sede sconosciuta
 }
 
-type Strada = 'T1' | 'T6' | 'ARCHIVIO'
+type Strada = 'T1' | 'T6' | 'T7' | 'ARCHIVIO'
 const STRADE: Array<[Strada, string, string]> = [
   ['T1', 'Libro soci (T1)', 'Nuovi soci e abbinamento all\'anagrafica PGS'],
   ['T6', 'Aggiornamento dati (T6)', 'Sedi, date di nascita, email, tessere, note, tipologia, stato di chi c\'è già'],
+  ['T7', 'Quote versate (T7)', 'Importi delle quote associative, mese per mese o in unica soluzione'],
   ['ARCHIVIO', 'Archivio fra ambienti', 'Esporta e carica tutto il CRAL (produzione ↔ pre-produzione)'],
 ]
 
@@ -80,6 +82,7 @@ export function ImportTab() {
       </div>
       {strada === 'T1' && <LibroSoci />}
       {strada === 'T6' && <ImportT6 />}
+      {strada === 'T7' && <ImportT7 />}
       {strada === 'ARCHIVIO' && <ImportArchivio />}
     </div>
   )

@@ -12,7 +12,7 @@ import { cralApi } from '../api/endpoints'
 import { useStore } from '../store/useStore'
 import { showToast } from '../components/ToastManager'
 import { daStato, type Db, type Lotto, type PatchScelta, type QuotaSocio, type Richiesta, type Scelta } from '../components/cral/tipi'
-import { eSocio } from '../components/cral/logica'
+import { eSocio, quotaDopoModifica } from '../components/cral/logica'
 import { Ctx, messaggioErrore, type CralCtx, type Scheda } from '../components/cral/ui'
 import { SociTab } from '../components/cral/SociTab'
 import { SediTab } from '../components/cral/SediTab'
@@ -81,7 +81,7 @@ export function CralPage() {
       catch (e) { showToast(messaggioErrore(e), 'error'); await ricarica(); return false }
     },
     quota: (anno, sid, prima, patch) => {
-      const nuova: QuotaSocio = { ...prima, ...patch }
+      const nuova: QuotaSocio = quotaDopoModifica(prima, patch, db.quoteAnno.find(a => a.anno === anno)?.importo ?? 0)
       setDb(d => d && ({ ...d, quote: { ...d.quote, [String(anno)]: { ...(d.quote[String(anno)] ?? {}), [sid]: nuova } } }))
       // la modalità va sempre: una quota mai salvata prende quella mostrata (predefinita)
       cralApi.quota(anno, sid, { modo: nuova.modo, ...patch })

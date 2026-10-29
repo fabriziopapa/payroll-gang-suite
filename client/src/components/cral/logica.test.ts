@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import type { Db, Iniziativa, Persona } from './tipi.ts'
 import {
   agganciaPersona, applicaSconto, codaRichieste, contiMagazzino, contiOrdine, destinatari, dovutoTurni, eta, importoRichiesta, leggiData,
-  nettoSocio, parseEuro, quotaDi, rataMese, rifDi, risolvi, riepilogo, simNome, spezzaNominativo, tenutoQuota, tesseraRiammissione, versatoQuota,
+  nettoSocio, parseEuro, quotaDi, quotaDopoModifica, rataMese, rifDi, risolvi, riepilogo, simNome, spezzaNominativo, tenutoQuota, tesseraRiammissione, versatoQuota,
 } from './logica.ts'
 import { costruisciReport, testoPdf, type CfgReport } from './report.ts'
 
@@ -123,7 +123,7 @@ test('magazzino: giacenza, coda per data, sconto € a biglietto', () => {
 
 test('quote associative: intera anche entrando a novembre o recedendo prima', () => {
   const nov = P('090009', 'SD', 'NUOVI', 'Ada', { iscrittoIl: '2026-11-05' })
-  const d = db({ soci: [...SOCI, nov], perId: new Map([...SOCI, nov].map(s => [s.id, s])), quote: { '2026': { '090001': { modo: 'MENSILE', mesi: [true, true, ...Array<boolean>(10).fill(false)], pagataIl: null, note: '' } } } })
+  const d = db({ soci: [...SOCI, nov], perId: new Map([...SOCI, nov].map(s => [s.id, s])), quote: { '2026': { '090001': { modo: 'MENSILE', mesi: [true, true, ...Array<boolean>(10).fill(false)], importi: [500, 500, ...Array<number>(10).fill(0)], pagataIl: null, versatoUnica: null, note: '' } } } })
   assert.equal(tenutoQuota(nov, 2026), true)
   assert.equal(tenutoQuota(nov, 2025), false)
   assert.equal(tenutoQuota(d.perId.get('090004')!, 2026), true)   // cessato a maggio: deve l'anno
@@ -179,4 +179,14 @@ test('quota: eliminati e anni esenti (decisione del 29/10)', () => {
   const soci = [el, P('FAM-0010', 'FAM', 'COLOMBO', 'Pietro', { legami: [{ socio: '090010', relazione: 'FIGLIO' }] })]
   const d = db({ soci, perId: new Map(soci.map(x => [x.id, x])) })
   assert.deepEqual(destinatari(d, evento({ gruppi: ['SD', 'FAM'] })).map(x => x.id), [])
+})
+
+test('quote (0024): il versato è la somma degli importi; a mano un mese registra la rata', () => {
+  const s = SOCI[0]!
+  const q = { modo: 'MENSILE' as const, mesi: [true, false, ...Array<boolean>(10).fill(false)], importi: [500, 450, ...Array<number>(10).fill(0)], pagataIl: null, versatoUnica: null, note: '' }
+  const d = db({ quote: { '2026': { [s.id]: q } } })
+  assert.equal(versatoQuota(d, 2026, s), 950)
+  const q2 = quotaDopoModifica(q, { mesi: [true, true, ...Array<boolean>(10).fill(false)] }, 6000)
+  assert.deepEqual(q2.importi.slice(0, 2), [500, 500])
+  assert.equal(quotaDopoModifica(q, { pagataIl: '2026-01-10' }, 6000).versatoUnica, 6000)
 })

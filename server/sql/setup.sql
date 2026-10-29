@@ -474,16 +474,20 @@ CREATE TABLE IF NOT EXISTS cral_quote (
   mesi        BOOLEAN[]    NOT NULL DEFAULT ARRAY[false,false,false,false,false,false,false,false,false,false,false,false]
                            CHECK (cardinality(mesi) = 12),
   pagata_il   DATE,
+  -- 0024: importo versato per ogni rata e in unica soluzione (centesimi)
+  importi     INTEGER[]    NOT NULL DEFAULT ARRAY[0,0,0,0,0,0,0,0,0,0,0,0],
+  versato_unica INTEGER,
   note        VARCHAR(300) NOT NULL DEFAULT '',
   updated_by  UUID         REFERENCES users(id) ON DELETE SET NULL,
   updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
-  PRIMARY KEY (anno, socio_id)
+  PRIMARY KEY (anno, socio_id),
+  CONSTRAINT cral_quote_importi CHECK (cardinality(importi) = 12 AND 0 <= ALL(importi) AND (versato_unica IS NULL OR versato_unica >= 0))
 );
 
 -- Lotti di variazioni da validare (migrazione 0023)
 CREATE TABLE IF NOT EXISTS cral_lotti (
   id          UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-  origine     VARCHAR(8)    NOT NULL CHECK (origine IN ('T6', 'ARCHIVIO')),
+  origine     VARCHAR(8)    NOT NULL CONSTRAINT cral_lotti_origine_check CHECK (origine IN ('T6', 'T7', 'ARCHIVIO')),
   file        VARCHAR(200)  NOT NULL DEFAULT '',
   ambiente    VARCHAR(80)   NOT NULL DEFAULT '',
   esportato   TIMESTAMPTZ,

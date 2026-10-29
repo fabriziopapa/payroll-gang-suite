@@ -1270,6 +1270,11 @@ export interface CralRigaT6 {
   socio: string; riga: number
   valori: { sede?: string | null; nascita?: string | null; email?: string | null; tessera?: string | null; note?: string | null; tipo?: 'SD' | 'SE' | 'EST'; stato?: 'ATTIVO' | 'CESSATO' | 'ELIMINATO'; dataStato?: string }
 }
+/** Riga del T7 (quote versate): importi in centesimi, 'X' = la rata (o la quota dell'anno per l'unica soluzione). */
+export interface CralRigaT7 {
+  socio: string; riga: number; anno: number; modo?: 'UNICA' | 'MENSILE' | 'TRATTENUTA'
+  mesi?: Record<string, number | 'X'>; unica?: { importo: number | 'X'; data?: string }; note?: string
+}
 export interface CralNuovaPersonaApi {
   tipo: 'SD' | 'SE' | 'EST' | 'FAM'; matricola?: string; cognome?: string; nome?: string; nascita?: string | null
   email?: string; sede?: string | null; tessera?: string; note?: string; legami?: Legame[]; perIniziativa?: string
@@ -1316,6 +1321,8 @@ export const cralApi = {
   lotto: (id: string) => apiFetch<{ lotto: Lotto; variazioni: Variazione[] }>(`/cral/lotti/${enc(id)}`, undefined, 60_000),
   lottoArchivio: (file: string, sezioni: SezioneLotto[], archivio: unknown) =>
     apiFetch<{ id: string; variazioni: number }>('/cral/lotti/archivio', corpo('POST', { file, sezioni, archivio }), 180_000),
+  lottoT7: (file: string, righe: CralRigaT7[]) => apiFetch<{ id: string | null; variazioni: number }>('/cral/lotti/t7', corpo('POST', { file, righe }), 120_000),
+  esportaQuote: (anno: number, ids: string[]) => apiFetch<{ ambiente: string; base64: string }>('/cral/export/quote', corpo('POST', { anno, ids }), 60_000),
   lottoT6: (file: string, righe: CralRigaT6[]) => apiFetch<{ id: string | null; variazioni: number }>('/cral/lotti/t6', corpo('POST', { file, righe }), 120_000),
   decidi: (id: string, b: { voci?: Array<{ id: number; esito: 'ACCETTATA' | 'SCARTATA' | 'ATTESA'; accettati?: string[] }>; sezione?: SezioneLotto; azione?: 'accettaTutte' | 'scartaTutte' | 'azzera' }) =>
     apiFetch<{ fatte: number }>(`/cral/lotti/${enc(id)}`, corpo('PATCH', b), 60_000),

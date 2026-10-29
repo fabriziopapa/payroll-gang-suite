@@ -30,13 +30,28 @@ export function nomeFile(base: string, ambiente: string, est: string): string {
   return `${base}_${a}_${oggi()}.${est}`
 }
 
+/** Base64 → file scaricato. */
+function scaricaBase64(nome: string, b64: string, tipo: string) {
+  const bin = atob(b64); const buf = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i)
+  scarica(nome, new Blob([buf], { type: tipo }))
+}
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+/** Esporta le quote dell'anno dei soci indicati nell'Excel del T7. */
+export async function esportaQuoteExcel(anno: number, ids: string[]): Promise<void> {
+  try {
+    const r = await cralApi.esportaQuote(anno, ids)
+    scaricaBase64(nomeFile(`cral-quote-${anno}`, r.ambiente, 'xlsx'), r.base64, XLSX_MIME)
+    avviso(`Esportate le quote ${anno} di ${ids.length} soci. Correggi gli importi e ricarica da Importazione › Quote versate (T7).`, 'info')
+  } catch (e) { avviso(messaggioErrore(e), 'error') }
+}
+
 /** Esporta le persone indicate (e i loro familiari) nell'Excel del T6. */
 export async function esportaSociExcel(ids: string[]): Promise<void> {
   try {
     const r = await cralApi.esportaSoci(ids)
-    const bin = atob(r.base64); const buf = new Uint8Array(bin.length)
-    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i)
-    scarica(nomeFile('cral-soci', r.ambiente, 'xlsx'), new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }))
+    scaricaBase64(nomeFile('cral-soci', r.ambiente, 'xlsx'), r.base64, XLSX_MIME)
     avviso(`Esportate ${ids.length} persone (con i loro familiari). Il file contiene dati personali: non lasciarlo in giro.`, 'info')
   } catch (e) { avviso(messaggioErrore(e), 'error') }
 }
@@ -82,6 +97,29 @@ function statoDaTesto(t: string): Persona['stato'] | undefined {
   return m[norm(t)]
 }
 
+/** Aggancio di una riga a una persona già presente: ID (anche l'ex matricola), tessera, nominativo (la data di nascita decide fra gli omonimi). */
+export function aggancia(db: Db, perTessera: Map<string, Persona>, id: string, tk: string, nomin: string, nascita: string | null):
+  { socio: Persona | null; come: string; candidati: Persona[]; errore?: string } {
+  let errore: string | undefined
+  if (id) {
+    const p = db.perId.get(id.toUpperCase()) ?? (/^\d+$/.test(id) ? db.perId.get(id.padStart(6, '0')) : undefined)
+    // una matricola di chi è passato a socio esterno: è la stessa persona, col nuovo ID
+    const ex = !p && /^\d+$/.test(id) ? db.soci.find(x => x.exMatricola === id || x.exMatricola === id.padStart(6, '0')) : undefined
+    if (p) return { socio: p, come: 'ID', candidati: [] }
+    if (ex) return { socio: ex, come: `ex matricola (ora ${ex.id})`, candidati: [] }
+    errore = `ID ${id} non presente`
+  }
+  if (tk) { const p = perTessera.get(norm(tesseraDaTesto(db.tessera, tk))); if (p) return { socio: p, come: 'tessera', candidati: [] } }
+  if (nomin) {
+    const ris = risolvi(nomin, db.soci)
+    const perData = nascita ? ris.cand.filter(c => c.nascita === nascita) : []
+    if ((ris.esito === 'trovato' || ris.esito === 'parziale') && ris.cand[0]) return { socio: ris.cand[0], come: ris.esito === 'trovato' ? 'nominativo' : 'nominativo parziale', candidati: ris.cand }
+    if (perData.length === 1) return { socio: perData[0]!, come: 'nominativo e data di nascita', candidati: ris.cand }
+    return { socio: null, come: '', candidati: ris.cand, ...(errore ? { errore } : {}) }
+  }
+  return { socio: null, come: '', candidati: [], ...(errore ? { errore } : {}) }
+}
+
 interface RigaLetta { i: number; riga: number; chiave: string; socio: Persona | null; come: string; candidati: Persona[]; valori: CralRigaT6['valori']; errori: string[] }
 
 export function ImportT6() {
@@ -120,7 +158,6 @@ export function ImportT6() {
   const rows = useMemo(() => file?.fogli[foglio] ?? [], [file, foglio])
   const hdr = trovaIntestazione(rows)
   const intest = rows[hdr] ?? []
-  const elenco = useMemo(() => db.soci, [db])
   const perTessera = useMemo(() => new Map(db.soci.filter(s => s.tessera).map(s => [norm(s.tessera), s])), [db])
   const pronto = map['id'] !== '' || map['tesseraKey'] !== '' || map['nominativo'] !== '' || (map['cognome'] !== '' && map['nome'] !== '')
 
@@ -129,21 +166,8 @@ export function ImportT6() {
     const errori: string[] = []
     const id = val('id'), tk = val('tesseraKey'), nomin = val('nominativo') || [val('cognome'), val('nome')].filter(Boolean).join(' ')
     const nascitaTxt = val('nascita'), nascita = nascitaTxt && nascitaTxt !== '-' ? leggiData(nascitaTxt) : null
-    let socio: Persona | null = null, come = '', candidati: Persona[] = []
-    if (id) {
-      const p = db.perId.get(id.toUpperCase()) ?? (/^\d+$/.test(id) ? db.perId.get(id.padStart(6, '0')) : undefined)
-      // una matricola di chi è passato a socio esterno: è la stessa persona, col nuovo ID
-      const ex = !p && /^\d+$/.test(id) ? db.soci.find(x => x.exMatricola === id || x.exMatricola === id.padStart(6, '0')) : undefined
-      if (p) { socio = p; come = 'ID' } else if (ex) { socio = ex; come = `ex matricola (ora ${ex.id})` } else errori.push(`ID ${id} non presente`)
-    }
-    if (!socio && tk) { const p = perTessera.get(norm(tesseraDaTesto(db.tessera, tk))); if (p) { socio = p; come = 'tessera' } }
-    if (!socio && nomin) {
-      const ris = risolvi(nomin, elenco)
-      candidati = ris.cand
-      const perData = nascita ? ris.cand.filter(c => c.nascita === nascita) : []
-      if ((ris.esito === 'trovato' || ris.esito === 'parziale') && ris.cand[0]) { socio = ris.cand[0]; come = ris.esito === 'trovato' ? 'nominativo' : 'nominativo parziale' }
-      else if (perData.length === 1) { socio = perData[0]!; come = 'nominativo e data di nascita' }
-    }
+    const { socio, come, candidati, errore } = aggancia(db, perTessera, id, tk, nomin, nascita)
+    if (errore) errori.push(errore)
     const valori: CralRigaT6['valori'] = {}
     const svuota = (t: string) => t === '-'
     if (usa.has('sede')) { const t = val('sede'); if (t) { if (svuota(t)) valori.sede = null; else { const s = sedeDaTesto(db, t); if (s) valori.sede = s; else errori.push(`sede «${t}» sconosciuta`) } } }
@@ -164,7 +188,7 @@ export function ImportT6() {
       }
     }
     return { i, riga: hdr + i + 2, chiave: id || tk || nomin, socio, come, candidati, valori, errori }
-  }).filter(r => r.chiave), [file, pronto, rows, hdr, map, usa, db, elenco, perTessera])
+  }).filter(r => r.chiave), [file, pronto, rows, hdr, map, usa, db, perTessera])
 
   const finale = (r: RigaLetta): Persona | null => {
     const s = scelte[r.i]
@@ -183,7 +207,7 @@ export function ImportT6() {
       const righe: CralRigaT6[] = conValori.map(r => ({ socio: finale(r)!.id, riga: r.riga, valori: r.valori }))
       const r = await cralApi.lottoT6(file.nome, righe)
       if (!r.id) avviso('Nessuna differenza: i dati del file sono già quelli di qui.', 'info')
-      else { await ricarica(); setLotto(r.id); avviso(`${r.variazioni} persone con variazioni da validare`, 'info') }
+      else { await ricarica(); setLotto(r.id); avviso(`${r.variazioni} ${r.variazioni === 1 ? 'persona' : 'persone'} con variazioni da validare`, 'info') }
     } catch (e) { avviso(messaggioErrore(e), 'error') } finally { setInvio(false) }
   }
 

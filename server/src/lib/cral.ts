@@ -324,3 +324,41 @@ export function pulisciFoglio(righe: unknown[][]): string[][] {
     (Array.isArray(r) ? r : []).slice(0, MAX_COLONNE).map(c =>
       String(c ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').slice(0, 500)))
 }
+
+// ── Quote associative: rate e importi versati (0024) ─────────
+export interface QuotaValori {
+  modo: 'UNICA' | 'MENSILE' | 'TRATTENUTA'; mesi: boolean[]; importi: number[]; pagataIl: string | null; versatoUnica: number | null; note: string
+}
+/** Rata del mese k (0–11) di una quota annua: l'ultima prende i centesimi di resto. */
+export const rataMese = (imp: number, k: number): number => { const r = Math.floor(imp / 12); return k === 11 ? imp - 11 * r : r }
+/** Versato reale: somma degli importi delle rate e dell'unica soluzione. */
+export const versato = (q: Pick<QuotaValori, 'importi' | 'versatoUnica'>): number => q.importi.reduce((a, v) => a + v, 0) + (q.versatoUnica ?? 0)
+
+/**
+ * Modifica a mano di una quota (scheda Quote associative), con le regole
+ * della 0024: accendere un mese registra la rata (o lascia l'importo se e'
+ * gia' maggiore), spegnerlo azzera l'importo; segnare pagata l'unica
+ * soluzione registra la quota dell'anno, toglierla la azzera. Importi
+ * espliciti: il mese e' pagato se l'importo copre la rata, tutti i mesi se
+ * un versamento copre la quota dell'anno.
+ */
+export function quotaDopoModifica(
+  cur: QuotaValori, patch: Partial<Pick<QuotaValori, 'modo' | 'mesi' | 'importi' | 'pagataIl' | 'note'>>, imp: number,
+): QuotaValori {
+  const q: QuotaValori = { ...cur, mesi: [...cur.mesi], importi: [...cur.importi] }
+  if (patch.modo !== undefined) q.modo = patch.modo
+  if (patch.note !== undefined) q.note = patch.note
+  if (patch.importi) {
+    q.importi = patch.importi.map(v => Math.max(0, Math.round(v)))
+    q.mesi = q.importi.map((v, k) => v > 0 && v >= rataMese(imp, k))
+    if (imp > 0 && q.importi.some(v => v >= imp)) q.mesi = q.mesi.map(() => true)
+  } else if (patch.mesi) {
+    q.mesi = [...patch.mesi]
+    q.importi = q.importi.map((v, k) => (q.mesi[k] ? Math.max(v, rataMese(imp, k)) : 0))
+  }
+  if (patch.pagataIl !== undefined) {
+    q.pagataIl = patch.pagataIl
+    q.versatoUnica = patch.pagataIl ? Math.max(cur.versatoUnica ?? 0, imp) : null
+  }
+  return q
+}

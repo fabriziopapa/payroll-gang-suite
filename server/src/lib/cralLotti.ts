@@ -16,7 +16,7 @@
 
 import { z } from 'zod'
 import {
-  MODALITA, erroreDati, erroreIniziativa, iniziativaSchema, parametriTesseraSchema, riga, sceltaSchema, scontoPersonale,
+  MODALITA, rataMese, erroreDati, erroreIniziativa, iniziativaSchema, parametriTesseraSchema, riga, sceltaSchema, scontoPersonale,
   usiTolti, type ConfigEvento, type ParametriTessera,
 } from './cral.js'
 import { normalizza } from '../services/emolumenti/nominativi.js'
@@ -68,6 +68,9 @@ export const personaArch = z.object({
 export const quotaArch = z.object({
   anno: ANNO, socio: ID_PERSONA, modo: z.enum(['UNICA', 'MENSILE', 'TRATTENUTA']), mesi: z.array(z.boolean()).length(12),
   pagataIl: DATA.nullable(), note: riga(300),
+  // 0024: centesimi versati (un archivio della 26.10.29 non li ha)
+  importi: z.array(z.number().int().min(0).max(10_000_000)).length(12).default([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  versatoUnica: z.number().int().min(0).max(10_000_000).nullable().default(null),
 })
 const UUID = z.string().uuid()
 export const eventoArch = iniziativaSchema.extend({
@@ -301,7 +304,7 @@ export function confrontaArchivio(src: Archivio, dst: Archivio, sezioni: Sezione
       const d = qDst.get(`${q.anno}|${q.socio}`)
       if (!d) {
         out.push({ sezione: 'quote', entita: 'quota', chiave: `${q.anno}|${q.socio}`, tipo: 'NUOVO', delicata: false, etichetta, ...(bloccata ? { bloccata } : {}),
-          campi: [{ campo: 'modo', etichetta: 'Modalità', prima: null, dopo: q.modo }, { campo: 'mesi', etichetta: 'Mesi pagati', prima: null, dopo: q.mesi }, { campo: 'pagataIl', etichetta: 'Pagata il', prima: null, dopo: q.pagataIl }], record: q })
+          campi: [{ campo: 'modo', etichetta: 'Modalità', prima: null, dopo: q.modo }, { campo: 'versamenti', etichetta: 'Versamenti', prima: null, dopo: { mesi: q.mesi, importi: q.importi } }, { campo: 'unica', etichetta: 'Unica soluzione', prima: null, dopo: { pagataIl: q.pagataIl, versatoUnica: q.versatoUnica } }], record: q })
         continue
       }
       const campi: CampoVar[] = []
@@ -310,8 +313,12 @@ export function confrontaArchivio(src: Archivio, dst: Archivio, sezioni: Sezione
       const mesi = d.mesi.map((m, k) => m || !!q.mesi[k])
       if (!uguale(mesi, d.mesi)) campi.push({ campo: 'mesi', etichetta: 'Mesi pagati', prima: d.mesi, dopo: mesi })
       if (q.pagataIl && q.pagataIl !== d.pagataIl) campi.push({ campo: 'pagataIl', etichetta: 'Pagata il', prima: d.pagataIl, dopo: q.pagataIl })
+      // un importo registrato qui resta: si prendono solo quelli che qui mancano
+      const importi = d.importi.map((v, k) => (v > 0 ? v : q.importi[k] ?? 0))
+      if (!uguale(importi, d.importi)) campi.push({ campo: 'importi', etichetta: 'Importi versati', prima: d.importi, dopo: importi })
+      if (q.versatoUnica !== null && d.versatoUnica === null) campi.push({ campo: 'versatoUnica', etichetta: 'Versato in unica soluzione', prima: null, dopo: q.versatoUnica })
       if (q.note && q.note !== d.note) campi.push({ campo: 'note', etichetta: 'Note', prima: d.note, dopo: q.note })
-      if (campi.length) out.push({ sezione: 'quote', entita: 'quota', chiave: `${q.anno}|${q.socio}`, tipo: 'MODIFICA', delicata: false, etichetta, campi, record: { ...q, mesi } })
+      if (campi.length) out.push({ sezione: 'quote', entita: 'quota', chiave: `${q.anno}|${q.socio}`, tipo: 'MODIFICA', delicata: false, etichetta, campi, record: { ...q, mesi, importi } })
     }
   }
 
@@ -598,6 +605,112 @@ export function azioneStato(d: Pick<PersonaArch, 'stato' | 'tipo' | 'statoPrima'
   return { blocco: d.stato === 'DA_VALIDARE' ? 'si attiva validandolo in «Da validare»' : 'rifiutato: rimettilo in attesa e validalo' }
 }
 
+// ── T7: quote versate (righe per socio o per versamento) ─────
+const IMPORTO_T7 = z.union([z.literal('X'), z.number().int().min(1).max(10_000_000)])
+export const rigaT7Schema = z.object({
+  socio: ID_PERSONA,
+  riga: z.number().int().min(0).max(1_000_000),
+  anno: ANNO,
+  modo: z.enum(['UNICA', 'MENSILE', 'TRATTENUTA']).optional(),
+  /** mese (1–12) → centesimi versati, oppure 'X' = la rata */
+  mesi: z.record(z.string().regex(/^(1[0-2]|[1-9])$/), IMPORTO_T7).optional(),
+  /** unica soluzione: centesimi o 'X' = la quota dell'anno */
+  unica: z.object({ importo: IMPORTO_T7, data: DATA.optional() }).strict().optional(),
+  note: riga(300).optional(),
+}).strict()
+export type RigaT7 = z.infer<typeof rigaT7Schema>
+const MESI_IT = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre']
+const euro = (c: number) => `${(c / 100).toFixed(2).replace('.', ',')} €`
+
+/** Perche' una persona non deve la quota dell'anno (per il messaggio). */
+function perchéNonTenuto(p: PersonaArch, anno: number): string {
+  if (p.tipo !== 'SD' && p.tipo !== 'SE') return 'non è un socio (esterno o familiare)'
+  if (p.anniEsenti.includes(anno)) return `esente per il ${anno} (era eliminato)`
+  if (p.stato === 'ELIMINATO' && p.eliminatoIl && anno >= +p.eliminatoIl.slice(0, 4)) return `eliminato dal ${p.eliminatoIl.slice(0, 4)}`
+  if (p.iscrittoIl.slice(0, 10) > `${anno}-12-31`) return `iscritto dopo il ${anno}`
+  if (p.stato === 'CESSATO') return `cessato prima del ${anno}`
+  return `non deve la quota ${anno} (${p.stato.toLowerCase().replace('_', ' ')})`
+}
+
+/**
+ * Variazioni del T7 (decisione del 29/10): si registra l'importo versato;
+ * se copre la rata del mese il mese e' pagato, se un versamento copre la
+ * quota dell'anno e' pagato tutto l'anno. Da file non si toglie mai una
+ * rata pagata (si fa a mano): un importo minore su un mese pagato si
+ * segnala e si salta. Importi diversi dalla rata: avviso, la variazione si
+ * conferma una per una.
+ */
+export function confrontaT7(righe: RigaT7[], soci: PersonaArch[], quote: QuotaArch[], quoteAnno: Map<number, number>, oggi: string): Variazione[] {
+  const perId = new Map(soci.map(p => [p.id, p]))
+  const qDst = new Map(quote.map(q => [`${q.anno}|${q.socio}`, q]))
+  const gruppi = new Map<string, RigaT7[]>()
+  for (const r of righe) { const k = `${r.anno}|${r.socio}`; gruppi.set(k, [...(gruppi.get(k) ?? []), r]) }
+  const out: Variazione[] = []
+  for (const [chiave, rr] of gruppi) {
+    const { anno, socio } = rr[0]!
+    const p = perId.get(socio)
+    if (!p) continue
+    const elenco = [...new Set(rr.map(r => r.riga))].join(', ')
+    const etichetta = `${anno} · ${nominativoDi(p)} · ${rr.length > 1 ? 'righe' : 'riga'} ${elenco}`
+    // le righe dello stesso socio e anno si uniscono; lo stesso mese con importi diversi e' un errore del file
+    const mesi = new Map<number, number | 'X'>(), doppi: string[] = []
+    let unica: RigaT7['unica'], modo: RigaT7['modo'], note: string | undefined
+    for (const r of rr) {
+      for (const [m, v] of Object.entries(r.mesi ?? {})) {
+        const k = +m - 1, prima = mesi.get(k)
+        if (prima !== undefined && prima !== v) doppi.push(MESI_IT[k]!); else mesi.set(k, v)
+      }
+      if (r.unica) { if (unica && !uguale(unica, r.unica)) doppi.push('unica soluzione'); unica = r.unica }
+      if (r.modo) { if (modo && modo !== r.modo) doppi.push('modalità'); modo = r.modo }
+      if (r.note) note = r.note
+    }
+    const imp = quoteAnno.get(anno)
+    const cur: QuotaArch = qDst.get(chiave) ?? { anno, socio, modo: p.matricola ? 'TRATTENUTA' : 'UNICA', mesi: Array<boolean>(12).fill(false), importi: Array<number>(12).fill(0), pagataIl: null, versatoUnica: null, note: '' }
+    const base = { sezione: 'quote' as const, entita: 'quota' as const, chiave, tipo: (qDst.has(chiave) ? 'MODIFICA' : 'NUOVO') as Variazione['tipo'], etichetta }
+    const bloccata = !imp ? `l'anno ${anno} non è impostato (Parametri › Quota associativa)` : !tenutoQuota(p, anno) ? perchéNonTenuto(p, anno)
+      : doppi.length ? `nel file ci sono valori diversi per ${[...new Set(doppi)].join(', ')}` : undefined
+    if (bloccata || !imp) { out.push({ ...base, delicata: true, bloccata: bloccata ?? '', campi: [], record: cur }); continue }
+    const dopo: QuotaArch = { ...cur, mesi: [...cur.mesi], importi: [...cur.importi] }
+    const avvisi: string[] = [], saltati: string[] = []
+    for (const [k, v] of [...mesi].sort((a, b) => a[0] - b[0])) {
+      const rata = rataMese(imp, k)
+      const val = v === 'X' ? Math.max(cur.importi[k] ?? 0, rata) : v
+      if (val === cur.importi[k]) continue
+      if (cur.mesi[k] && val < rata) { saltati.push(`${MESI_IT[k]} è già pagato: un importo minore (${euro(val)}) si corregge a mano`); continue }
+      dopo.importi[k] = val
+      if (val >= rata) dopo.mesi[k] = true
+      if (val >= imp) dopo.mesi = dopo.mesi.map(() => true)
+      if (val !== rata && val !== imp) avvisi.push(`${MESI_IT[k]}: ${euro(val)} invece della rata di ${euro(rata)}${val < rata ? ' (resta da completare)' : ''}`)
+    }
+    if (unica) {
+      const val = unica.importo === 'X' ? Math.max(cur.versatoUnica ?? 0, imp) : unica.importo
+      if (val !== cur.versatoUnica) {
+        if (cur.pagataIl && val < imp) saltati.push(`unica soluzione già pagata: un importo minore (${euro(val)}) si corregge a mano`)
+        else {
+          dopo.versatoUnica = val
+          if (val >= imp) dopo.pagataIl = unica.data ?? cur.pagataIl ?? oggi
+          if (val !== imp) avvisi.push(`unica soluzione: ${euro(val)} invece di ${euro(imp)}${val < imp ? ' (resta da completare)' : ''}`)
+        }
+      } else if (unica.data && val >= imp && unica.data !== cur.pagataIl) dopo.pagataIl = unica.data
+    }
+    const campi: CampoVar[] = []
+    if (modo && modo !== cur.modo) {
+      dopo.modo = modo
+      campi.push({ campo: 'modo', etichetta: 'Modalità', prima: base.tipo === 'NUOVO' ? null : cur.modo, dopo: modo, ...(modo === 'TRATTENUTA' && !p.matricola ? { blocco: 'la trattenuta richiede la matricola' } : {}) })
+    }
+    if (!uguale(dopo.importi, cur.importi) || !uguale(dopo.mesi, cur.mesi)) campi.push({ campo: 'versamenti', etichetta: 'Versamenti', prima: base.tipo === 'NUOVO' ? null : { mesi: cur.mesi, importi: cur.importi }, dopo: { mesi: dopo.mesi, importi: dopo.importi } })
+    if (dopo.versatoUnica !== cur.versatoUnica || dopo.pagataIl !== cur.pagataIl) campi.push({ campo: 'unica', etichetta: 'Unica soluzione', prima: base.tipo === 'NUOVO' ? null : { pagataIl: cur.pagataIl, versatoUnica: cur.versatoUnica }, dopo: { pagataIl: dopo.pagataIl, versatoUnica: dopo.versatoUnica } })
+    if (note && note !== cur.note) { dopo.note = note; campi.push({ campo: 'note', etichetta: 'Note', prima: cur.note || null, dopo: note }) }
+    if (!campi.length) {
+      if (saltati.length) out.push({ ...base, delicata: true, bloccata: saltati.join(' · '), campi: [], record: cur })
+      continue
+    }
+    const avviso = [...avvisi, ...saltati].join(' · ')
+    out.push({ ...base, delicata: avvisi.length + saltati.length > 0, campi, ...(avviso ? { avviso } : {}), record: dopo })
+  }
+  return out.map(conBlocchi)
+}
+
 // ── Quota associativa: chi la deve ───────────────────────────
 /**
  * Socio tenuto alla quota dell'anno (stessa regola del client): soci attivi
@@ -642,7 +755,7 @@ export function archivioDaStato(st: CralStato, meta: { app: string; ambiente: st
   }
   if (ha('soci')) a.soci = st.soci.map(personaDaRiga)
   if (ha('quote')) a.quote = Object.entries(st.quote).flatMap(([anno, perSocio]) =>
-    Object.entries(perSocio).map(([socio, q]) => ({ anno: +anno, socio, modo: q.modo, mesi: q.mesi, pagataIl: q.pagataIl, note: q.note })))
+    Object.entries(perSocio).map(([socio, q]) => ({ anno: +anno, socio, modo: q.modo, mesi: q.mesi, pagataIl: q.pagataIl, note: q.note, importi: q.importi, versatoUnica: q.versatoUnica })))
   if (ha('eventi')) a.eventi = st.iniziative.map(i => ({
     id: i.id, tipo: i.tipo, titolo: i.titolo, anno: i.anno, data: i.data, scadenza: i.scadenza, stato: i.stato, modalita: i.modalita,
     modoPart: i.modoPart, gruppi: i.gruppi as EventoArch['gruppi'], sedi: i.sedi, predefinita: i.predefinita, fornitore: i.fornitore,

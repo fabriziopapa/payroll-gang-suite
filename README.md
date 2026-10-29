@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.10.29-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.10.29.1-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -145,7 +145,7 @@ payroll-gang-suite/
 - **Verifica liquidato** *(admin)* — confronto del liquidato CINECA (`/liquidazioni/liquidato/dettaglio`) con gli invii PGS ricostruiti (join per `matricola|voce|capitolo|dataCompVoce|riferimento`), classificazione NUOVO / CONGUAGLIO / STORNO / RETTIFICA; ogni lettura è auditata
 - **Dottorandi e borse (area Emolumenti)** *(admin)* — elenco lavorazioni con bozze/archiviate, caricamento nominativi per incollato o ricerca in anagrafica, lettura di cio' che e' **gia' in CSA** (i mesi presenti non sono selezionabili: la competenza doppia non nasce), abbinamenti d'ufficio tipo→voce→capitolo (DR `09834`/`000601`, BS `09947`/`000706`, BE `09766`/`000602`), export CSV per HR Suite e **TXT matricole divise per area del conto**
 - **Versamenti enti** (dalla 26.10.26) — porting strutturato del Java *GestioneSaldiEnti*: si carica la stampa versamenti di CSA (`STAMPA_VERSAMENTI_*.CSV`, anche con **piu' mesi**), e per ogni ente si scarica l'**EML da aprire in Outlook** (bozza `X-Unsent`) con CSV e PDF di dettaglio, ora con la **data di nascita**. Il file si elabora **solo nel browser**: PGS salva soltanto la rubrica degli enti (email anche multiple, abilitato, modello) e i **modelli mail** con i loro allegati personalizzabili. Vedi *Sezione Versamenti enti*
-- **Modulo CRAL** (dalla 26.10.28) *(admin)* — soci dipendenti, soci esterni, esterni e familiari; import annuale del **libro soci** abbinato all'anagrafica PGS per nominativo (mai il codice fiscale); eventi con scelta, consegna, **ordini a pagamento**, **campi estivi a settimane** e **biglietti a magazzino**; sconti per tipologia e personali; **quote associative** per anno solare; report CSV/PDF. Dalla 26.10.29: stato **Eliminato** (esente dalla quota, reversibile), passaggio da **socio dipendente a socio esterno**, **aggiornamento massivo** da Excel (T6) e modifiche in blocco, **archivio fra ambienti** (produzione ↔ pre-produzione) con lotto di variazioni da validare. Vedi *Sezione Modulo CRAL*
+- **Modulo CRAL** (dalla 26.10.28) *(admin)* — soci dipendenti, soci esterni, esterni e familiari; import annuale del **libro soci** abbinato all'anagrafica PGS per nominativo (mai il codice fiscale); eventi con scelta, consegna, **ordini a pagamento**, **campi estivi a settimane** e **biglietti a magazzino**; sconti per tipologia e personali; **quote associative** per anno solare; report CSV/PDF. Dalla 26.10.29: stato **Eliminato** (esente dalla quota, reversibile), passaggio da **socio dipendente a socio esterno**, **aggiornamento massivo** da Excel (T6) e modifiche in blocco, **archivio fra ambienti** (produzione ↔ pre-produzione) con lotto di variazioni da validare; dalla 26.10.29.1 **quote versate in massa** (T7) con l'importo di ogni rata. Vedi *Sezione Modulo CRAL*
 - **PDF Region Editor** *(in rollout, kill-switch off)* — strumento admin: disegno regioni di riconoscimento layout direttamente sul cedolino renderizzato (canvas), template versionati e immutabili riusabili per l'estrazione automatica delle voci
 
 ---
@@ -326,7 +326,7 @@ Audit: `VERSAMENTI_ENTI_SINCRONIZZATI` (enti nuovi e descrizioni cambiate), `VER
 
 ## Sezione Modulo CRAL
 
-Menu *Modulo CRAL → Soci e iniziative*, **solo amministratori** (voce di menu nascosta e rotte respinte per gli altri). Rotte `/api/v1/cral` (`routes/cral.ts`, audit **awaited**: se non si registra, l'operazione risponde errore); regole pure in `lib/cral.ts` (con test); lettura dei file in `services/cral/fogli.ts`; repository `PgCralRepository`; migrazioni `0022_cral.sql` (14 tabelle `cral_*`) e `0023_cral_eliminati_lotti.sql` (stato Eliminato, ex matricola, 2 tabelle dei lotti), gia' incluse in `setup.sql`. Motore dei lotti (T6 e archivio) in `lib/cralLotti.ts` (con test), export Excel in `services/cral/esporta.ts`. Client in `components/cral/` e `pages/CralPage.tsx` (caricata a richiesta).
+Menu *Modulo CRAL → Soci e iniziative*, **solo amministratori** (voce di menu nascosta e rotte respinte per gli altri). Rotte `/api/v1/cral` (`routes/cral.ts`, audit **awaited**: se non si registra, l'operazione risponde errore); regole pure in `lib/cral.ts` (con test); lettura dei file in `services/cral/fogli.ts`; repository `PgCralRepository`; migrazioni `0022_cral.sql` (14 tabelle `cral_*`), `0023_cral_eliminati_lotti.sql` (stato Eliminato, ex matricola, 2 tabelle dei lotti) e `0024_cral_quote_importi.sql` (importo versato per rata), gia' incluse in `setup.sql`. Motore dei lotti (T6 e archivio) in `lib/cralLotti.ts` (con test), export Excel in `services/cral/esporta.ts`. Client in `components/cral/` e `pages/CralPage.tsx` (caricata a richiesta).
 
 **Privacy.** Il modulo **non raccoglie il codice fiscale**: le persone si distinguono con **cognome, nome e data di nascita**. La colonna *CODICE FISCALE* del libro soci si ignora e non si salva. L'audit registra solo ID e conteggi, mai nominativi.
 
@@ -360,6 +360,10 @@ Stati della persona: *Attivo*, *Da validare*, *Rifiutato*, *Cessato* e **Elimina
 
 *Importazione › Aggiornamento dati (T6)*: un Excel con persone **gia' presenti** (il piu' comodo e' l'export della scheda *Soci*, che ha le stesse colonne e un secondo foglio *Familiari*). Aggancio per ID (anche l'ex matricola), tessera o nominativo (la data di nascita decide fra gli omonimi); chi non si aggancia si sceglie a mano o si ignora. Colonne aggiornabili, da spuntare una per una: **sede, data di nascita, email, tessera, note, tipologia, stato** (Attivo/Cessato/Eliminato con *Data stato*). Cella vuota = non cambia; `-` = svuota. La data di nascita di chi ha la matricola si scrive **solo se in PGS manca** (se c'e' ed e' diversa si segnala). Il server prepara un **lotto** di variazioni prima → dopo da validare (vedi sotto).
 
+### Quote versate (tracciato T7)
+
+*Importazione › Quote versate (T7)*: carica, aggiorna e corregge in massa i versamenti delle quote associative, in attesa della lettura delle trattenute da CINECA (che usera' la stessa strada). Due forme, riconosciute dalle intestazioni: **una riga per socio** (colonne `Gen … Dic`, `Unica`, `Pagata il`: e' la forma di *Quote associative › Esporta Excel*, da correggere e ricaricare) oppure **una riga per versamento** (`Mese` 1–12 o `UNICA`, `Importo`, `Data versamento`: la forma degli elenchi delle trattenute; piu' righe dello stesso socio si uniscono). Aggancio come nel T6 (ID anche ex matricola, tessera, nominativo e nascita). Si registra l'**importo versato** (migrazione 0024: `importi[12]` e `versato_unica` in `cral_quote`): se copre la rata il mese e' pagato, se un versamento copre la **quota dell'anno** e' pagato tutto l'anno, un importo minore resta registrato e il mese «da completare» (in ambra nella scheda). `X`/`SI` = la rata intera; vuoto = non cambia. **Le rate pagate non si tolgono da file** (decisione del 29/10): un `-` si ignora, un importo minore su un mese pagato si segnala e si salta; si tolgono solo a mano con un clic sul mese. Importi diversi dalla rata: avviso, conferma una per una. Bloccati: chi in quell'anno non deve la quota, anno non impostato, stesso mese con importi diversi. Il versato e' ora la **somma reale** degli importi (la 0024 ha portato il pregresso alla rata teorica, quindi i totali di prima non cambiano); a mano un clic sul mese registra la rata o la toglie, «Registra la trattenuta del mese» registra la rata.
+
 ### Archivio fra ambienti e lotti da validare
 
 *Importazione › Archivio fra ambienti*: **Esporta archivio** produce un JSON (`cral-archivio_<ambiente>_<data>.json`) con le sezioni scelte: sedi; parametri e tabelle (tipi, tipologie, tessera, importi della quota); soci e familiari (con storico tessere); quote; eventi con partecipanti, scelte, carichi e richieste. I dati personali viaggiano cosi' come sono; l'export resta nell'audit. **Carica un archivio** nell'altro ambiente: si scelgono le sezioni e il server prepara un lotto.
@@ -380,7 +384,7 @@ Cinque modalita': **Scelta** di un'opzione (con opzione predefinita per chi non 
 
 ### Quote associative
 
-Quota per **anno solare** (es. 60,00 €, parametrizzabile anno per anno), dovuta **per intero** anche da chi entra a novembre o recede prima. Pagamento in un'unica soluzione, mensile o con **trattenuta in busta paga** (solo con matricola; «Registra la trattenuta del mese»). Esterni e familiari non la pagano. Gli **eliminati** non la devono dall'anno dell'eliminazione (gli anni prima restano dovuti) e gli anni passati da eliminati restano esenti anche dopo il ripristino. Il confronto con le trattenute dei cedolini e' **tra i lavori da fare** (voci stipendiali da individuare): il report *Quote associative* e' la base.
+Quota per **anno solare** (es. 60,00 €, parametrizzabile anno per anno), dovuta **per intero** anche da chi entra a novembre o recede prima. Pagamento in un'unica soluzione, mensile o con **trattenuta in busta paga** (solo con matricola; «Registra la trattenuta del mese»). Esterni e familiari non la pagano. Dalla 26.10.29.1 il versato e' la somma degli importi registrati per rata (T7). Gli **eliminati** non la devono dall'anno dell'eliminazione (gli anni prima restano dovuti) e gli anni passati da eliminati restano esenti anche dopo il ripristino. Il confronto con le trattenute dei cedolini e' **tra i lavori da fare** (voci stipendiali da individuare): il report *Quote associative* e' la base.
 
 ### Report
 
@@ -390,7 +394,7 @@ Elenco soci, quote associative e, per ogni evento, riepilogo per sede, scelte/or
 
 `cral_sedi`, `cral_parametri` (tessera e progressivi), `cral_tipi`, `cral_tipologie_prodotto`, `cral_soci` (nessun codice fiscale), `cral_familiari_legami`, `cral_soci_tessere`, `cral_iniziative` (config in JSON validato dal server), `cral_iniziative_partecipanti`, `cral_scelte` (dati in JSON validato contro la config), `cral_carichi`, `cral_richieste`, `cral_quote_anno`, `cral_quote`, `cral_lotti` e `cral_lotti_variazioni` (0023; le variazioni si svuotano alla chiusura del lotto). Importi in centesimi interi.
 
-Audit (entita' `cral`): `CRAL_FILE_LETTO`, `CRAL_IMPORT_ABBINAMENTO`, `CRAL_IMPORT_CONFERMATO`, `CRAL_PERSONA_CREATA` / `_MODIFICATA`, `CRAL_LEGAMI_FAMILIARE`, `CRAL_PERSONE_VALIDA` / `_RIFIUTA` / `_RIMETTI` / `_CESSA` / `_RIATTIVA`, `CRAL_SOCIO_RIAMMESSO`, `CRAL_TROVATO_IN_PGS`, `CRAL_SEDE_ASSEGNATA`, `CRAL_SEDE_*`, `CRAL_TIPO_*`, `CRAL_TIPOLOGIA_*`, `CRAL_PARAMETRI_TESSERA`, `CRAL_EVENTO_CREATO` / `_MODIFICATO` / `_ARCHIVIATO` / `_RIPRISTINATO`, `CRAL_PARTECIPANTI`, `CRAL_SCELTA`, `CRAL_SCELTE_IN_BLOCCO`, `CRAL_CARICO`, `CRAL_RICHIESTA` / `_MODIFICATA`, `CRAL_QUOTA_ANNO`, `CRAL_QUOTA_SOCIO`, `CRAL_TRATTENUTA_MESE`; dalla 26.10.29 `CRAL_PERSONE_ELIMINA` / `_RIPRISTINA`, `CRAL_TIPOLOGIA_IN_BLOCCO`, `CRAL_PASSAGGIO_SOCIO_ESTERNO`, `CRAL_EXPORT_SOCI`, `CRAL_EXPORT_ARCHIVIO` (ambiente, sezioni, conteggi), `CRAL_LOTTO_T6`, `CRAL_LOTTO_ARCHIVIO`, `CRAL_LOTTO_APPLICATO`, `CRAL_LOTTO_SCARTATO`.
+Audit (entita' `cral`): `CRAL_FILE_LETTO`, `CRAL_IMPORT_ABBINAMENTO`, `CRAL_IMPORT_CONFERMATO`, `CRAL_PERSONA_CREATA` / `_MODIFICATA`, `CRAL_LEGAMI_FAMILIARE`, `CRAL_PERSONE_VALIDA` / `_RIFIUTA` / `_RIMETTI` / `_CESSA` / `_RIATTIVA`, `CRAL_SOCIO_RIAMMESSO`, `CRAL_TROVATO_IN_PGS`, `CRAL_SEDE_ASSEGNATA`, `CRAL_SEDE_*`, `CRAL_TIPO_*`, `CRAL_TIPOLOGIA_*`, `CRAL_PARAMETRI_TESSERA`, `CRAL_EVENTO_CREATO` / `_MODIFICATO` / `_ARCHIVIATO` / `_RIPRISTINATO`, `CRAL_PARTECIPANTI`, `CRAL_SCELTA`, `CRAL_SCELTE_IN_BLOCCO`, `CRAL_CARICO`, `CRAL_RICHIESTA` / `_MODIFICATA`, `CRAL_QUOTA_ANNO`, `CRAL_QUOTA_SOCIO`, `CRAL_TRATTENUTA_MESE`; dalla 26.10.29 `CRAL_PERSONE_ELIMINA` / `_RIPRISTINA`, `CRAL_TIPOLOGIA_IN_BLOCCO`, `CRAL_PASSAGGIO_SOCIO_ESTERNO`, `CRAL_EXPORT_SOCI`, `CRAL_EXPORT_ARCHIVIO` (ambiente, sezioni, conteggi), `CRAL_LOTTO_T6`, `CRAL_LOTTO_T7`, `CRAL_EXPORT_QUOTE`, `CRAL_LOTTO_ARCHIVIO`, `CRAL_LOTTO_APPLICATO`, `CRAL_LOTTO_SCARTATO`.
 
 ## Sezione PDF Region Editor
 
@@ -541,6 +545,15 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.10.29.1
+**Modulo CRAL: quote versate in massa (T7) con l'importo di ogni rata**
+
+- **Tracciato T7** (*Importazione › Quote versate*): una riga per socio (`Gen … Dic`, `Unica`, `Pagata il`) o una riga per versamento (`Mese`, `Importo`, `Data versamento`), aggancio come nel T6, lotto di variazioni da validare. Si registra l'importo versato: copre la rata = mese pagato, copre la quota dell'anno = anno pagato, minore = registrato e da completare. Le rate pagate si tolgono **solo a mano**. Prima strada per le trattenute, in attesa delle API CINECA che useranno lo stesso lotto.
+- **Quote associative**: *Esporta Excel* nel formato del T7; mesi parziali in ambra con l'importo nel suggerimento; il versato e' la somma reale.
+- **Server**: `confrontaT7` e `quotaDopoModifica` (regole pure, con test), rotte `/lotti/t7` e `/export/quote`, quote a mano e trattenuta del mese con l'importo della rata, archivio fra ambienti con gli importi (un archivio della 26.10.29 resta leggibile). **Migrazione `0024_cral_quote_importi.sql`** (additiva, idempotente: `importi`, `versato_unica`, pregresso alla rata teorica cosi' i totali non cambiano; lotti con provenienza `T7`), consolidata in `setup.sql`.
+- **Guide**: tracciati **T7** (per socio) e **T7-V** (per versamento) con esempio e modello CSV.
+- Test: server 138, client 104. Provato su database (pregresso, quote a mano, trattenuta, lotto T7, archivio senza differenze) e nel browser (export → T7 → lotto → applicazione, forma per versamento, nessun errore in console).
 
 ### 26.10.29
 **Modulo CRAL: stato Eliminato, passaggio a socio esterno, aggiornamento massivo (T6), archivio fra ambienti**

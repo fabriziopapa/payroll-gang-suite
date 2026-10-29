@@ -297,12 +297,24 @@ export function tenutoQuota(s: Persona, anno: number): boolean {
 }
 export const sociQuota = (db: Db, anno: number): Persona[] => db.soci.filter(s => tenutoQuota(s, anno))
 export const quotaSocio = (db: Db, anno: number, s: Persona): QuotaSocio =>
-  db.quote[String(anno)]?.[s.id] ?? { modo: s.matricola ? 'TRATTENUTA' : 'UNICA', mesi: Array<boolean>(12).fill(false), pagataIl: null, note: '' }
+  db.quote[String(anno)]?.[s.id] ?? { modo: s.matricola ? 'TRATTENUTA' : 'UNICA', mesi: Array<boolean>(12).fill(false), importi: Array<number>(12).fill(0), pagataIl: null, versatoUnica: null, note: '' }
 /** Rata del mese k (0–11): l'ultima prende i centesimi di resto. */
 export const rataMese = (imp: number, k: number): number => { const r = Math.floor(imp / 12); return k === 11 ? imp - 11 * r : r }
-export function versatoQuota(db: Db, anno: number, s: Persona): number {
-  const q = quotaSocio(db, anno, s), imp = quotaAnno(db, anno)
-  return q.modo === 'UNICA' ? (q.pagataIl ? imp : 0) : q.mesi.reduce((a, on, k) => a + (on ? rataMese(imp, k) : 0), 0)
+/** Versato reale (0024): importi delle rate più l'unica soluzione. */
+export const versatoDi = (q: Pick<QuotaSocio, 'importi' | 'versatoUnica'>): number => (q.importi ?? []).reduce((a, v) => a + v, 0) + (q.versatoUnica ?? 0)
+export const versatoQuota = (db: Db, anno: number, s: Persona): number => versatoDi(quotaSocio(db, anno, s))
+/**
+ * Modifica a mano (stessa regola del server, lib/cral.ts): accendere un mese
+ * registra la rata (o lascia l'importo se maggiore), spegnerlo lo azzera;
+ * l'unica soluzione pagata registra la quota dell'anno.
+ */
+export function quotaDopoModifica(cur: QuotaSocio, patch: Partial<Pick<QuotaSocio, 'modo' | 'mesi' | 'pagataIl' | 'note'>>, imp: number): QuotaSocio {
+  const q: QuotaSocio = { ...cur, mesi: [...cur.mesi], importi: [...(cur.importi ?? Array<number>(12).fill(0))] }
+  if (patch.modo !== undefined) q.modo = patch.modo
+  if (patch.note !== undefined) q.note = patch.note
+  if (patch.mesi) { q.mesi = [...patch.mesi]; q.importi = q.importi.map((v, k) => (q.mesi[k] ? Math.max(v, rataMese(imp, k)) : 0)) }
+  if (patch.pagataIl !== undefined) { q.pagataIl = patch.pagataIl; q.versatoUnica = patch.pagataIl ? Math.max(cur.versatoUnica ?? 0, imp) : null }
+  return q
 }
 
 // ── Tessera ──────────────────────────────────────────────────
