@@ -9,6 +9,7 @@ import { cralApi } from '../../api/endpoints'
 import type { Persona } from './tipi'
 import { TIPOLOGIE, fmtData, nominativo, tesseraDaTesto, tesseraDoppia } from './logica'
 import { CercaAnagrafica } from './SociTab'
+import { ElencoLotti } from './Lotto'
 import {
   Campo, Conferma, D, Ico, Modale, Origine, Pill, avviso, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario, cardCls, inputCls, inputW, thCls, useCral,
 } from './ui'
@@ -20,6 +21,7 @@ export function ValidareTab() {
   const rifiutati = db.soci.filter(s => s.stato === 'RIFIUTATO')
   return (
     <div className="flex flex-col gap-6">
+      <ElencoLotti />
       <SezioneValidazione tipo="SE" onCollega={setCollega} onRifiuta={setRifiuta}
         titolo="Soci esterni da validare"
         spiega="Diventano soci a tutti gli effetti: entrano nell'elenco soci con la tessera del libro soci (non si assegna in automatico: se manca la scrivi qui), negli eventi per gruppi «soci esterni» e possono avere familiari. Se in realtà è un dipendente, «Trova in anagrafica PGS» lo trasforma in socio dipendente con la sua matricola." />

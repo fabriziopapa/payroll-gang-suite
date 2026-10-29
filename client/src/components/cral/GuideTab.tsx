@@ -1,7 +1,8 @@
 // ============================================================
 // PAYROLL GANG SUITE — Modulo CRAL · scheda Guide
-// Tracciato record di ogni importazione (T1–T5), con un esempio CSV, il
-// modello da scaricare e l'equivalente manuale. In fondo, i lavori da fare.
+// Tracciato record di ogni importazione (T1–T6), con un esempio CSV, il
+// modello da scaricare e l'equivalente manuale; l'archivio fra ambienti.
+// In fondo, i lavori da fare.
 // ============================================================
 
 import { D, Ico, Pill, avviso, btnPiccoloSec, cardCls, etichettaCls, scarica, useCral, type Scheda } from './ui'
@@ -30,7 +31,7 @@ const TRACCIATI: Tracciato[] = [
       ['MATRICOLA', 'No', 'Numero, fino a 6 cifre', '090123', 'Non c\'è nel libro soci; se un file la porta (es. la stampa dei versamenti) prevale sul nominativo.'],
       ['SEDE DI CONSEGNA · EMAIL', 'No', 'Testo', 'Sede di Via Acton', 'Non ci sono nel libro soci: la sede dei soci nuovi resta «da indicare» e si assegna nella scheda Sedi; quella dei soci già presenti non cambia.'],
     ],
-    note: ['* Serve il NOMINATIVO (o COGNOME + NOME, o la MATRICOLA).', 'Se il file ha più fogli (LIBRO SOCI, TUTTI LIBRO SOCI, STAMPA_VERSAMENTI…) si sceglie quale usare.', 'Soci attivi in PGS che non sono nel file: per ciascuno si decide a mano «Cessato», «Resta attivo» o «È nel file come…» (nome scritto male: si associa la riga giusta, proposta per stesso numero d\'iscrizione o nome simile). Finché non si decide, la conferma è bloccata.', 'Formati .xlsx, .xls, .csv. Le intestazioni si riconoscono anche con nomi simili; altrimenti si scelgono a mano.'],
+    note: ['* Serve il NOMINATIVO (o COGNOME + NOME, o la MATRICOLA).', 'Se il file ha più fogli (LIBRO SOCI, TUTTI LIBRO SOCI, STAMPA_VERSAMENTI…) si sceglie quale usare.', 'Soci attivi in PGS che non sono nel file: per ciascuno si decide a mano «Cessato», «Resta attivo» o «È nel file come…» (nome scritto male: si associa la riga giusta, proposta per stesso numero d\'iscrizione o nome simile). Finché non si decide, la conferma è bloccata.', 'Formati .xlsx, .xls, .csv. Le intestazioni si riconoscono anche con nomi simili; altrimenti si scelgono a mano.', 'Un ex dipendente passato a socio esterno si riconosce dalla sua ex matricola: l\'import aggiorna il socio esterno che c\'è già, non crea un nuovo socio dipendente.', 'Il T1 aggiunge e abbina. Per aggiornare in massa dati di chi c\'è già (sedi, date di nascita, email, tessere, stato) c\'è il T6.'],
     esempio: ' ;AGM 14 09 2026;QUOTA ASSOCIATIVA 2026\nATTIVI;NOMINATIVO;CODICE FISCALE;N.ISCR.SOCIO;ESTERNI\n1;ROSSI MARIA;(ignorato);2;\n2;D\'ANGELO MARCO;(ignorato);240;ESTERNO',
     mano: [['Un socio alla volta', 'Soci › Nuova persona (dall\'anagrafica PGS o esterno)', 'soci'], ['La sede di uno o più soci', 'Sedi › cerca e aggiungi, oppure seleziona e «Sposta in…»', 'sedi'], ['Tessera, email, note, cessazione', 'Soci › clic sulla riga', 'soci']],
   },
@@ -91,7 +92,24 @@ const TRACCIATI: Tracciato[] = [
     note: ['* Serve almeno uno fra MATRICOLA/ID e NOMINATIVO.', 'La quota NON si importa: quota piena dell\'evento, scontata della percentuale se la persona di riferimento è socio (dipendente o esterno) o dipendente non socio, × settimane prenotate o frequentate.', 'Frequentata e Tolta si segnano a mano, settimana per settimana.', 'In un evento «Singoli» chi viene importato entra anche tra i partecipanti.'],
     esempio: 'MATRICOLA / ID;NOMINATIVO;RIFERIMENTO;SETTIMANA 1;SETTIMANA 2;SETTIMANA 3;SETTIMANA 4;SETTIMANA 5;VERSATO;NOTE\nFAM-0002;;;X;X;;;;180,00;\n;COLOMBO Nicolò;;X;;;;X;;prima e ultima\n;ROSSI Chiara;090123;X;X;;;;;figlia di dipendente non socio',
     mano: [['Una settimana', 'Eventi › apri il campo › cella della settimana: Prenotata / Frequentata / Tolta', 'iniziative'], ['Un nuovo iscritto', 'Eventi › apri il campo › Nuovo partecipante', 'iniziative'], ['Il versato', 'Eventi › apri il campo › colonna Versato', 'iniziative']],
-  }
+  },
+  {
+    id: 'T6', titolo: 'Aggiornamento dati delle persone già presenti', dove: 'Importazione › Aggiornamento dati (T6)', scheda: 'import',
+    cosa: 'Aggiorna in massa i dati di soci, esterni e familiari che ci sono già: sede di consegna, data di nascita, email, tessera, note, tipologia, stato. Non crea persone nuove (per quelle c\'è il T1). Il modo più semplice: «Soci › Esporta Excel» (stesse colonne, anche il foglio Familiari), correggi in Excel e ricarica il file. Dalle differenze nasce un lotto: per ogni persona prima → dopo, si accetta o si scarta anche un campo alla volta, e solo allora si applica.',
+    campi: [
+      ['ID', 'Sì*', 'Matricola, EXT-nnnn o FAM-nnnn', '090123', 'Primo criterio di aggancio.'],
+      ['Tessera', 'No*', 'Numero o testo', '42', 'Per agganciare, se manca l\'ID (si sceglie a mano la colonna). Come campo da aggiornare: nuova tessera, controllata contro i doppioni.'],
+      ['Cognome + Nome (o Nominativo)', 'No*', 'Testo', 'ROSSI · MARIA', 'Terzo criterio, con la regola di Emolumenti; fra omonimi decide la data di nascita. Non si aggiornano: per chi ha la matricola vengono da PGS.'],
+      ['Data di nascita', 'No', 'gg/mm/aaaa, aaaammgg', '07/03/1958', 'Per chi ha la matricola si scrive solo se in PGS manca; se c\'è ed è diversa si segnala e non si sovrascrive.'],
+      ['Sede', 'No', 'Codice (CD) o nome della sede', 'ACT', 'Deve esistere. È la colonna «Sede» dell\'export; «Sede (nome)» si ignora.'],
+      ['Email · Note', 'No', 'Testo', 'maria.rossi@…', 'Email controllata nel formato.'],
+      ['Tipologia', 'No', 'Socio dipendente · Socio esterno · Esterno', 'Esterno', 'Con la matricola: socio dipendente o esterno; senza: socio esterno o esterno. Un socio con familiari non diventa esterno. Il passaggio a socio esterno di un dipendente si fa dalla scheda (nuovo ID).'],
+      ['Stato · Data stato', 'No', 'Attivo · Cessato · Eliminato · data gg/mm/aaaa', 'Cessato · 31/12/2026', 'Cessato solo chi è attivo; Eliminato da qualunque stato; Attivo su un eliminato = ripristino. Senza data, oggi. I cambi di stato si confermano uno per uno.'],
+    ],
+    note: ['* Serve almeno un criterio di aggancio: ID, tessera o nominativo.', 'Cella vuota = il campo non cambia. «-» = svuota il campo.', 'Si applicano solo le colonne spuntate (di default sede, email e note): le altre si accendono a mano.', 'Persone non agganciate: si scelgono a mano o si ignorano. Una persona in più righe: vale la prima.', 'Il lotto resta in «Da validare» finché non è tutto deciso: si può applicare una parte e riprendere più tardi.'],
+    esempio: 'ID;Tipologia;Stato;Data stato;Cognome;Nome;Data di nascita;Email;Sede;Tessera;Note\n090123;Socio dipendente;Attivo;;ROSSI;MARIA;;maria.rossi@ateneo.example;ACT;;\nEXT-0004;Socio esterno;Cessato;31/12/2026;BIANCHI;GIULIA;12/05/1961;;CD;0108;\nFAM-0002;;;;FERRARI;MATTEO;;;-;;sede svuotata con il trattino',
+    mano: [['Sede di molte persone', 'Soci › seleziona › Sede di consegna › Applica', 'soci'], ['Stato o tipologia di molte persone', 'Soci › seleziona › Cessa / Elimina / Ripristina, Tipologia', 'soci'], ['Una persona', 'Soci › clic sulla riga', 'soci']],
+  },
 ]
 
 export function GuideTab() {
@@ -133,6 +151,17 @@ export function GuideTab() {
             </div>
           </div>
         </section>))}
+      <section className={`${cardCls} p-5 flex flex-col gap-2 text-sm text-slate-300`}>
+        <h3 className="text-white font-semibold">Archivio fra ambienti (produzione ↔ pre-produzione)</h3>
+        <ul className="list-disc ml-5 space-y-1 max-w-[80ch] text-slate-400">
+          <li><b className="text-slate-200">Esporta</b> (Importazione › Archivio fra ambienti): un file .json con le sezioni scelte, cioè sedi, parametri e tabelle (tipi di evento, tipologie di prodotto, tessera, importi della quota), soci e familiari con lo storico delle tessere, quote, eventi con partecipanti, scelte, carichi e richieste. Nome con ambiente e data. I dati personali viaggiano così come sono: l'export resta nell'audit.</li>
+          <li><b className="text-slate-200">Carica</b> nell'altro ambiente: si scelgono le sezioni e il server prepara un lotto da validare in «Da validare». Nulla si cancella: chi c'è qui e non nel file resta, un valore vuoto non svuota, un mese di quota pagato qui resta pagato.</li>
+          <li>Gli <b className="text-slate-200">ID restano gli stessi</b>. Se qui un EXT-/FAM- è già di un'altra persona, la riga è un conflitto: accettandola entra con un nuovo ID e quote, scelte e legami la seguono. I contatori EXT-/FAM- e il prossimo numero di tessera si alzano da soli.</li>
+          <li>Le <b className="text-slate-200">sedi</b> si ritrovano per codice o per nome. Gli utenti che hanno creato o validato i record si ricollegano per username; chi non c'è resta scritto nelle note.</li>
+          <li>Da confermare una per una: cambi di stato, nuovi ID, matricole che qui non sono in anagrafica PGS, possibili doppioni. Bloccate: tessere già usate da altri, ex dipendenti passati a socio esterno in un solo ambiente.</li>
+          <li>Il file contiene dati personali: tienilo fuori dalla cartella del repository e cancellalo dopo l'uso.</li>
+        </ul>
+      </section>
       <section className="rounded-xl border border-sky-800/70 bg-sky-950/10 p-5 flex flex-col gap-2">
         <h3 className="text-white font-semibold">Lavori da fare</h3>
         <ul className="list-disc ml-5 text-sm text-slate-300 space-y-1 max-w-[80ch]">

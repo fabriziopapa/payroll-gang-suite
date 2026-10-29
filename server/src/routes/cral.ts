@@ -31,6 +31,15 @@
 //   PUT    /quote-anno/:anno                   { importo }
 //   PATCH  /quote/:anno/:socio                 { modo?, mesi?, pagataIl?, note? }
 //   POST   /quote/:anno/trattenuta             { mese } rata del mese per chi ha la trattenuta
+//   POST   /soci/tipologia                     { ids, tipo } tipologia in blocco
+//   POST   /soci/:id/passa-esterno             socio dipendente → socio esterno (nuovo ID EXT)
+//   POST   /export/soci                        { ids } → Excel soci + familiari (stesse colonne del T6)
+//   GET    /export/archivio?sezioni=           archivio JSON per un altro ambiente
+//   POST   /lotti/archivio                     { file, archivio, sezioni } → lotto da validare
+//   POST   /lotti/t6                           { file, righe } → lotto da validare
+//   GET    /lotti | GET /lotti/:id             lotti e variazioni
+//   PATCH  /lotti/:id                          accetta/scarta (voci o intera sezione)
+//   POST   /lotti/:id/applica | /scarta        applica le accettate | scarta il lotto
 // ============================================================
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
@@ -44,6 +53,18 @@ import {
   unisciDati, usiTolti, type AnagraficaCral, type DatiScelta, type ConfigEvento,
 } from '../lib/cral.js'
 import { leggiFogli, MAX_BYTE_FILE } from '../services/cral/fogli.js'
+import { foglioSoci } from '../services/cral/esporta.js'
+import {
+  SEZIONI, archivioDaStato, archivioSchema, confrontaArchivio, confrontaT6, conteggi, personaDaRiga, rigaT6Schema, type Sezione,
+} from '../lib/cralLotti.js'
+import { readFileSync } from 'node:fs'
+
+const VERSIONE = (() => {
+  try { return String(JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version ?? '') } catch { return '' }
+})()
+/** Nome dell'ambiente (pre-produzione, produzione): PGS_AMBIENTE, altrimenti il dominio. */
+const ambienteDi = (r: FastifyRequest) => (process.env['PGS_AMBIENTE']?.trim() || r.hostname || 'PGS').slice(0, 80)
+const MAX_BYTE_ARCHIVIO = 40 * 1024 * 1024
 
 const ID_PERSONA = z.string().regex(/^([0-9]{1,10}|EXT-[0-9]{4,6}|FAM-[0-9]{4,6})$/)
 const ID_SEDE    = z.string().regex(/^[A-Z0-9]{1,12}$/)
@@ -59,6 +80,7 @@ const MAX_IDS    = 5000
 const STATO_HTTP: Record<CralErrore, number> = {
   TESSERA_DOPPIA: 409, MATRICOLA_GIA_SOCIO: 409, NOME_GIA_USATO: 409, SOCIO_NON_TROVATO: 404,
   SEDE_SCONOSCIUTA: 400, LEGAME_NON_VALIDO: 400, STATO_NON_VALIDO: 409, SUFFISSI_ESAURITI: 409, TIPO_SCONOSCIUTO: 400,
+  LOTTO_NON_TROVATO: 404, LOTTO_CHIUSO: 409,
 }
 const eErrore = (x: unknown): x is CralErrore => typeof x === 'string' && x in STATO_HTTP
 
@@ -247,10 +269,25 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
   })
 
   app.post('/soci/stato', admin, async (request, reply) => {
-    const b = z.object({ ids: z.array(ID_PERSONA).min(1).max(MAX_IDS), azione: z.enum(['valida', 'rifiuta', 'rimetti', 'cessa', 'riattiva']) }).parse(request.body)
+    const b = z.object({ ids: z.array(ID_PERSONA).min(1).max(MAX_IDS), azione: z.enum(['valida', 'rifiuta', 'rimetti', 'cessa', 'riattiva', 'elimina', 'ripristina']) }).parse(request.body)
     const n = await repo.cambiaStato(b.ids, b.azione, uid(request))
     await audit(request, `CRAL_PERSONE_${b.azione.toUpperCase()}`, b.ids.length === 1 ? b.ids[0] : undefined, { richieste: b.ids.length, fatte: n })
     return reply.send({ fatte: n })
+  })
+
+  app.post('/soci/tipologia', admin, async (request, reply) => {
+    const b = z.object({ ids: z.array(ID_PERSONA).min(1).max(MAX_IDS), tipo: z.enum(['SD', 'SE', 'EST']) }).parse(request.body)
+    const n = await repo.cambiaTipologia(b.ids, b.tipo, uid(request))
+    await audit(request, 'CRAL_TIPOLOGIA_IN_BLOCCO', undefined, { tipo: b.tipo, richieste: b.ids.length, fatte: n })
+    return reply.send({ fatte: n })
+  })
+
+  app.post('/soci/:id/passa-esterno', admin, async (request, reply) => {
+    const { id } = z.object({ id: ID_PERSONA }).parse(request.params)
+    const r = await repo.passaEsterno(id, uid(request))
+    if (eErrore(r)) return errore(reply, r)
+    await audit(request, 'CRAL_PASSAGGIO_SOCIO_ESTERNO', r.id, { era: id })
+    return reply.send({ socio: r })
   })
 
   app.post('/soci/:id/riammetti', admin, async (request, reply) => {
@@ -279,6 +316,100 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
       await audit(request, 'CRAL_SEDE_ASSEGNATA', b.sede ?? undefined, { persone: n })
       return reply.send({ fatte: n })
     } catch (e) { if (e instanceof Error && e.message === 'SEDE_SCONOSCIUTA') return errore(reply, 'SEDE_SCONOSCIUTA'); throw e }
+  })
+
+  // ── Export: Excel dei soci e archivio per un altro ambiente ─
+  app.post('/export/soci', admin, async (request, reply) => {
+    const { ids } = z.object({ ids: z.array(ID_PERSONA).max(50_000) }).parse(request.body)
+    const st = await repo.stato()
+    const scelti = new Set(ids)
+    const soci = st.soci.filter(s => s.tipo !== 'FAM' && scelti.has(s.id))
+    const presi = new Set(soci.map(s => s.id))
+    const familiari = st.soci.filter(s => s.tipo === 'FAM' && s.legami.some(l => presi.has(l.socio)))
+    const buf = foglioSoci(soci, familiari, st.sedi)
+    await audit(request, 'CRAL_EXPORT_SOCI', undefined, { soci: soci.length, familiari: familiari.length, ambiente: ambienteDi(request) })
+    return reply.send({ ambiente: ambienteDi(request), base64: buf.toString('base64') })
+  })
+
+  app.get('/export/archivio', admin, async (request, reply) => {
+    const q = z.object({ sezioni: z.string().max(100).default(SEZIONI.join(',')) }).parse(request.query)
+    const sezioni = [...new Set(q.sezioni.split(',').map(x => x.trim()))].filter((x): x is Sezione => (SEZIONI as readonly string[]).includes(x))
+    if (!sezioni.length) return reply.code(400).send({ error: 'NESSUNA_SEZIONE' })
+    const a = archivioDaStato(await repo.stato(), { app: VERSIONE, ambiente: ambienteDi(request), esportato: new Date().toISOString() }, sezioni)
+    await audit(request, 'CRAL_EXPORT_ARCHIVIO', undefined, {
+      ambiente: a.ambiente, sezioni, sedi: a.sedi?.length ?? 0, soci: a.soci?.length ?? 0, quote: a.quote?.length ?? 0, eventi: a.eventi?.length ?? 0,
+    })
+    return reply.send(a)
+  })
+
+  // ── Lotti di variazioni da validare ───────────────────────
+  app.post('/lotti/archivio', { ...admin, bodyLimit: MAX_BYTE_ARCHIVIO }, async (request, reply) => {
+    const b = z.object({ file: riga(200, 1), sezioni: z.array(z.enum(SEZIONI)).min(1).max(5), archivio: z.unknown() }).parse(request.body)
+    const p = archivioSchema.safeParse(b.archivio)
+    if (!p.success) {
+      const primo = p.error.issues[0]
+      return reply.code(400).send({ error: 'ARCHIVIO_NON_VALIDO', dove: primo ? primo.path.slice(0, 4).join('.') : '' })
+    }
+    const src = p.data
+    const sezioni = b.sezioni.filter(x => src.sezioni.includes(x))
+    if (!sezioni.length) return reply.code(400).send({ error: 'NESSUNA_SEZIONE' })
+    const dst = archivioDaStato(await repo.stato(), { app: VERSIONE, ambiente: ambienteDi(request), esportato: '' }, SEZIONI)
+    const matricole = new Set((await repo.anagrafica()).map(a => a.matricola))
+    const { variazioni, daRimappare } = confrontaArchivio(src, dst, sezioni, matricole)
+    const riepilogo = { variazioni: conteggi(variazioni), app: src.app, stessoAmbiente: src.ambiente === ambienteDi(request), daRimappare }
+    const id = await repo.creaLotto({ origine: 'ARCHIVIO', file: b.file, ambiente: src.ambiente, esportato: src.esportato || null, sezioni, riepilogo }, variazioni, uid(request))
+    await audit(request, 'CRAL_LOTTO_ARCHIVIO', id, { file: b.file, ambiente: src.ambiente, sezioni, variazioni: conteggi(variazioni) })
+    return reply.code(201).send({ id, variazioni: variazioni.length })
+  })
+
+  app.post('/lotti/t6', { ...admin, bodyLimit: 20 * 1024 * 1024 }, async (request, reply) => {
+    const b = z.object({ file: riga(200, 1), righe: z.array(rigaT6Schema).min(1).max(MAX_IDS * 4) }).parse(request.body)
+    const st = await repo.stato()
+    const anag = await repo.anagrafica()
+    const nascita = new Map(anag.map(a => [a.matricola, a.nascita]))
+    const oggi = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Rome' }).format(new Date())
+    const variazioni = confrontaT6(b.righe, st.soci.map(personaDaRiga), new Set(st.sedi.map(s => s.id)), nascita, oggi)
+    if (!variazioni.length) return reply.send({ id: null, variazioni: 0 })
+    const riepilogo = { variazioni: conteggi(variazioni), righe: b.righe.length }
+    const id = await repo.creaLotto({ origine: 'T6', file: b.file, ambiente: ambienteDi(request), esportato: null, sezioni: ['soci'], riepilogo }, variazioni, uid(request))
+    await audit(request, 'CRAL_LOTTO_T6', id, { file: b.file, righe: b.righe.length, variazioni: variazioni.length })
+    return reply.code(201).send({ id, variazioni: variazioni.length })
+  })
+
+  app.get('/lotti', admin, async (_request, reply) => reply.send({ lotti: await repo.lotti() }))
+
+  app.get('/lotti/:id', admin, async (request, reply) => {
+    const { id } = z.object({ id: UUID }).parse(request.params)
+    const r = await repo.lotto(id)
+    if (!r) return errore(reply, 'LOTTO_NON_TROVATO')
+    return reply.send(r)
+  })
+
+  app.patch('/lotti/:id', admin, async (request, reply) => {
+    const { id } = z.object({ id: UUID }).parse(request.params)
+    const b = z.object({
+      voci: z.array(z.object({ id: z.number().int().positive(), esito: z.enum(['ACCETTATA', 'SCARTATA', 'ATTESA']), accettati: z.array(z.string().max(40)).max(40).optional() })).max(200_000).optional(),
+      sezione: z.enum(SEZIONI).optional(), azione: z.enum(['accettaTutte', 'scartaTutte', 'azzera']).optional(),
+    }).parse(request.body)
+    const r = await repo.decidiVariazioni(id, b)
+    if (eErrore(r)) return errore(reply, r)
+    return reply.send({ fatte: r })
+  })
+
+  app.post('/lotti/:id/applica', admin, async (request, reply) => {
+    const { id } = z.object({ id: UUID }).parse(request.params)
+    const r = await repo.applicaLotto(id, uid(request))
+    if (eErrore(r)) return errore(reply, r)
+    await audit(request, 'CRAL_LOTTO_APPLICATO', id, { ...r })
+    return reply.send({ esito: r })
+  })
+
+  app.post('/lotti/:id/scarta', admin, async (request, reply) => {
+    const { id } = z.object({ id: UUID }).parse(request.params)
+    const r = await repo.scartaLotto(id, uid(request))
+    if (eErrore(r)) return errore(reply, r)
+    await audit(request, 'CRAL_LOTTO_SCARTATO', id, {})
+    return reply.send({ ok: true })
   })
 
   // ── Eventi ─────────────────────────────────────────────────

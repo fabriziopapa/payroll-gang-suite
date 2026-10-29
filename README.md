@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.10.28-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.10.29-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -145,7 +145,7 @@ payroll-gang-suite/
 - **Verifica liquidato** *(admin)* — confronto del liquidato CINECA (`/liquidazioni/liquidato/dettaglio`) con gli invii PGS ricostruiti (join per `matricola|voce|capitolo|dataCompVoce|riferimento`), classificazione NUOVO / CONGUAGLIO / STORNO / RETTIFICA; ogni lettura è auditata
 - **Dottorandi e borse (area Emolumenti)** *(admin)* — elenco lavorazioni con bozze/archiviate, caricamento nominativi per incollato o ricerca in anagrafica, lettura di cio' che e' **gia' in CSA** (i mesi presenti non sono selezionabili: la competenza doppia non nasce), abbinamenti d'ufficio tipo→voce→capitolo (DR `09834`/`000601`, BS `09947`/`000706`, BE `09766`/`000602`), export CSV per HR Suite e **TXT matricole divise per area del conto**
 - **Versamenti enti** (dalla 26.10.26) — porting strutturato del Java *GestioneSaldiEnti*: si carica la stampa versamenti di CSA (`STAMPA_VERSAMENTI_*.CSV`, anche con **piu' mesi**), e per ogni ente si scarica l'**EML da aprire in Outlook** (bozza `X-Unsent`) con CSV e PDF di dettaglio, ora con la **data di nascita**. Il file si elabora **solo nel browser**: PGS salva soltanto la rubrica degli enti (email anche multiple, abilitato, modello) e i **modelli mail** con i loro allegati personalizzabili. Vedi *Sezione Versamenti enti*
-- **Modulo CRAL** (dalla 26.10.28) *(admin)* — soci dipendenti, soci esterni, esterni e familiari; import annuale del **libro soci** abbinato all'anagrafica PGS per nominativo (mai il codice fiscale); eventi con scelta, consegna, **ordini a pagamento**, **campi estivi a settimane** e **biglietti a magazzino**; sconti per tipologia e personali; **quote associative** per anno solare; report CSV/PDF. Vedi *Sezione Modulo CRAL*
+- **Modulo CRAL** (dalla 26.10.28) *(admin)* — soci dipendenti, soci esterni, esterni e familiari; import annuale del **libro soci** abbinato all'anagrafica PGS per nominativo (mai il codice fiscale); eventi con scelta, consegna, **ordini a pagamento**, **campi estivi a settimane** e **biglietti a magazzino**; sconti per tipologia e personali; **quote associative** per anno solare; report CSV/PDF. Dalla 26.10.29: stato **Eliminato** (esente dalla quota, reversibile), passaggio da **socio dipendente a socio esterno**, **aggiornamento massivo** da Excel (T6) e modifiche in blocco, **archivio fra ambienti** (produzione ↔ pre-produzione) con lotto di variazioni da validare. Vedi *Sezione Modulo CRAL*
 - **PDF Region Editor** *(in rollout, kill-switch off)* — strumento admin: disegno regioni di riconoscimento layout direttamente sul cedolino renderizzato (canvas), template versionati e immutabili riusabili per l'estrazione automatica delle voci
 
 ---
@@ -326,7 +326,7 @@ Audit: `VERSAMENTI_ENTI_SINCRONIZZATI` (enti nuovi e descrizioni cambiate), `VER
 
 ## Sezione Modulo CRAL
 
-Menu *Modulo CRAL → Soci e iniziative*, **solo amministratori** (voce di menu nascosta e rotte respinte per gli altri). Rotte `/api/v1/cral` (`routes/cral.ts`, audit **awaited**: se non si registra, l'operazione risponde errore); regole pure in `lib/cral.ts` (con test); lettura dei file in `services/cral/fogli.ts`; repository `PgCralRepository`; migrazione `0022_cral.sql` (14 tabelle `cral_*`, gia' inclusa in `setup.sql`). Client in `components/cral/` e `pages/CralPage.tsx` (caricata a richiesta).
+Menu *Modulo CRAL → Soci e iniziative*, **solo amministratori** (voce di menu nascosta e rotte respinte per gli altri). Rotte `/api/v1/cral` (`routes/cral.ts`, audit **awaited**: se non si registra, l'operazione risponde errore); regole pure in `lib/cral.ts` (con test); lettura dei file in `services/cral/fogli.ts`; repository `PgCralRepository`; migrazioni `0022_cral.sql` (14 tabelle `cral_*`) e `0023_cral_eliminati_lotti.sql` (stato Eliminato, ex matricola, 2 tabelle dei lotti), gia' incluse in `setup.sql`. Motore dei lotti (T6 e archivio) in `lib/cralLotti.ts` (con test), export Excel in `services/cral/esporta.ts`. Client in `components/cral/` e `pages/CralPage.tsx` (caricata a richiesta).
 
 **Privacy.** Il modulo **non raccoglie il codice fiscale**: le persone si distinguono con **cognome, nome e data di nascita**. La colonna *CODICE FISCALE* del libro soci si ignora e non si salva. L'audit registra solo ID e conteggi, mai nominativi.
 
@@ -344,6 +344,27 @@ Menu *Modulo CRAL → Soci e iniziative*, **solo amministratori** (voce di menu 
 - *Da validare*: soci esterni ed esterni si correggono (tipologia, sede, **tessera dal libro soci**, nominativo, nascita, email) e si validano o rifiutano; **«Trova in anagrafica PGS»** da' la matricola: il socio esterno diventa socio dipendente, l'esterno resta esterno; scelte, ordini e familiari seguono il nuovo ID.
 - **Tessera** (*Parametri*): solo progressivo (default, `0042`) o parte testuale + progressivo (`CRAL-0042`); chi rientra dopo la cessazione prende un **numero nuovo** (default) oppure lo stesso con un suffisso (`0042/01`). Deve essere unica. La validazione non la assegna: viene dal libro soci o si scrive a mano.
 - **ATIPICO** del libro soci: per ora solo un'etichetta.
+- In alto il riquadro **Totale soci** (soci dipendenti + soci esterni attivi), cliccabile come gli altri: filtra l'elenco sui soci.
+
+### Stati, eliminazione e passaggio a socio esterno
+
+Stati della persona: *Attivo*, *Da validare*, *Rifiutato*, *Cessato* e **Eliminato** (dalla 26.10.29).
+
+- **Elimina** (scheda o selezione multipla): da qualunque stato. La persona esce da elenchi, eventi e report; i suoi familiari restano sospesi. **Non deve la quota dall'anno dell'eliminazione**: gli anni prima restano dovuti. Non si cancella nulla (scelte, ordini, quote, storico, tessera). Visibile solo col filtro *Stato: Eliminati*. Lo stato di prima resta salvato (`stato_prima`).
+- **Ripristina**: torna allo stato di prima con la **stessa tessera**. Gli anni passati da eliminato restano **esenti** (`anni_esenti`); la quota torna dovuta dall'anno del ripristino.
+- **Passa a socio esterno** (scheda di un socio dipendente attivo): chi lascia l'Ateneo e resta socio prende un nuovo ID `EXT-nnnn` e resta attivo. La matricola va in **`ex_matricola`** (unica): il libro soci successivo lo riconosce come il socio esterno che c'e' gia' e non crea un doppione, e la matricola non si puo' riusare per un nuovo socio dipendente. Tessera, iscrizione, familiari, eventi, scelte, ordini, richieste e quote seguono il nuovo ID (`ON UPDATE CASCADE`, piu' il riferimento nei campi estivi). La trattenuta in busta paga dell'anno in corso diventa mensile; i mesi registrati restano.
+- **Trova in anagrafica PGS** e' disponibile anche per soci esterni ed esterni gia' attivi (riassunto, o dipendente mai collegato), con la scorciatoia «Usa l'ex matricola».
+- **Selezione multipla** nella scheda *Soci*: sede di consegna, tipologia (con le regole della scheda: chi non puo' si salta), cessa, elimina, ripristina, riattiva; **Esporta Excel** dell'elenco filtrato o dei selezionati.
+
+### Aggiornamento massivo (tracciato T6)
+
+*Importazione › Aggiornamento dati (T6)*: un Excel con persone **gia' presenti** (il piu' comodo e' l'export della scheda *Soci*, che ha le stesse colonne e un secondo foglio *Familiari*). Aggancio per ID (anche l'ex matricola), tessera o nominativo (la data di nascita decide fra gli omonimi); chi non si aggancia si sceglie a mano o si ignora. Colonne aggiornabili, da spuntare una per una: **sede, data di nascita, email, tessera, note, tipologia, stato** (Attivo/Cessato/Eliminato con *Data stato*). Cella vuota = non cambia; `-` = svuota. La data di nascita di chi ha la matricola si scrive **solo se in PGS manca** (se c'e' ed e' diversa si segnala). Il server prepara un **lotto** di variazioni prima → dopo da validare (vedi sotto).
+
+### Archivio fra ambienti e lotti da validare
+
+*Importazione › Archivio fra ambienti*: **Esporta archivio** produce un JSON (`cral-archivio_<ambiente>_<data>.json`) con le sezioni scelte: sedi; parametri e tabelle (tipi, tipologie, tessera, importi della quota); soci e familiari (con storico tessere); quote; eventi con partecipanti, scelte, carichi e richieste. I dati personali viaggiano cosi' come sono; l'export resta nell'audit. **Carica un archivio** nell'altro ambiente: si scelgono le sezioni e il server prepara un lotto.
+
+Il **lotto** (stesso motore per T6 e archivio, `lib/cralLotti.ts`) non scrive nulla finche' non si decide: per ogni record *nuovo*, *modificato* o *in conflitto* si vede *qui → in arrivo*, si accetta o si scarta, una modifica anche **un campo alla volta**; «Accetta tutte» per sezione salta le **delicate** (cambi di stato, nuovi ID, matricole che qui non sono in anagrafica, possibili doppioni), che si confermano una per una. Le **bloccate** non si accettano (tessera gia' di un altro, ex dipendente passato a socio esterno in un solo ambiente, tipo di evento o persona mancanti). Regole: **niente si cancella in arrivo**, un valore vuoto non svuota, un mese di quota pagato qui resta pagato, legami e partecipanti si aggiungono soltanto. Gli **ID restano gli stessi**; un `EXT-`/`FAM-` che qui e' di un'altra persona e' un conflitto: accettato, entra con un nuovo ID e le sue quote, scelte e legami lo seguono (la corrispondenza resta nel lotto anche fra un'applicazione e l'altra); non accettato, chi lo cita si salta. Le sedi si ritrovano per codice o per nome; gli utenti per username (chi non c'e' resta scritto nella provenienza). All'**applicazione** ogni variazione accettata va nel suo savepoint dentro una transazione e un campo si scrive solo se qui vale ancora quel che il lotto ha mostrato («cambiato nel frattempo» → saltato). I contatori `EXT-`/`FAM-` e il prossimo numero di tessera si alzano da soli. Il lotto resta in *Da validare* finche' tutto non e' deciso; alla chiusura (o se lo si scarta) i dati copiati si cancellano e restano i conteggi.
 
 ### Importazione del libro soci (tracciato T1)
 
@@ -359,7 +380,7 @@ Cinque modalita': **Scelta** di un'opzione (con opzione predefinita per chi non 
 
 ### Quote associative
 
-Quota per **anno solare** (es. 60,00 €, parametrizzabile anno per anno), dovuta **per intero** anche da chi entra a novembre o recede prima. Pagamento in un'unica soluzione, mensile o con **trattenuta in busta paga** (solo con matricola; «Registra la trattenuta del mese»). Esterni e familiari non la pagano. Il confronto con le trattenute dei cedolini e' **tra i lavori da fare** (voci stipendiali da individuare): il report *Quote associative* e' la base.
+Quota per **anno solare** (es. 60,00 €, parametrizzabile anno per anno), dovuta **per intero** anche da chi entra a novembre o recede prima. Pagamento in un'unica soluzione, mensile o con **trattenuta in busta paga** (solo con matricola; «Registra la trattenuta del mese»). Esterni e familiari non la pagano. Gli **eliminati** non la devono dall'anno dell'eliminazione (gli anni prima restano dovuti) e gli anni passati da eliminati restano esenti anche dopo il ripristino. Il confronto con le trattenute dei cedolini e' **tra i lavori da fare** (voci stipendiali da individuare): il report *Quote associative* e' la base.
 
 ### Report
 
@@ -367,9 +388,9 @@ Elenco soci, quote associative e, per ogni evento, riepilogo per sede, scelte/or
 
 ### Cosa salva PGS
 
-`cral_sedi`, `cral_parametri` (tessera e progressivi), `cral_tipi`, `cral_tipologie_prodotto`, `cral_soci` (nessun codice fiscale), `cral_familiari_legami`, `cral_soci_tessere`, `cral_iniziative` (config in JSON validato dal server), `cral_iniziative_partecipanti`, `cral_scelte` (dati in JSON validato contro la config), `cral_carichi`, `cral_richieste`, `cral_quote_anno`, `cral_quote`. Importi in centesimi interi.
+`cral_sedi`, `cral_parametri` (tessera e progressivi), `cral_tipi`, `cral_tipologie_prodotto`, `cral_soci` (nessun codice fiscale), `cral_familiari_legami`, `cral_soci_tessere`, `cral_iniziative` (config in JSON validato dal server), `cral_iniziative_partecipanti`, `cral_scelte` (dati in JSON validato contro la config), `cral_carichi`, `cral_richieste`, `cral_quote_anno`, `cral_quote`, `cral_lotti` e `cral_lotti_variazioni` (0023; le variazioni si svuotano alla chiusura del lotto). Importi in centesimi interi.
 
-Audit (entita' `cral`): `CRAL_FILE_LETTO`, `CRAL_IMPORT_ABBINAMENTO`, `CRAL_IMPORT_CONFERMATO`, `CRAL_PERSONA_CREATA` / `_MODIFICATA`, `CRAL_LEGAMI_FAMILIARE`, `CRAL_PERSONE_VALIDA` / `_RIFIUTA` / `_RIMETTI` / `_CESSA` / `_RIATTIVA`, `CRAL_SOCIO_RIAMMESSO`, `CRAL_TROVATO_IN_PGS`, `CRAL_SEDE_ASSEGNATA`, `CRAL_SEDE_*`, `CRAL_TIPO_*`, `CRAL_TIPOLOGIA_*`, `CRAL_PARAMETRI_TESSERA`, `CRAL_EVENTO_CREATO` / `_MODIFICATO` / `_ARCHIVIATO` / `_RIPRISTINATO`, `CRAL_PARTECIPANTI`, `CRAL_SCELTA`, `CRAL_SCELTE_IN_BLOCCO`, `CRAL_CARICO`, `CRAL_RICHIESTA` / `_MODIFICATA`, `CRAL_QUOTA_ANNO`, `CRAL_QUOTA_SOCIO`, `CRAL_TRATTENUTA_MESE`.
+Audit (entita' `cral`): `CRAL_FILE_LETTO`, `CRAL_IMPORT_ABBINAMENTO`, `CRAL_IMPORT_CONFERMATO`, `CRAL_PERSONA_CREATA` / `_MODIFICATA`, `CRAL_LEGAMI_FAMILIARE`, `CRAL_PERSONE_VALIDA` / `_RIFIUTA` / `_RIMETTI` / `_CESSA` / `_RIATTIVA`, `CRAL_SOCIO_RIAMMESSO`, `CRAL_TROVATO_IN_PGS`, `CRAL_SEDE_ASSEGNATA`, `CRAL_SEDE_*`, `CRAL_TIPO_*`, `CRAL_TIPOLOGIA_*`, `CRAL_PARAMETRI_TESSERA`, `CRAL_EVENTO_CREATO` / `_MODIFICATO` / `_ARCHIVIATO` / `_RIPRISTINATO`, `CRAL_PARTECIPANTI`, `CRAL_SCELTA`, `CRAL_SCELTE_IN_BLOCCO`, `CRAL_CARICO`, `CRAL_RICHIESTA` / `_MODIFICATA`, `CRAL_QUOTA_ANNO`, `CRAL_QUOTA_SOCIO`, `CRAL_TRATTENUTA_MESE`; dalla 26.10.29 `CRAL_PERSONE_ELIMINA` / `_RIPRISTINA`, `CRAL_TIPOLOGIA_IN_BLOCCO`, `CRAL_PASSAGGIO_SOCIO_ESTERNO`, `CRAL_EXPORT_SOCI`, `CRAL_EXPORT_ARCHIVIO` (ambiente, sezioni, conteggi), `CRAL_LOTTO_T6`, `CRAL_LOTTO_ARCHIVIO`, `CRAL_LOTTO_APPLICATO`, `CRAL_LOTTO_SCARTATO`.
 
 ## Sezione PDF Region Editor
 
@@ -493,6 +514,7 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 | `PARENTELA_FIGLIO` | Codice `rapportoParentela` per figlio/figlia (default `FG`) |
 | `CINECA_PROXY_URL` | Reverse proxy in Italia per CSA-WS (opzionale) — necessario se il server è fuori UE (CINECA geo-blocca gli IP extra-UE). Attivazione runtime dal toggle *Proxy Italia per API CINECA* in Impostazioni → Moduli. Il setup del proxy e' nella documentazione operativa interna. |
 | `CINECA_PROXY_SECRET` | Secret condiviso (≥32 char) inviato al proxy come header `X-Proxy-Auth` |
+| `PGS_AMBIENTE` | Nome dell'ambiente negli archivi CRAL esportati e nei nomi dei file (opzionale; senza, il dominio). Es. `PROD`, `PRE` |
 
 ---
 
@@ -519,6 +541,18 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.10.29
+**Modulo CRAL: stato Eliminato, passaggio a socio esterno, aggiornamento massivo (T6), archivio fra ambienti**
+
+- **Stato «Eliminato»**: da qualunque stato, reversibile con «Ripristina» (stato di prima, stessa tessera). Esce da elenchi, eventi e report; **non deve la quota dall'anno dell'eliminazione** e gli anni passati da eliminato restano esenti dopo il ripristino. Filtro *Stato: Eliminati*.
+- **Da socio dipendente a socio esterno**: nuovo ID `EXT-nnnn`, matricola conservata come **ex matricola** (il libro soci successivo e il T6 la riconoscono, nessun doppione), tutto il resto segue il nuovo ID; la trattenuta dell'anno diventa mensile. «Trova in anagrafica PGS» anche per i soci esterni attivi.
+- **Scheda Soci**: riquadro **Totale soci** (dipendenti + esterni attivi), selezione multipla con sede, tipologia, cessa / elimina / ripristina / riattiva in blocco, **Esporta Excel** (stesse colonne del T6, foglio Familiari).
+- **Aggiornamento massivo T6** (Importazione): sede, data di nascita (per chi ha la matricola solo se manca in PGS), email, tessera, note, tipologia, stato di chi c'e' gia'; cella vuota non cambia, `-` svuota.
+- **Archivio fra ambienti** (Importazione): export JSON per sezioni e import nell'altro ambiente come **lotto di variazioni da validare** in *Da validare* (accetta/scarta anche un campo alla volta, «accetta tutte» senza le delicate, niente si cancella in arrivo, conflitti di ID con nuovo ID, applicazione per savepoint con controllo «cambiato nel frattempo», dati del lotto cancellati alla chiusura).
+- **Server**: `lib/cralLotti.ts` (formato dell'archivio validato con zod, confronto, T6, regola della quota), `services/cral/esporta.ts`, nuove rotte `/soci/tipologia`, `/soci/:id/passa-esterno`, `/export/soci`, `/export/archivio`, `/lotti*`. **Migrazione `0023_cral_eliminati_lotti.sql`** (additiva e idempotente: stato Eliminato, `eliminato_il/_da`, `stato_prima`, `anni_esenti`, `ex_matricola` unica, tabelle `cral_lotti` e `cral_lotti_variazioni`), consolidata in `setup.sql`. Variabile facoltativa `PGS_AMBIENTE`.
+- **Client**: `components/cral/Lotto.tsx` (lotto e elenco dei lotti), `ImportDati.tsx` (T6, archivio), scheda Importazione a tre strade, Guide con il tracciato **T6** e la sezione sull'archivio.
+- Test: 10 nuovi in `lib/cralLotti.test.ts` (server 136) e 1 in `logica.test.ts` (client 103). Provato su due database: archivio pre → prod vuoto (tutto nuovo), reimport senza differenze, eliminazione e ripristino con anni esenti, passaggio a socio esterno con quote e scelte al seguito, ritorno prod → pre con conflitti di ID e matricole, T6 con stato delicato e data di nascita protetta, «cambiato nel frattempo»; nel browser: selezione multipla, export Excel → T6 → lotto → applicazione, archivio → lotto, nessun errore in console.
 
 ### 26.10.28
 **Modulo CRAL: soci, eventi, quote associative e report (solo admin)**

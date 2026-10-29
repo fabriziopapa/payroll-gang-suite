@@ -1,5 +1,7 @@
 // ============================================================
-// PAYROLL GANG SUITE — Modulo CRAL · scheda Importazione (libro soci, T1)
+// PAYROLL GANG SUITE — Modulo CRAL · scheda Importazione
+// Tre strade: libro soci (T1), aggiornamento dati (T6, ImportDati.tsx),
+// archivio da un altro ambiente (ImportDati.tsx). Qui sotto il T1.
 //
 // Il file va al server, che lo legge (xlsx/xls/csv) e abbina i nominativi
 // all'anagrafica PGS con la regola di Emolumenti. Qui l'operatore decide i
@@ -13,8 +15,9 @@ import type { AnagraficaPgs, Db, Persona } from './tipi'
 import {
   eSocio, fmtData, leggiData, nominativo, norm, numBase, oggi, risolvi, simNome, spezzaNominativo, tesseraDaTesto, trovaIntestazione,
 } from './logica'
+import { ImportArchivio, ImportT6 } from './ImportDati'
 import {
-  Campo, D, Ico, Interruttore, Origine, Pill, PersonaPgs, avviso, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario, cardCls,
+  Campo, D, Ico, Interruttore, Origine, Pill, PersonaPgs, avviso, chipCls, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario, cardCls,
   etichettaCls, fileBase64, inputCls, inputW, messaggioErrore, thCls, useCral, type Tono,
 } from './ui'
 
@@ -61,7 +64,28 @@ function mappaSede(db: Db, testo: string): string | null | undefined {
   return s ? s.id : undefined // undefined = testo presente ma sede sconosciuta
 }
 
+type Strada = 'T1' | 'T6' | 'ARCHIVIO'
+const STRADE: Array<[Strada, string, string]> = [
+  ['T1', 'Libro soci (T1)', 'Nuovi soci e abbinamento all\'anagrafica PGS'],
+  ['T6', 'Aggiornamento dati (T6)', 'Sedi, date di nascita, email, tessere, note, tipologia, stato di chi c\'è già'],
+  ['ARCHIVIO', 'Archivio fra ambienti', 'Esporta e carica tutto il CRAL (produzione ↔ pre-produzione)'],
+]
+
 export function ImportTab() {
+  const [strada, setStrada] = useState<Strada>('T1')
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap gap-2">
+        {STRADE.map(([k, l, d]) => <button key={k} onClick={() => setStrada(k)} className={`${chipCls(strada === k)} !py-2 flex-col !items-start text-left`} title={d}><span>{l}</span><span className="text-[11px] font-normal text-slate-500">{d}</span></button>)}
+      </div>
+      {strada === 'T1' && <LibroSoci />}
+      {strada === 'T6' && <ImportT6 />}
+      {strada === 'ARCHIVIO' && <ImportArchivio />}
+    </div>
+  )
+}
+
+function LibroSoci() {
   const { db, esegui, vaiA } = useCral()
   const [file, setFile] = useState<{ nome: string; fogli: Record<string, string[][]> } | null>(null)
   const [foglio, setFoglio] = useState('')
@@ -161,7 +185,11 @@ export function ImportTab() {
   const d = (i: number): Decisione => dec[i] ?? {}
   const patch = (i: number, p: Decisione) => setDec(x => ({ ...x, [i]: { ...(x[i] ?? {}), ...p } }))
   const conAnag = (a: AnagraficaPgs) => setAnag(prima => new Map(prima).set(a.matricola, a))
-  const sociPerMatricola = useMemo(() => new Map(db.soci.filter(s => s.matricola).map(s => [s.matricola!, s])), [db])
+  // anche l'ex matricola: chi è passato a socio esterno non deve tornare socio dipendente doppio
+  const sociPerMatricola = useMemo(() => new Map([
+    ...db.soci.filter(s => s.exMatricola).map(s => [s.exMatricola!, s] as const),
+    ...db.soci.filter(s => s.matricola).map(s => [s.matricola!, s] as const),
+  ]), [db])
 
   /** Che cosa succede alla riga se confermi adesso. */
   function risultato(e: Analisi): Risultato {
@@ -370,6 +398,8 @@ export function ImportTab() {
                       <td className="px-5 py-2 whitespace-nowrap">
                         {r.tipo === 'pgs' && <Pill tono={e.tipoRich === 'EST' ? 'cyan' : 'nuovo'}>{e.tipoRich === 'EST' ? 'Nuovo esterno (dipendente)' : 'Nuovo socio dipendente'}</Pill>}
                         {r.tipo === 'socio' && <Pill>{sedeFinale(e) && sedeFinale(e) !== r.socio.sede ? 'Già nel CRAL · aggiorna sede' : 'Già nel CRAL'}</Pill>}
+                        {r.tipo === 'socio' && r.socio.exMatricola && r.anag?.matricola === r.socio.exMatricola && <span className="ml-1.5"><Pill tono="cf" title={`Ex matricola ${r.socio.exMatricola}: è passato a socio esterno (${r.socio.id})`}>socio esterno · ex dipendente</Pill></span>}
+                        {r.tipo === 'socio' && r.socio.stato === 'ELIMINATO' && <span className="ml-1.5"><Pill tono="err" title="Resta eliminato: per farlo tornare usa «Ripristina» dalla scheda">eliminato</Pill></span>}
                         {tessNuova(e, r) && <span className="ml-1.5"><Pill tono="ok" title="Non aveva la tessera: prende il numero del libro soci">tessera {e.tessera}</Pill></span>}
                         {tessDiv(e, r) && r.tipo === 'socio' && <span className="ml-1.5"><Pill tono="warn" title={aggTess ? 'Alla conferma prende il numero del file' : 'Il numero resta quello di PGS'}>tessera {r.socio.tessera || '—'} → {e.tessera}</Pill></span>}
                         {r.tipo === 'esterno' && <Pill tono={e.tipoRich === 'EST' ? 'cyan' : 'cf'}>{e.tipoRich === 'EST' ? 'Esterno da validare' : 'Socio esterno da validare'}</Pill>}

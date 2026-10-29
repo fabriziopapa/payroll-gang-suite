@@ -55,12 +55,12 @@ export function QuoteTab() {
           <tbody className="divide-y divide-slate-800/70">
             {lista.map(s => {
               const qs = quotaSocio(db, anno, s), v = versatoQuota(db, anno, s)
-              const entra = s.iscrittoIl.slice(0, 10) >= `${anno}-01-01`, esce = s.stato === 'CESSATO'
+              const entra = s.iscrittoIl.slice(0, 10) >= `${anno}-01-01`, esce = s.stato === 'CESSATO' || s.stato === 'ELIMINATO'
               return (
                 <tr key={s.id} className="hover:bg-slate-800/30">
                   <td className="px-5 py-2 font-mono text-xs text-slate-400">{s.tessera || '—'}</td>
                   <td className="px-3 py-2 whitespace-nowrap"><span className="text-slate-100">{nominativo(s)}</span> {s.tipo === 'SE' && <Origine s={s} />}
-                    {(entra || esce) && <div className="text-[11px] text-amber-300/90">{entra ? `entrato il ${fmtData(s.iscrittoIl)}` : ''}{entra && esce ? ' · ' : ''}{esce ? `cessato il ${fmtData(s.cessatoIl)}` : ''} · quota intera</div>}</td>
+                    {(entra || esce) && <div className="text-[11px] text-amber-300/90">{entra ? `entrato il ${fmtData(s.iscrittoIl)}` : ''}{entra && esce ? ' · ' : ''}{esce ? (s.stato === 'ELIMINATO' ? `eliminato il ${fmtData(s.eliminatoIl)} (dovuta per gli anni prima)` : `cessato il ${fmtData(s.cessatoIl)}`) : ''} · quota intera</div>}</td>
                   <td className="px-3 py-1.5"><select className={inputW + ' py-1 text-xs w-48'} value={qs.modo} onChange={e => agg(s, { modo: e.target.value as QuotaSocio['modo'] })}>{(Object.keys(MODI_QUOTA) as Array<QuotaSocio['modo']>).map(k => <option key={k} value={k} disabled={k === 'TRATTENUTA' && !s.matricola}>{MODI_QUOTA[k]}</option>)}</select></td>
                   <td className="px-3 py-1.5">{qs.modo === 'UNICA'
                     ? <label className="inline-flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" className="accent-emerald-500" checked={!!qs.pagataIl} onChange={e => agg(s, { pagataIl: e.target.checked ? oggi() : null })} />{qs.pagataIl ? <>pagata il <input type="date" className="bg-transparent border-b border-slate-700 text-slate-200 text-xs" value={qs.pagataIl} onChange={e => { if (e.target.value) agg(s, { pagataIl: e.target.value }) }} /></> : 'da pagare'}</label>
@@ -72,7 +72,7 @@ export function QuoteTab() {
             })}
             {!lista.length && <tr><td colSpan={7} className="px-5 py-10 text-center text-slate-500">Nessun socio con questi filtri.</td></tr>}
           </tbody></table></div>
-        <p className="px-5 py-3 border-t border-slate-800 text-xs text-slate-500">Tenuti alla quota: soci dipendenti e soci esterni iscritti entro il 31/12 e non cessati prima del 1/1. Esterni e familiari non sono soci e non la pagano. «Trattenuta in busta paga» solo per chi ha la matricola. Il confronto con le trattenute dei cedolini è tra i lavori da fare (voci da individuare).</p>
+        <p className="px-5 py-3 border-t border-slate-800 text-xs text-slate-500">Tenuti alla quota: soci dipendenti e soci esterni iscritti entro il 31/12 e non cessati prima del 1/1. Gli eliminati non la devono dall'anno dell'eliminazione (gli anni prima restano dovuti, e quelli passati da eliminati restano esenti anche dopo il ripristino). Esterni e familiari non sono soci e non la pagano. «Trattenuta in busta paga» solo per chi ha la matricola. Il confronto con le trattenute dei cedolini è tra i lavori da fare (voci da individuare).</p>
       </div>
     </div>
   )

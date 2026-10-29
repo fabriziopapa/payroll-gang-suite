@@ -8,7 +8,7 @@
 // ============================================================
 
 export type TipoPersona = 'SD' | 'SE' | 'EST' | 'FAM'
-export type StatoPersona = 'ATTIVO' | 'DA_VALIDARE' | 'RIFIUTATO' | 'CESSATO'
+export type StatoPersona = 'ATTIVO' | 'DA_VALIDARE' | 'RIFIUTATO' | 'CESSATO' | 'ELIMINATO'
 export type Relazione = 'CONIUGE' | 'FIGLIO'
 export type Modalita = 'SCELTA' | 'NESSUNA' | 'ORDINE' | 'TURNI' | 'MAGAZZINO'
 export type CatSconto = 'SD' | 'SE' | 'DIP' | 'EST' | 'FAM'
@@ -23,6 +23,9 @@ export interface Persona {
   iscrittoIl: string; cessatoIl: string | null; provenienza: string | null; atipico: boolean; note: string
   creatoDa: string | null; creatoIl: string; validatoDa: string | null; validatoIl: string | null
   modificatoDa: string | null; modificatoIl: string | null
+  /** Eliminato (con lo stato di prima), anni esenti dalla quota, ex matricola di chi è passato a socio esterno. */
+  eliminatoIl: string | null; eliminatoDa: string | null; statoPrima: Exclude<StatoPersona, 'ELIMINATO'> | null
+  anniEsenti: number[]; exMatricola: string | null
   legami: Legame[]
   storicoTessere: Array<{ tessera: string; dal: string | null; al: string }>
 }
@@ -113,6 +116,26 @@ export interface StatoApi {
 export interface AnagraficaPgs {
   matricola: string; cognome: string; nome: string; ruolo: string | null; druolo: string | null
   nascita: string | null; finRap: string | null
+}
+
+// ── Lotti di variazioni da validare ──────────────────────────
+export type SezioneLotto = 'sedi' | 'tabelle' | 'soci' | 'quote' | 'eventi'
+export interface Lotto {
+  id: string; origine: 'T6' | 'ARCHIVIO'; file: string; ambiente: string; esportato: string | null; sezioni: SezioneLotto[]
+  stato: 'APERTO' | 'CHIUSO' | 'SCARTATO'; riepilogo: Record<string, unknown>
+  creatoDa: string | null; creatoIl: string; chiusoDa: string | null; chiusoIl: string | null
+  conteggi?: Record<string, number>
+}
+export interface CampoVariazione { campo: string; etichetta: string; prima: unknown; dopo: unknown; blocco?: string }
+export interface Variazione {
+  id: number; sezione: SezioneLotto; entita: string; chiave: string; tipo: 'NUOVO' | 'MODIFICA' | 'CONFLITTO'
+  delicata: boolean; bloccata: string | null; esito: 'ATTESA' | 'ACCETTATA' | 'SCARTATA' | 'APPLICATA' | 'ERRORE'
+  accettati: string[]; etichetta: string; campi: CampoVariazione[]; avviso: string | null; nota: string
+}
+/** Testata dell'archivio (per mostrare cosa contiene prima di caricarlo). */
+export interface ArchivioTestata {
+  formato: string; versione: number; app: string; ambiente: string; esportato: string; sezioni: SezioneLotto[]
+  sedi?: unknown[]; tabelle?: { tipi?: unknown[]; tipologie?: unknown[]; quoteAnno?: unknown[] }; soci?: unknown[]; quote?: unknown[]; eventi?: unknown[]
 }
 
 const arr = <T>(x: unknown): T[] => (Array.isArray(x) ? (x as T[]) : [])

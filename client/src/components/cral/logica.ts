@@ -58,6 +58,9 @@ export const TIPOLOGIE: Record<TipoPersona, [string, 'nuovo' | 'cf' | 'cyan' | '
   FAM: ['Familiare', 'fam', 'Coniuge o figlio/figlia di uno o più soci (dipendenti o esterni)'],
 }
 export const RELAZIONI: Record<Relazione, string> = { CONIUGE: 'Coniuge', FIGLIO: 'Figlio/Figlia' }
+export const STATI: Record<Persona['stato'], string> = { ATTIVO: 'Attivo', DA_VALIDARE: 'Da validare', RIFIUTATO: 'Rifiutato', CESSATO: 'Cessato', ELIMINATO: 'Eliminato' }
+/** Soci dipendenti e soci esterni attivi: il totale dei soci. */
+export const totaleSoci = (db: Db): number => db.soci.filter(s => eSocio(s) && s.stato === 'ATTIVO').length
 export const GRUPPI: TipoPersona[] = ['SD', 'SE', 'EST', 'FAM']
 export const eSocio = (s: Pick<Persona, 'tipo'>): boolean => s.tipo === 'SD' || s.tipo === 'SE'
 export const persona = (db: Db, id: string | null | undefined): Persona | undefined => (id ? db.perId.get(id) : undefined)
@@ -279,9 +282,19 @@ export function generaSettimane(dal: string, n: number, posti: number | null, pr
 export const MESI = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic']
 export const MODI_QUOTA: Record<QuotaSocio['modo'], string> = { TRATTENUTA: 'Trattenuta in busta paga', MENSILE: 'Mensile', UNICA: 'Unica soluzione' }
 export const quotaAnno = (db: Db, anno: number): number => db.quoteAnno.find(q => q.anno === anno)?.importo ?? 0
-/** Socio tenuto alla quota dell'anno: iscritto entro il 31/12 e non cessato prima del 1/1. Esterni e familiari no. */
-export const tenutoQuota = (s: Persona, anno: number): boolean => eSocio(s) && (s.stato === 'ATTIVO' || s.stato === 'CESSATO') &&
-  (s.iscrittoIl || '0000').slice(0, 10) <= `${anno}-12-31` && (s.stato === 'ATTIVO' || (s.cessatoIl ?? '') >= `${anno}-01-01`)
+/**
+ * Socio tenuto alla quota dell'anno (stessa regola del server): iscritto
+ * entro il 31/12 e non cessato prima del 1/1. Esterni e familiari no.
+ * L'eliminato la deve solo per gli anni prima dell'eliminazione; gli anni
+ * passati da eliminato restano esenti anche dopo il ripristino.
+ */
+export function tenutoQuota(s: Persona, anno: number): boolean {
+  if (!eSocio(s) || (s.anniEsenti ?? []).includes(anno)) return false
+  if ((s.iscrittoIl || '0000').slice(0, 10) > `${anno}-12-31`) return false
+  const stato = s.stato === 'ELIMINATO' ? s.statoPrima : s.stato
+  if (s.stato === 'ELIMINATO' && (!s.eliminatoIl || anno >= +s.eliminatoIl.slice(0, 4))) return false
+  return stato === 'ATTIVO' || (stato === 'CESSATO' && (s.cessatoIl ?? '') >= `${anno}-01-01`)
+}
 export const sociQuota = (db: Db, anno: number): Persona[] => db.soci.filter(s => tenutoQuota(s, anno))
 export const quotaSocio = (db: Db, anno: number, s: Persona): QuotaSocio =>
   db.quote[String(anno)]?.[s.id] ?? { modo: s.matricola ? 'TRATTENUTA' : 'UNICA', mesi: Array<boolean>(12).fill(false), pagataIl: null, note: '' }

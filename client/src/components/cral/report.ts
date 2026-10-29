@@ -70,7 +70,7 @@ export function costruisciReport(db: Db, cfg: CfgReport, oggiIso: string): Repor
     let tv = 0
     const righe: Cella[][] = lista.map(s => {
       const q = quotaSocio(db, anno, s), v = versatoQuota(db, anno, s); tv += v
-      const nota = s.stato === 'CESSATO' ? ` (cessato ${fmtData(s.cessatoIl)})` : s.iscrittoIl.slice(0, 10) >= `${anno}-01-01` ? ` (dal ${fmtData(s.iscrittoIl)})` : ''
+      const nota = s.stato === 'CESSATO' ? ` (cessato ${fmtData(s.cessatoIl)})` : s.stato === 'ELIMINATO' ? ` (eliminato ${fmtData(s.eliminatoIl)})` : s.iscrittoIl.slice(0, 10) >= `${anno}-01-01` ? ` (dal ${fmtData(s.iscrittoIl)})` : ''
       return [sedeNome(db, s.sede), ...(cfg.tessera ? [s.tessera] : []), nominativo(s) + nota, ...(cfg.eta ? [etaDi(s, oggiIso)] : []), TIPOLOGIE[s.tipo][0], MODI_QUOTA[q.modo] + (q.modo === 'UNICA' && q.pagataIl ? ` · ${fmtData(q.pagataIl)}` : ''),
         ...(cfg.mesi ? MESI.map((_, k) => q.modo === 'UNICA' ? (q.pagataIl ? 'X' : '') : q.mesi[k] ? 'X' : '') : []), fmtImp(imp), fmtImp(v), fmtImp(imp - v), ...(cfg.note ? [q.note] : []), ...(cfg.firma ? [''] : [])]
     })

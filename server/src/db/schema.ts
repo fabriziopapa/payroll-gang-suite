@@ -677,6 +677,12 @@ export const cralSoci = pgTable('cral_soci', {
   validatoIl:   timestamp('validato_il', { withTimezone: true }),
   modificatoDa: uuid('modificato_da').references(() => users.id, { onDelete: 'set null' }),
   modificatoIl: timestamp('modificato_il', { withTimezone: true }),
+  // 0023: eliminato (stato di prima, anni esenti dalla quota), ex matricola di chi e' passato a socio esterno
+  eliminatoIl:  date('eliminato_il'),
+  eliminatoDa:  uuid('eliminato_da').references(() => users.id, { onDelete: 'set null' }),
+  statoPrima:   varchar('stato_prima', { length: 12 }),
+  anniEsenti:   smallint('anni_esenti').array().notNull().default(sql`'{}'`),
+  exMatricola:  varchar('ex_matricola', { length: 10 }),
 })
 
 export const cralFamiliariLegami = pgTable('cral_familiari_legami', {
@@ -781,3 +787,36 @@ export const cralQuote = pgTable('cral_quote', {
   updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.anno, t.socioId] })])
+
+// ------------------------------------------------------------
+// MODULO CRAL — lotti di variazioni da validare (migrazione 0023)
+// ------------------------------------------------------------
+export const cralLotti = pgTable('cral_lotti', {
+  id:        uuid('id').primaryKey().defaultRandom(),
+  origine:   varchar('origine', { length: 8 }).notNull(),
+  file:      varchar('file', { length: 200 }).notNull().default(''),
+  ambiente:  varchar('ambiente', { length: 80 }).notNull().default(''),
+  esportato: timestamp('esportato', { withTimezone: true }),
+  sezioni:   text('sezioni').array().notNull().default(sql`'{}'`),
+  stato:     varchar('stato', { length: 10 }).notNull().default('APERTO'),
+  riepilogo: jsonb('riepilogo').notNull().default(sql`'{}'::jsonb`),
+  creatoDa:  uuid('creato_da').references(() => users.id, { onDelete: 'set null' }),
+  creatoIl:  timestamp('creato_il', { withTimezone: true }).notNull().defaultNow(),
+  chiusoDa:  uuid('chiuso_da').references(() => users.id, { onDelete: 'set null' }),
+  chiusoIl:  timestamp('chiuso_il', { withTimezone: true }),
+})
+
+export const cralLottiVariazioni = pgTable('cral_lotti_variazioni', {
+  id:        serial('id').primaryKey(),
+  lottoId:   uuid('lotto_id').notNull().references(() => cralLotti.id, { onDelete: 'cascade' }),
+  ordine:    integer('ordine').notNull(),
+  sezione:   varchar('sezione', { length: 10 }).notNull(),
+  entita:    varchar('entita', { length: 10 }).notNull(),
+  chiave:    varchar('chiave', { length: 80 }).notNull(),
+  tipo:      varchar('tipo', { length: 10 }).notNull(),
+  delicata:  boolean('delicata').notNull().default(false),
+  esito:     varchar('esito', { length: 10 }).notNull().default('ATTESA'),
+  accettati: text('accettati').array().notNull().default(sql`'{}'`),
+  dati:      jsonb('dati').notNull(),
+  nota:      varchar('nota', { length: 300 }).notNull().default(''),
+})

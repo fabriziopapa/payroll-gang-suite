@@ -333,7 +333,7 @@ CREATE TABLE IF NOT EXISTS cral_soci (
   sede_id        VARCHAR(12)   REFERENCES cral_sedi(id) ON UPDATE CASCADE ON DELETE SET NULL,
   tessera        VARCHAR(30),
   riammissioni   SMALLINT      NOT NULL DEFAULT 0 CHECK (riammissioni >= 0),
-  stato          VARCHAR(12)   NOT NULL DEFAULT 'DA_VALIDARE' CHECK (stato IN ('ATTIVO', 'DA_VALIDARE', 'RIFIUTATO', 'CESSATO')),
+  stato          VARCHAR(12)   NOT NULL DEFAULT 'DA_VALIDARE' CONSTRAINT cral_soci_stato_check CHECK (stato IN ('ATTIVO', 'DA_VALIDARE', 'RIFIUTATO', 'CESSATO', 'ELIMINATO')),
   iscritto_il    DATE          NOT NULL DEFAULT CURRENT_DATE,
   cessato_il     DATE,
   provenienza    VARCHAR(200),
@@ -345,6 +345,15 @@ CREATE TABLE IF NOT EXISTS cral_soci (
   validato_il    TIMESTAMPTZ,
   modificato_da  UUID          REFERENCES users(id) ON DELETE SET NULL,
   modificato_il  TIMESTAMPTZ,
+  -- Eliminato (0023): stato di prima, anni esenti dalla quota; ex matricola di chi e' passato a socio esterno
+  eliminato_il   DATE,
+  eliminato_da   UUID          REFERENCES users(id) ON DELETE SET NULL,
+  stato_prima    VARCHAR(12),
+  anni_esenti    SMALLINT[]    NOT NULL DEFAULT '{}',
+  ex_matricola   VARCHAR(10),
+  CONSTRAINT cral_soci_eliminato CHECK (
+    stato <> 'ELIMINATO' OR (eliminato_il IS NOT NULL AND stato_prima IN ('ATTIVO', 'DA_VALIDARE', 'RIFIUTATO', 'CESSATO'))),
+  CONSTRAINT cral_soci_ex_matricola CHECK (ex_matricola IS NULL OR ex_matricola ~ '^[0-9]{1,10}$'),
   -- Il socio dipendente e' una matricola PGS, e la matricola e' l'ID.
   CONSTRAINT cral_soci_sd_matricola CHECK (tipo <> 'SD' OR matricola IS NOT NULL),
   CONSTRAINT cral_soci_id_matricola CHECK (matricola IS NULL OR id = matricola),
@@ -354,6 +363,7 @@ CREATE TABLE IF NOT EXISTS cral_soci (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS cral_soci_tessera ON cral_soci (lower(tessera)) WHERE tessera IS NOT NULL;
 CREATE INDEX IF NOT EXISTS cral_soci_stato ON cral_soci (stato, tipo);
+CREATE UNIQUE INDEX IF NOT EXISTS cral_soci_ex_matricola_u ON cral_soci (ex_matricola) WHERE ex_matricola IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS cral_familiari_legami (
   familiare_id  VARCHAR(12)  NOT NULL REFERENCES cral_soci(id) ON UPDATE CASCADE ON DELETE CASCADE,
@@ -469,6 +479,39 @@ CREATE TABLE IF NOT EXISTS cral_quote (
   updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
   PRIMARY KEY (anno, socio_id)
 );
+
+-- Lotti di variazioni da validare (migrazione 0023)
+CREATE TABLE IF NOT EXISTS cral_lotti (
+  id          UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  origine     VARCHAR(8)    NOT NULL CHECK (origine IN ('T6', 'ARCHIVIO')),
+  file        VARCHAR(200)  NOT NULL DEFAULT '',
+  ambiente    VARCHAR(80)   NOT NULL DEFAULT '',
+  esportato   TIMESTAMPTZ,
+  sezioni     TEXT[]        NOT NULL DEFAULT '{}',
+  stato       VARCHAR(10)   NOT NULL DEFAULT 'APERTO' CHECK (stato IN ('APERTO', 'CHIUSO', 'SCARTATO')),
+  riepilogo   JSONB         NOT NULL DEFAULT '{}'::jsonb,
+  creato_da   UUID          REFERENCES users(id) ON DELETE SET NULL,
+  creato_il   TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  chiuso_da   UUID          REFERENCES users(id) ON DELETE SET NULL,
+  chiuso_il   TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS cral_lotti_stato ON cral_lotti (stato, creato_il);
+
+CREATE TABLE IF NOT EXISTS cral_lotti_variazioni (
+  id         SERIAL        PRIMARY KEY,
+  lotto_id   UUID          NOT NULL REFERENCES cral_lotti(id) ON DELETE CASCADE,
+  ordine     INTEGER       NOT NULL,
+  sezione    VARCHAR(10)   NOT NULL CHECK (sezione IN ('sedi', 'tabelle', 'soci', 'quote', 'eventi')),
+  entita     VARCHAR(10)   NOT NULL,
+  chiave     VARCHAR(80)   NOT NULL,
+  tipo       VARCHAR(10)   NOT NULL CHECK (tipo IN ('NUOVO', 'MODIFICA', 'CONFLITTO')),
+  delicata   BOOLEAN       NOT NULL DEFAULT FALSE,
+  esito      VARCHAR(10)   NOT NULL DEFAULT 'ATTESA' CHECK (esito IN ('ATTESA', 'ACCETTATA', 'SCARTATA', 'APPLICATA', 'ERRORE')),
+  accettati  TEXT[]        NOT NULL DEFAULT '{}',
+  dati       JSONB         NOT NULL,
+  nota       VARCHAR(300)  NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS cral_lotti_variazioni_lotto ON cral_lotti_variazioni (lotto_id, ordine);
 
 COMMENT ON TABLE cral_soci IS
   'Modulo CRAL: soci dipendenti (ID = matricola PGS), soci esterni, esterni e familiari (EXT-/FAM-). Nessun codice fiscale: cognome, nome, data di nascita.';

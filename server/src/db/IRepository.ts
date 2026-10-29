@@ -899,8 +899,11 @@ export interface CralSocioRow {
   id: string; tipo: 'SD' | 'SE' | 'EST' | 'FAM'; origine: 'PGS' | 'EST'; matricola: string | null
   cognome: string; nome: string; nascita: string | null; email: string; sede: string | null
   tessera: string; riammissioni: number
-  stato: 'ATTIVO' | 'DA_VALIDARE' | 'RIFIUTATO' | 'CESSATO'
+  stato: 'ATTIVO' | 'DA_VALIDARE' | 'RIFIUTATO' | 'CESSATO' | 'ELIMINATO'
   iscrittoIl: string; cessatoIl: string | null; provenienza: string | null; atipico: boolean; note: string
+  /** 0023: eliminato (con lo stato di prima), anni esenti dalla quota, ex matricola di chi è passato a socio esterno. */
+  eliminatoIl: string | null; eliminatoDa: string | null; statoPrima: 'ATTIVO' | 'DA_VALIDARE' | 'RIFIUTATO' | 'CESSATO' | null
+  anniEsenti: number[]; exMatricola: string | null
   creatoDa: string | null; creatoIl: string; validatoDa: string | null; validatoIl: string | null
   modificatoDa: string | null; modificatoIl: string | null
   legami: Array<{ socio: string; relazione: 'CONIUGE' | 'FIGLIO' }>
@@ -963,6 +966,25 @@ export interface CralEsitoImport { nuoviPgs: number; nuoviEsterni: number; aggio
 export type CralErrore =
   | 'TESSERA_DOPPIA' | 'MATRICOLA_GIA_SOCIO' | 'SOCIO_NON_TROVATO' | 'SEDE_SCONOSCIUTA'
   | 'LEGAME_NON_VALIDO' | 'STATO_NON_VALIDO' | 'SUFFISSI_ESAURITI' | 'NOME_GIA_USATO' | 'TIPO_SCONOSCIUTO'
+  | 'LOTTO_NON_TROVATO' | 'LOTTO_CHIUSO'
+
+export type CralAzioneStato = 'valida' | 'rifiuta' | 'rimetti' | 'cessa' | 'riattiva' | 'elimina' | 'ripristina'
+
+/** Lotto di variazioni da validare (0023). */
+export interface CralLottoRow {
+  id: string; origine: 'T6' | 'ARCHIVIO'; file: string; ambiente: string; esportato: string | null; sezioni: string[]
+  stato: 'APERTO' | 'CHIUSO' | 'SCARTATO'; riepilogo: Record<string, unknown>
+  creatoDa: string | null; creatoIl: string; chiusoDa: string | null; chiusoIl: string | null
+  /** Conteggi per esito (solo nell'elenco). */
+  conteggi?: Record<string, number>
+}
+export interface CralVariazioneRow {
+  id: number; sezione: string; entita: string; chiave: string; tipo: 'NUOVO' | 'MODIFICA' | 'CONFLITTO'
+  delicata: boolean; bloccata: string | null; esito: 'ATTESA' | 'ACCETTATA' | 'SCARTATA' | 'APPLICATA' | 'ERRORE'
+  accettati: string[]; etichetta: string; campi: Array<{ campo: string; etichetta: string; prima: unknown; dopo: unknown; blocco?: string }>
+  avviso: string | null; nota: string
+}
+export interface CralEsitoApplica { applicate: number; errori: number; campiSaltati: number; chiuso: boolean }
 
 export interface ICralRepository {
   stato(): Promise<CralStato>
@@ -982,7 +1004,9 @@ export interface ICralRepository {
   creaPersona(p: CralNuovaPersona, userId: string | null): Promise<CralSocioRow | CralErrore>
   modificaPersona(id: string, patch: CralModificaPersona, userId: string | null): Promise<CralSocioRow | CralErrore>
   impostaLegami(id: string, legami: Array<{ socio: string; relazione: 'CONIUGE' | 'FIGLIO' }>, userId: string | null): Promise<CralSocioRow | CralErrore>
-  cambiaStato(ids: string[], azione: 'valida' | 'rifiuta' | 'rimetti' | 'cessa' | 'riattiva', userId: string | null): Promise<number>
+  cambiaStato(ids: string[], azione: CralAzioneStato, userId: string | null): Promise<number>
+  cambiaTipologia(ids: string[], tipo: 'SD' | 'SE' | 'EST', userId: string | null): Promise<number>
+  passaEsterno(id: string, userId: string | null): Promise<CralSocioRow | CralErrore>
   riammetti(id: string, userId: string | null): Promise<CralSocioRow | CralErrore>
   collegaPgs(id: string, a: CralAnagraficaRow, userId: string | null): Promise<CralSocioRow | CralErrore>
   spostaSede(ids: string[], sede: string | null, userId: string | null): Promise<number>

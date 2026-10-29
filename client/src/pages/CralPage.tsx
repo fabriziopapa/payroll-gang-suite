@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { cralApi } from '../api/endpoints'
 import { useStore } from '../store/useStore'
 import { showToast } from '../components/ToastManager'
-import { daStato, type Db, type PatchScelta, type QuotaSocio, type Richiesta, type Scelta } from '../components/cral/tipi'
+import { daStato, type Db, type Lotto, type PatchScelta, type QuotaSocio, type Richiesta, type Scelta } from '../components/cral/tipi'
 import { eSocio } from '../components/cral/logica'
 import { Ctx, messaggioErrore, type CralCtx, type Scheda } from '../components/cral/ui'
 import { SociTab } from '../components/cral/SociTab'
@@ -43,17 +43,21 @@ function unisci(prima: Scelta | undefined, patch: PatchScelta, fonte: Scelta['fo
 export function CralPage() {
   const user = useStore(s => s.user)
   const [db, setDb] = useState<Db | null>(null)
+  const [lotti, setLotti] = useState<Lotto[]>([])
   const [errore, setErrore] = useState<string | null>(null)
   const [scheda, setScheda] = useState<Scheda>('soci')
 
   const ricarica = useCallback(async () => {
-    try { setDb(daStato(await cralApi.stato())); setErrore(null) }
-    catch (e) { setErrore(messaggioErrore(e)) }
+    try {
+      const [st, lt] = await Promise.all([cralApi.stato(), cralApi.lotti().catch(() => ({ lotti: [] as Lotto[] }))])
+      setDb(daStato(st)); setLotti(lt.lotti); setErrore(null)
+    } catch (e) { setErrore(messaggioErrore(e)) }
   }, [])
   useEffect(() => { void ricarica() }, [ricarica])
 
   const ctx = useMemo<CralCtx | null>(() => !db ? null : ({
     db,
+    lotti,
     utente: user?.username ?? '',
     vaiA: (s: Scheda) => { setScheda(s); window.scrollTo({ top: 0 }) },
     ricarica,
@@ -84,12 +88,12 @@ export function CralPage() {
         .then(r => setDb(d => d && ({ ...d, quote: { ...d.quote, [String(anno)]: { ...(d.quote[String(anno)] ?? {}), [sid]: r.quota } } })))
         .catch(e => { showToast(messaggioErrore(e), 'error'); void ricarica() })
     },
-  }), [db, ricarica, user?.username])
+  }), [db, lotti, ricarica, user?.username])
 
   if (!ctx) return (
     <div className="p-6 text-sm text-slate-400">{errore ? <span className="text-red-300">{errore}</span> : 'Caricamento del modulo CRAL…'}</div>
   )
-  const daValidare = ctx.db.soci.filter(s => s.stato === 'DA_VALIDARE').length
+  const daValidare = ctx.db.soci.filter(s => s.stato === 'DA_VALIDARE').length + ctx.lotti.filter(l => l.stato === 'APERTO').length
   const attivi = ctx.db.soci.filter(s => s.stato === 'ATTIVO' && eSocio(s)).length
   return (
     <Ctx.Provider value={ctx}>

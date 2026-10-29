@@ -7,7 +7,7 @@
 import { createContext, useContext, useEffect, type ReactNode } from 'react'
 import { ApiError } from '../../api/client'
 import { showToast } from '../ToastManager'
-import type { AnagraficaPgs, Db, PatchScelta, Persona, QuotaSocio, Richiesta } from './tipi'
+import type { AnagraficaPgs, Db, Lotto, PatchScelta, Persona, QuotaSocio, Richiesta } from './tipi'
 import { RELAZIONI, TIPOLOGIE, fmtData, nominativo, sociDi } from './logica'
 
 export { btnPrimario, btnSecondario, btnPiccolo, inputCls, cardCls, etichettaCls } from '../versamenti/ui'
@@ -109,6 +109,7 @@ export function StatoSocio({ s }: { s: Persona }) {
   if (s.stato === 'ATTIVO') return <Pill tono="ok">Attivo</Pill>
   if (s.stato === 'DA_VALIDARE') return <Pill tono="warn">Da validare</Pill>
   if (s.stato === 'RIFIUTATO') return <Pill tono="err">Rifiutato</Pill>
+  if (s.stato === 'ELIMINATO') return <Pill tono="err" title={`Eliminato il ${fmtData(s.eliminatoIl)}${s.statoPrima ? ` · prima: ${s.statoPrima.toLowerCase().replace('_', ' ')}` : ''}`}>Eliminato</Pill>
   return <Pill>Cessato</Pill>
 }
 export function Origine({ s }: { s: Pick<Persona, 'tipo'> }) {
@@ -189,6 +190,10 @@ const ERRORI: Record<string, string> = {
   FILE_NON_LEGGIBILE: 'File non leggibile.',
   VALIDATION_ERROR: 'Dati non validi.',
   FORBIDDEN: 'Operazione riservata agli amministratori.',
+  LOTTO_NON_TROVATO: 'Lotto non trovato: ricarica la pagina.',
+  LOTTO_CHIUSO: 'Il lotto è già chiuso.',
+  ARCHIVIO_NON_VALIDO: 'Il file non è un archivio CRAL valido (esportato da PGS 26.10.29 o successivo).',
+  NESSUNA_SEZIONE: 'Scegli almeno una sezione.',
 }
 export function messaggioErrore(err: unknown): string {
   if (!(err instanceof ApiError)) return 'Errore imprevisto.'
@@ -199,6 +204,8 @@ export function messaggioErrore(err: unknown): string {
 export type Scheda = 'soci' | 'sedi' | 'import' | 'validare' | 'iniziative' | 'quote' | 'report' | 'guide' | 'parametri'
 export interface CralCtx {
   db: Db
+  /** Lotti di variazioni (aperti e recenti). */
+  lotti: Lotto[]
   utente: string
   vaiA: (s: Scheda) => void
   ricarica: () => Promise<void>

@@ -14,7 +14,8 @@ import { costruisciReport, testoPdf, type CfgReport } from './report.ts'
 const P = (id: string, tipo: Persona['tipo'], cognome: string, nome: string, over: Partial<Persona> = {}): Persona => ({
   id, tipo, origine: /^\d/.test(id) ? 'PGS' : 'EST', matricola: /^\d/.test(id) ? id : null, cognome, nome, nascita: null, email: '', sede: 'S1',
   tessera: '', riammissioni: 0, stato: 'ATTIVO', iscrittoIl: '2020-01-10', cessatoIl: null, provenienza: null, atipico: false, note: '',
-  creatoDa: null, creatoIl: '2020-01-10', validatoDa: null, validatoIl: null, modificatoDa: null, modificatoIl: null, legami: [], storicoTessere: [], ...over,
+  creatoDa: null, creatoIl: '2020-01-10', validatoDa: null, validatoIl: null, modificatoDa: null, modificatoIl: null,
+  eliminatoIl: null, eliminatoDa: null, statoPrima: null, anniEsenti: [], exMatricola: null, legami: [], storicoTessere: [], ...over,
 })
 const SOCI: Persona[] = [
   P('090001', 'SD', 'ROSSI', 'Luca', { tessera: '0001', nascita: '1980-06-15' }),
@@ -164,4 +165,18 @@ test('report: elenco soci per sede ed età solo se richiesta', () => {
   const e = costruisciReport(db(), { ...cfg, eta: true }, '2026-10-28')
   assert.equal(e.righe[0]?.[3], 46)
   assert.equal(testoPdf('−10% → ok ●'), '-10% -> ok *')
+})
+
+test('quota: eliminati e anni esenti (decisione del 29/10)', () => {
+  const el = P('090010', 'SD', 'COLOMBO', 'Anna', { stato: 'ELIMINATO', statoPrima: 'ATTIVO', eliminatoIl: '2026-04-01', iscrittoIl: '2024-01-15' })
+  assert.equal(tenutoQuota(el, 2025), true)
+  assert.equal(tenutoQuota(el, 2026), false)
+  assert.equal(tenutoQuota({ ...el, statoPrima: 'DA_VALIDARE' }, 2025), false)
+  const rip = P('090010', 'SD', 'COLOMBO', 'Anna', { anniEsenti: [2026], iscrittoIl: '2024-01-15' })
+  assert.equal(tenutoQuota(rip, 2026), false)
+  assert.equal(tenutoQuota(rip, 2027), true)
+  // l'eliminato non è tra i destinatari degli eventi, e i suoi familiari sono sospesi
+  const soci = [el, P('FAM-0010', 'FAM', 'COLOMBO', 'Pietro', { legami: [{ socio: '090010', relazione: 'FIGLIO' }] })]
+  const d = db({ soci, perId: new Map(soci.map(x => [x.id, x])) })
+  assert.deepEqual(destinatari(d, evento({ gruppi: ['SD', 'FAM'] })).map(x => x.id), [])
 })

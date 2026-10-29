@@ -5,8 +5,8 @@
 import { apiFetch } from './client'
 import type { AppSettings, VoceConfig } from '../types'
 import type {
-  AnagraficaPgs, Carico, Iniziativa, Legame, ParametriTessera, PatchScelta, Persona, QuotaSocio, Richiesta,
-  ScontoPers, Sede, StatoApi, TipoEvento, Tipologia,
+  AnagraficaPgs, ArchivioTestata, Carico, Iniziativa, Legame, Lotto, ParametriTessera, PatchScelta, Persona, QuotaSocio, Richiesta,
+  ScontoPers, Sede, SezioneLotto, StatoApi, TipoEvento, Tipologia, Variazione,
 } from '../components/cral/tipi'
 
 // ── Tipi risposta dal server ──────────────────────────────────
@@ -1266,6 +1266,10 @@ export type CralOperazioneApi =
   | { op: 'nuovoPgs'; matricola: string; tipo: 'SD' | 'EST'; cognome: string; nome: string; nascita: string | null; email: string; sede: string | null; tessera: string; atipico: boolean; nota: string }
   | { op: 'nuovoEsterno'; tipo: 'SE' | 'EST'; cognome: string; nome: string; nascita: string | null; email: string; sede: string | null; tessera: string; atipico: boolean; nota: string }
   | { op: 'cessa'; socio: string; nota?: string }
+export interface CralRigaT6 {
+  socio: string; riga: number
+  valori: { sede?: string | null; nascita?: string | null; email?: string | null; tessera?: string | null; note?: string | null; tipo?: 'SD' | 'SE' | 'EST'; stato?: 'ATTIVO' | 'CESSATO' | 'ELIMINATO'; dataStato?: string }
+}
 export interface CralNuovaPersonaApi {
   tipo: 'SD' | 'SE' | 'EST' | 'FAM'; matricola?: string; cognome?: string; nome?: string; nascita?: string | null
   email?: string; sede?: string | null; tessera?: string; note?: string; legami?: Legame[]; perIniziativa?: string
@@ -1302,8 +1306,21 @@ export const cralApi = {
   modificaPersona: (id: string, p: Partial<Pick<Persona, 'cognome' | 'nome' | 'nascita' | 'email' | 'sede' | 'tessera' | 'note' | 'atipico'>> & { tipo?: 'SD' | 'SE' | 'EST' }) =>
     apiFetch<{ socio: Persona }>(`/cral/soci/${enc(id)}`, corpo('PATCH', p)),
   legami: (id: string, legami: Legame[]) => apiFetch<{ socio: Persona }>(`/cral/soci/${enc(id)}/legami`, corpo('PUT', { legami })),
-  cambiaStato: (ids: string[], azione: 'valida' | 'rifiuta' | 'rimetti' | 'cessa' | 'riattiva') =>
+  cambiaStato: (ids: string[], azione: 'valida' | 'rifiuta' | 'rimetti' | 'cessa' | 'riattiva' | 'elimina' | 'ripristina') =>
     apiFetch<{ fatte: number }>('/cral/soci/stato', corpo('POST', { ids, azione })),
+  tipologia: (ids: string[], tipo: 'SD' | 'SE' | 'EST') => apiFetch<{ fatte: number }>('/cral/soci/tipologia', corpo('POST', { ids, tipo })),
+  passaEsterno: (id: string) => apiFetch<{ socio: Persona }>(`/cral/soci/${enc(id)}/passa-esterno`, corpo('POST', {})),
+  esportaSoci: (ids: string[]) => apiFetch<{ ambiente: string; base64: string }>('/cral/export/soci', corpo('POST', { ids }), 60_000),
+  esportaArchivio: (sezioni: SezioneLotto[]) => apiFetch<ArchivioTestata>(`/cral/export/archivio?sezioni=${enc(sezioni.join(','))}`, undefined, 120_000),
+  lotti: () => apiFetch<{ lotti: Lotto[] }>('/cral/lotti'),
+  lotto: (id: string) => apiFetch<{ lotto: Lotto; variazioni: Variazione[] }>(`/cral/lotti/${enc(id)}`, undefined, 60_000),
+  lottoArchivio: (file: string, sezioni: SezioneLotto[], archivio: unknown) =>
+    apiFetch<{ id: string; variazioni: number }>('/cral/lotti/archivio', corpo('POST', { file, sezioni, archivio }), 180_000),
+  lottoT6: (file: string, righe: CralRigaT6[]) => apiFetch<{ id: string | null; variazioni: number }>('/cral/lotti/t6', corpo('POST', { file, righe }), 120_000),
+  decidi: (id: string, b: { voci?: Array<{ id: number; esito: 'ACCETTATA' | 'SCARTATA' | 'ATTESA'; accettati?: string[] }>; sezione?: SezioneLotto; azione?: 'accettaTutte' | 'scartaTutte' | 'azzera' }) =>
+    apiFetch<{ fatte: number }>(`/cral/lotti/${enc(id)}`, corpo('PATCH', b), 60_000),
+  applicaLotto: (id: string) => apiFetch<{ esito: { applicate: number; errori: number; campiSaltati: number; chiuso: boolean } }>(`/cral/lotti/${enc(id)}/applica`, corpo('POST', {}), 300_000),
+  scartaLotto: (id: string) => apiFetch<{ ok: true }>(`/cral/lotti/${enc(id)}/scarta`, corpo('POST', {})),
   riammetti: (id: string) => apiFetch<{ socio: Persona }>(`/cral/soci/${enc(id)}/riammetti`, corpo('POST', {})),
   collega: (id: string, matricola: string) => apiFetch<{ socio: Persona }>(`/cral/soci/${enc(id)}/collega`, corpo('POST', { matricola })),
   sposta: (ids: string[], sede: string | null) => apiFetch<{ fatte: number }>('/cral/soci/sposta', corpo('POST', { ids, sede })),

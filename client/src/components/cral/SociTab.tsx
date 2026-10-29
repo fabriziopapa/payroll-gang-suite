@@ -1,18 +1,21 @@
 // ============================================================
 // PAYROLL GANG SUITE — Modulo CRAL · scheda Soci
 // Soci dipendenti, soci esterni ed esterni; i familiari stanno sotto i
-// loro soci. Scheda della persona, familiari, nuova persona.
+// loro soci. Scheda della persona, familiari, nuova persona. Selezione
+// multipla per le modifiche in blocco (sede, tipologia, stato) e l'export
+// in Excel (stesse colonne del T6). Eliminati visibili solo col filtro.
 // ============================================================
 
 import { Fragment, useEffect, useState } from 'react'
 import { cralApi, type CralNuovaPersonaApi } from '../../api/endpoints'
 import type { AnagraficaPgs, Legame, Persona, Relazione, TipoPersona } from './tipi'
 import {
-  RELAZIONI, TIPOLOGIE, destinatari, eSocio, eta, familiariDi, fmtData, nominativo, norm, prossimaTessera, relDi,
-  rifAttivo, sedeNome, sociDi, tesseraDoppia, tesseraRiammissione,
+  RELAZIONI, STATI, TIPOLOGIE, destinatari, eSocio, eta, familiariDi, fmtData, nominativo, norm, oggi, prossimaTessera, relDi,
+  rifAttivo, sedeNome, sociDi, tesseraDoppia, tesseraRiammissione, totaleSoci,
 } from './logica'
+import { esportaSociExcel } from './ImportDati'
 import {
-  Campo, Conferma, D, DiChi, Ico, Modale, Origine, Pill, StatoSocio, avviso, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario,
+  Campo, Conferma, D, DiChi, Ico, Modale, Origine, Pill, StatoSocio, avviso, btnPericolo, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario,
   cardCls, etichettaCls, inputCls, inputW, messaggioErrore, sceltaCls, thCls, useCral,
 } from './ui'
 
@@ -25,14 +28,17 @@ export function SociTab() {
   const [modifica, setModifica] = useState<string | null>(null)
   const [nuovo, setNuovo] = useState(false)
   const [aperti, setAperti] = useState<Set<string>>(new Set())
+  const [sel, setSel] = useState<Set<string>>(new Set())
   const q = norm(cerca)
   // L'elenco mostra soci dipendenti, soci esterni ed esterni. I familiari stanno sotto i loro soci.
-  const famDi = (s: Persona) => eSocio(s) ? familiariDi(db, s.id).filter(x => x.stato !== 'RIFIUTATO') : []
+  const famDi = (s: Persona) => eSocio(s) ? familiariDi(db, s.id).filter(x => x.stato !== 'RIFIUTATO' && x.stato !== 'ELIMINATO') : []
   const famTrovati = (s: Persona) => q ? famDi(s).filter(x => norm(`${x.cognome} ${x.nome} ${x.id}`).includes(q)) : []
   const lista = db.soci.filter(s => s.tipo !== 'FAM' &&
     (!q || norm(`${s.cognome} ${s.nome} ${s.id} ${s.tessera} ${s.email}`).includes(q) || famTrovati(s).length > 0) &&
     (!sede || (sede === '__NOSEDE' ? !s.sede : s.sede === sede)) &&
-    (!tip || (tip === 'CONFAM' ? famDi(s).some(x => x.stato === 'ATTIVO') : s.tipo === tip)) && (!stato || s.stato === stato),
+    (!tip || (tip === 'CONFAM' ? famDi(s).some(x => x.stato === 'ATTIVO') : tip === 'SOCI' ? eSocio(s) : s.tipo === tip)) &&
+    // «Tutti» non comprende gli eliminati: si vedono solo col loro filtro
+    (stato ? s.stato === stato : s.stato !== 'ELIMINATO'),
   ).sort((a, b) => nominativo(a).localeCompare(nominativo(b)))
   const espanso = (s: Persona) => aperti.has(s.id) || famTrovati(s).length > 0 || tip === 'CONFAM'
   const conFam = lista.filter(s => famDi(s).length)
@@ -43,43 +49,49 @@ export function SociTab() {
   const senzaSede = attivi.filter(s => eSocio(s) && !s.sede).length
   const nFamAttivi = attivi.filter(s => s.tipo === 'FAM' && rifAttivo(db, s)).length
   const riquadri: Array<[string, number, string]> = [
+    ['Totale soci', totaleSoci(db), 'SOCI'],
     ['Soci dipendenti', attivi.filter(s => s.tipo === 'SD').length, 'SD'], ['Soci esterni', attivi.filter(s => s.tipo === 'SE').length, 'SE'],
     ['Esterni', attivi.filter(s => s.tipo === 'EST').length, 'EST'], ['Familiari', nFamAttivi, 'CONFAM'], ['Da validare', daValidare, ''],
   ]
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {riquadri.map(([l, n, k]) => (
           <button key={l} onClick={() => { setTip(k); setStato(k ? 'ATTIVO' : 'DA_VALIDARE') }} className={`${cardCls} px-4 py-3 text-left hover:border-slate-700 transition-colors`}>
-            <p className={etichettaCls}>{l}</p><p className={`text-2xl font-semibold tabular-nums mt-1 ${!k && n ? 'text-amber-400' : k === 'CONFAM' ? 'text-pink-300' : 'text-white'}`}>{n}</p>
-            {k === 'CONFAM' && <p className="text-[11px] text-slate-500">sotto i loro soci</p>}</button>
+            <p className={etichettaCls}>{l}</p><p className={`text-2xl font-semibold tabular-nums mt-1 ${!k && n ? 'text-amber-400' : k === 'CONFAM' ? 'text-pink-300' : k === 'SOCI' ? 'text-indigo-300' : 'text-white'}`}>{n}</p>
+            {k === 'CONFAM' && <p className="text-[11px] text-slate-500">sotto i loro soci</p>}
+            {k === 'SOCI' && <p className="text-[11px] text-slate-500">dipendenti + esterni, attivi</p>}</button>
         ))}
       </div>
       {senzaSede > 0 && <p className="text-xs text-amber-400 -mt-1">{senzaSede === 1 ? '1 socio attivo' : `${senzaSede} soci attivi`} senza sede di consegna.</p>}
       <div className={`${cardCls} p-4 flex flex-wrap gap-3 items-end`}>
         <div className="flex-1 min-w-[200px]"><Campo label="Cerca"><input className={inputCls} placeholder="Nominativo, ID, tessera, email… anche di un familiare" value={cerca} onChange={e => setCerca(e.target.value)} /></Campo></div>
         <div className="w-full sm:w-56"><Campo label="Sede di consegna"><select className={inputCls} value={sede} onChange={e => setSede(e.target.value)}><option value="">Tutte</option>{db.sedi.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}<option value="__NOSEDE">— Non indicata</option></select></Campo></div>
-        <div className="w-[calc(50%-6px)] sm:w-48"><Campo label="Tipologia"><select className={inputCls} value={tip} onChange={e => setTip(e.target.value)}><option value="">Tutte</option><option value="SD">Soci dipendenti</option><option value="SE">Soci esterni</option><option value="EST">Esterni</option><option value="CONFAM">Soci con familiari</option></select></Campo></div>
-        <div className="w-[calc(50%-6px)] sm:w-40"><Campo label="Stato"><select className={inputCls} value={stato} onChange={e => setStato(e.target.value)}><option value="">Tutti</option><option value="ATTIVO">Attivi</option><option value="DA_VALIDARE">Da validare</option><option value="CESSATO">Cessati</option><option value="RIFIUTATO">Rifiutati</option></select></Campo></div>
+        <div className="w-[calc(50%-6px)] sm:w-48"><Campo label="Tipologia"><select className={inputCls} value={tip} onChange={e => setTip(e.target.value)}><option value="">Tutte</option><option value="SOCI">Soci (dipendenti ed esterni)</option><option value="SD">Soci dipendenti</option><option value="SE">Soci esterni</option><option value="EST">Esterni</option><option value="CONFAM">Soci con familiari</option></select></Campo></div>
+        <div className="w-[calc(50%-6px)] sm:w-40"><Campo label="Stato"><select className={inputCls} value={stato} onChange={e => setStato(e.target.value)}><option value="">Tutti</option><option value="ATTIVO">Attivi</option><option value="DA_VALIDARE">Da validare</option><option value="CESSATO">Cessati</option><option value="RIFIUTATO">Rifiutati</option><option value="ELIMINATO">Eliminati</option></select></Campo></div>
         <button className={btnPrimario} onClick={() => setNuovo(true)}><Ico d={D.plus} />Nuova persona</button>
       </div>
       <div className={`${cardCls} overflow-hidden`}>
         <div className="px-5 py-3 border-b border-slate-800 flex flex-wrap items-center gap-3 text-xs text-slate-500">
           <span className="flex-1">{lista.length} persone{conFam.length ? ` · ${conFam.length} con familiari` : ''}</span>
+          <button className="text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-1" title="Excel con le stesse colonne del T6 (anche i familiari): si corregge e si reimporta da Importazione › Aggiornamento dati" onClick={() => void esportaSociExcel(sel.size ? [...sel] : lista.map(s => s.id))}><Ico d={D.download} cls="w-3.5 h-3.5" />Esporta Excel{sel.size ? ` (${sel.size} selezionati)` : ''}</button>
           {conFam.length > 0 && <button className="text-indigo-400 hover:text-indigo-300" onClick={() => setAperti(tuttiAperti ? new Set() : new Set(conFam.map(s => s.id)))}>{tuttiAperti ? 'Comprimi i familiari' : 'Mostra tutti i familiari'}</button>}
         </div>
+        {sel.size > 0 && <AzioniInBlocco ids={[...sel]} onFatto={() => setSel(new Set())} />}
         <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 bg-slate-900/60">
-            <th className="px-5 py-2.5 font-semibold">ID</th><th className={thCls}>Nominativo</th><th className={thCls}>Tipologia</th><th className={thCls}>Tessera CRAL</th><th className={thCls}>Sede di consegna</th><th className={thCls}>Stato</th><th className="px-5 py-2.5 font-semibold">Dal</th>
+            <th className="pl-5 pr-1 py-2.5"><input type="checkbox" className="accent-indigo-500" aria-label="Seleziona tutti" checked={lista.length > 0 && lista.every(s => sel.has(s.id))} onChange={() => setSel(lista.every(s => sel.has(s.id)) ? new Set() : new Set(lista.map(s => s.id)))} /></th>
+            <th className="px-2 py-2.5 font-semibold">ID</th><th className={thCls}>Nominativo</th><th className={thCls}>Tipologia</th><th className={thCls}>Tessera CRAL</th><th className={thCls}>Sede di consegna</th><th className={thCls}>Stato</th><th className="px-5 py-2.5 font-semibold">Dal</th>
           </tr></thead>
           <tbody className="divide-y divide-slate-800/70">
             {lista.map(s => {
               const fam = famDi(s); const exp = espanso(s); const evid = new Set(famTrovati(s).map(x => x.id))
               return (
                 <Fragment key={s.id}>
-                  <tr className="hover:bg-slate-800/40 cursor-pointer" onClick={() => setModifica(s.id)}>
-                    <td className="px-5 py-2.5 font-mono text-xs text-slate-300 whitespace-nowrap">{s.id}</td>
+                  <tr className={`hover:bg-slate-800/40 cursor-pointer ${sel.has(s.id) ? 'bg-indigo-950/20' : ''}`} onClick={() => setModifica(s.id)}>
+                    <td className="pl-5 pr-1 py-2.5" onClick={e => e.stopPropagation()}><input type="checkbox" className="accent-indigo-500" checked={sel.has(s.id)} onChange={() => setSel(x => { const n = new Set(x); if (n.has(s.id)) n.delete(s.id); else n.add(s.id); return n })} aria-label={`Seleziona ${nominativo(s)}`} /></td>
+                    <td className="px-2 py-2.5 font-mono text-xs text-slate-300 whitespace-nowrap">{s.id}{s.exMatricola && <div className="text-[10px] text-slate-500" title="Ex matricola: è passato a socio esterno">ex {s.exMatricola}</div>}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap"><span className="text-slate-100">{nominativo(s)}</span>{s.atipico && <span className="ml-1.5"><Pill tono="warn" title="ATIPICO nel libro soci: etichetta provvisoria">ATIPICO</Pill></span>}
                       {fam.length > 0 && <button onClick={e => { e.stopPropagation(); apri(s.id) }} className="ml-2 inline-flex items-center gap-1 text-xs text-pink-300 hover:text-pink-200 rounded px-1.5 py-0.5 border border-pink-900/60 hover:border-pink-700" aria-expanded={exp} title={exp ? 'Nascondi i familiari' : 'Mostra i familiari'}>
                         <span className={`inline-block transition-transform ${exp ? 'rotate-90' : ''}`}>›</span>{fam.length} {fam.length === 1 ? 'familiare' : 'familiari'}</button>}</td>
@@ -93,7 +105,8 @@ export function SociTab() {
                     const altri = sociDi(db, x).filter(l => l.socio !== s.id); const rel = relDi(x, s.id)
                     return (
                       <tr key={`${s.id}-${x.id}`} className={`cursor-pointer bg-pink-950/[0.07] hover:bg-pink-950/20 ${evid.has(x.id) ? 'ring-1 ring-inset ring-pink-700/60' : ''}`} onClick={() => setModifica(x.id)}>
-                        <td className="pl-9 pr-3 py-2 font-mono text-[11px] text-slate-500 whitespace-nowrap">{x.id}</td>
+                        <td />
+                        <td className="pl-6 pr-3 py-2 font-mono text-[11px] text-slate-500 whitespace-nowrap">{x.id}</td>
                         <td className="px-3 py-2 whitespace-nowrap"><span className="text-slate-500 mr-1.5">↳</span><span className={x.stato === 'ATTIVO' ? 'text-slate-200' : 'text-slate-500 line-through'}>{nominativo(x)}</span>
                           {rel && <span className="ml-2 text-xs text-pink-300">{RELAZIONI[rel]}</span>}
                           {altri.length > 0 && <span className="ml-2 text-[11px] text-slate-500">anche di {altri.map(l => nominativo(l.s)).join(', ')}</span>}</td>
@@ -106,7 +119,7 @@ export function SociTab() {
                   })}
                 </Fragment>)
             })}
-            {!lista.length && <tr><td colSpan={7} className="px-5 py-10 text-center text-slate-500">Nessuna persona con questi filtri.</td></tr>}
+            {!lista.length && <tr><td colSpan={8} className="px-5 py-10 text-center text-slate-500">Nessuna persona con questi filtri.</td></tr>}
           </tbody>
         </table></div>
       </div>
@@ -116,10 +129,41 @@ export function SociTab() {
   )
 }
 
+/** Modifiche in blocco sulle persone selezionate: sede, tipologia, stato. Le regole sono quelle della scheda: chi non può, si salta. */
+function AzioniInBlocco({ ids, onFatto }: { ids: string[]; onFatto: () => void }) {
+  const { db, esegui } = useCral()
+  const [sede, setSede] = useState('')
+  const [tipo, setTipo] = useState('')
+  const [conf, setConf] = useState<null | 'cessa' | 'elimina' | 'ripristina' | 'riattiva'>(null)
+  const pers = ids.flatMap(id => { const p = db.perId.get(id); return p ? [p] : [] })
+  const conta = {
+    cessa: pers.filter(p => p.stato === 'ATTIVO').length, elimina: pers.filter(p => p.stato !== 'ELIMINATO').length,
+    ripristina: pers.filter(p => p.stato === 'ELIMINATO').length, riattiva: pers.filter(p => p.stato === 'CESSATO' && (p.tipo === 'EST' || p.tipo === 'FAM')).length,
+  }
+  const fine = (r: unknown) => { if (r !== null) onFatto() }
+  const ETICH = { cessa: 'Cessa', elimina: 'Elimina', ripristina: 'Ripristina', riattiva: 'Riattiva' } as const
+  return (
+    <div className="px-5 py-3 border-b border-slate-800 bg-indigo-950/20 flex flex-wrap items-center gap-3 text-sm">
+      <span className="text-indigo-200 font-medium">{ids.length} selezionati</span>
+      <div className="flex items-center gap-1.5"><select className={inputW + ' py-1 text-xs w-48'} value={sede} onChange={e => setSede(e.target.value)}><option value="">Sede di consegna…</option><option value="__NESSUNA">— Da indicare</option>{db.sedi.filter(x => x.attiva).map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}</select>
+        <button className={btnPiccoloSec} disabled={!sede} onClick={() => void esegui(() => cralApi.sposta(ids, sede === '__NESSUNA' ? null : sede), r => `Sede aggiornata per ${r.fatte} persone`).then(fine)}>Applica</button></div>
+      <div className="flex items-center gap-1.5"><select className={inputW + ' py-1 text-xs w-40'} value={tipo} onChange={e => setTipo(e.target.value)}><option value="">Tipologia…</option><option value="SD">Socio dipendente</option><option value="SE">Socio esterno</option><option value="EST">Esterno</option></select>
+        <button className={btnPiccoloSec} disabled={!tipo} title="Con la matricola: socio dipendente o esterno; senza: socio esterno o esterno. Gli altri si saltano." onClick={() => void esegui(() => cralApi.tipologia(ids, tipo as 'SD' | 'SE' | 'EST'), r => `Tipologia cambiata per ${r.fatte} di ${ids.length}${r.fatte < ids.length ? ' (gli altri non possono)' : ''}`).then(fine)}>Applica</button></div>
+      <div className="flex items-center gap-1.5">{(Object.keys(ETICH) as Array<keyof typeof ETICH>).map(k => <button key={k} className={btnPiccoloSec} disabled={!conta[k]} onClick={() => setConf(k)}>{ETICH[k]} {conta[k] ? <span className="text-slate-500">{conta[k]}</span> : null}</button>)}</div>
+      <button className="ml-auto text-xs text-slate-400 hover:text-white" onClick={onFatto}>Deseleziona</button>
+      {conf && <Conferma testo={`${ETICH[conf]} ${conta[conf]} ${conta[conf] === 1 ? 'persona' : 'persone'}?`} etichetta={ETICH[conf]} pericolo={conf === 'elimina' || conf === 'cessa'} onClose={() => setConf(null)}
+        dettaglio={conf === 'elimina' ? `Escono da elenchi, eventi e report e non devono la quota dal ${oggi().slice(0, 4)}. Non si cancella nulla: con «Ripristina» tornano allo stato di prima, con la stessa tessera.`
+          : conf === 'ripristina' ? 'Tornano allo stato che avevano prima dell\'eliminazione, con la stessa tessera. Gli anni passati da eliminati restano esenti dalla quota.'
+            : conf === 'cessa' ? 'Diventano Cessati con la data di oggi: non compaiono nei nuovi eventi. La quota dell\'anno resta dovuta.' : 'Esterni e familiari cessati tornano attivi.'}
+        onOk={() => { void esegui(() => cralApi.cambiaStato(ids, conf), r => `${ETICH[conf]}: ${r.fatte} persone`).then(fine) }} />}
+    </div>
+  )
+}
+
 /** Familiari di un socio: elenco, nuovi familiari, collegamento di familiari già presenti (es. figlio di due soci). */
 function FamiliariSocio({ socio, onApri }: { socio: Persona; onApri: (id: string) => void }) {
   const { db, esegui } = useCral()
-  const fam = familiariDi(db, socio.id).filter(x => x.stato !== 'RIFIUTATO')
+  const fam = familiariDi(db, socio.id).filter(x => x.stato !== 'RIFIUTATO' && x.stato !== 'ELIMINATO')
   const [f, setF] = useState<{ cognome: string; nome: string; nascita: string; relazione: Relazione } | null>(null)
   const [col, setCol] = useState<{ q: string; relazione: Relazione } | null>(null)
   const ok = !!f && !!f.cognome.trim() && !!f.nome.trim()
@@ -222,6 +266,7 @@ function SocioModal({ id, onClose, onApri }: { id: string; onClose: () => void; 
   const [f, setF] = useState(() => ({ tipo: s?.tipo ?? 'SD', legami: s?.legami ?? [], tessera: s?.tessera ?? '', sede: s?.sede ?? '', email: s?.email ?? '', nascita: s?.nascita ?? '', note: s?.note ?? '' }))
   const [conferma, setConferma] = useState(false)
   const [riammetti, setRiammetti] = useState(false)
+  const [azione, setAzione] = useState<null | 'elimina' | 'ripristina' | 'passa' | 'collega'>(null)
   const [salvo, setSalvo] = useState(false)
   const a = useAnagraficaDi(s?.matricola ?? null)
   if (!s) return null
@@ -249,6 +294,7 @@ function SocioModal({ id, onClose, onApri }: { id: string; onClose: () => void; 
     <Modale largo titolo={nominativo(s)} sotto={<span className="font-mono">{s.id}</span>} onClose={onClose} piedi={<>
       {s.stato === 'ATTIVO' && <button className={btnSecondario + ' mr-auto'} onClick={() => setConferma(true)}>{eSocio(s) ? 'Cessa iscrizione' : 'Disattiva'}</button>}
       {s.stato === 'CESSATO' && <button className={btnSecondario + ' mr-auto'} onClick={() => setRiammetti(true)}>{eSocio(s) ? 'Riammetti' : 'Riattiva'}</button>}
+      {s.stato === 'ELIMINATO' && <button className={btnSecondario + ' mr-auto'} onClick={() => setAzione('ripristina')}>Ripristina</button>}
       <button className={btnSecondario} onClick={onClose}>Annulla</button>
       <button className={btnPrimario} disabled={doppia || salvo || (s.tipo === 'FAM' && !f.legami.length)} onClick={() => void salva()}>Salva</button>
     </>}>
@@ -256,6 +302,14 @@ function SocioModal({ id, onClose, onApri }: { id: string; onClose: () => void; 
         <div className="flex flex-wrap gap-2 items-center"><Origine s={s} /><StatoSocio s={s} />{s.atipico && <Pill tono="warn" title="ATIPICO nel libro soci: etichetta provvisoria">ATIPICO</Pill>}
           {s.matricola && <span className="text-xs text-slate-400">Matricola PGS <span className="font-mono text-slate-200">{s.matricola}</span>{a ? ` · ${a.ruolo ?? ''} ${a.druolo ?? ''}` : ''}</span>}
           {!s.matricola && s.provenienza && <span className="text-xs text-slate-400">{s.provenienza}</span>}
+          {s.exMatricola && <span className="text-xs text-slate-400">Ex matricola PGS <span className="font-mono text-slate-200">{s.exMatricola}</span> (ex socio dipendente)</span>}
+        </div>
+        {s.stato === 'ELIMINATO' && <p className="text-xs rounded-lg border border-red-900/60 bg-red-950/20 text-red-200 px-3 py-2">Eliminato il {fmtData(s.eliminatoIl)}{s.eliminatoDa ? ` da ${s.eliminatoDa}` : ''}{s.statoPrima ? ` · prima era «${STATI[s.statoPrima].toLowerCase()}»` : ''}. Non compare in elenchi, eventi e report e non deve la quota dal {s.eliminatoIl?.slice(0, 4)}. «Ripristina» lo riporta allo stato di prima con la stessa tessera.</p>}
+        {(s.anniEsenti ?? []).length > 0 && <p className="text-xs text-slate-400">Esente dalla quota associativa per: {s.anniEsenti.join(', ')} (anni passati da eliminato).</p>}
+        <div className="flex flex-wrap gap-2">
+          {s.tipo === 'SD' && s.stato === 'ATTIVO' && <button className={btnPiccoloSec} onClick={() => setAzione('passa')} title="Lascia l'Ateneo ma resta socio: nuovo ID EXT, la matricola resta come ex matricola"><Ico d={D.link} cls="w-3.5 h-3.5" />Passa a socio esterno</button>}
+          {!s.matricola && (s.tipo === 'SE' || s.tipo === 'EST') && s.stato === 'ATTIVO' && <button className={btnPiccoloSec} onClick={() => setAzione('collega')} title="Se è (di nuovo) un dipendente: prende la matricola come ID"><Ico d={D.search} cls="w-3.5 h-3.5" />Trova in anagrafica PGS</button>}
+          {s.stato !== 'ELIMINATO' && <button className={btnPiccolo + ' text-red-300 hover:bg-red-950/40 border border-red-900/60'} onClick={() => setAzione('elimina')}><Ico d={D.trash} cls="w-3.5 h-3.5" />Elimina</button>}
         </div>
         {s.tipo === 'FAM' ? <LegamiFamiliare legami={f.legami} onChange={legami => setF({ ...f, legami })} onApri={onApri} /> :
           <Campo label="Tipologia" hint={f.tipo === 'EST' ? "Esterno: non è socio, niente tessera, non compare nell'elenco soci." : undefined}>
@@ -298,6 +352,29 @@ function SocioModal({ id, onClose, onApri }: { id: string; onClose: () => void; 
           void esegui(async () => eSocio(s) ? (await cralApi.riammetti(id)).socio.tessera : (await cralApi.cambiaStato([id], 'riattiva'), ''),
             t => eSocio(s) ? `${nominativo(s)} riammesso con tessera ${t}` : 'Riattivato').then(r => { if (r !== null) onClose() })
         }} />}
+      {azione === 'elimina' && <Conferma testo={`Eliminare ${nominativo(s)}?`} etichetta="Elimina" pericolo onClose={() => setAzione(null)}
+        dettaglio={`Esce da elenchi, eventi e report e non deve la quota associativa dal ${oggi().slice(0, 4)} (gli anni prima restano dovuti). Non si cancella nulla: scelte, ordini, quote e storico restano, la tessera resta sua. Con «Ripristina» torna «${STATI[s.stato].toLowerCase()}».${eSocio(s) && familiariDi(db, id).length ? ' I suoi familiari restano sospesi finché non torna attivo.' : ''}`}
+        onOk={() => { void esegui(() => cralApi.cambiaStato([id], 'elimina'), `${nominativo(s)} eliminato`, 'info').then(r => { if (r) onClose() }) }} />}
+      {azione === 'ripristina' && <Conferma testo={`Ripristinare ${nominativo(s)}?`} etichetta="Ripristina" onClose={() => setAzione(null)}
+        dettaglio={`Torna «${s.statoPrima ? STATI[s.statoPrima].toLowerCase() : '—'}» con la stessa tessera${s.tessera ? ` (${s.tessera})` : ''}. ${s.eliminatoIl && +s.eliminatoIl.slice(0, 4) < +oggi().slice(0, 4) ? `Gli anni dal ${s.eliminatoIl.slice(0, 4)} al ${+oggi().slice(0, 4) - 1} restano esenti dalla quota; ` : ''}la quota ${oggi().slice(0, 4)} torna dovuta.`}
+        onOk={() => { void esegui(() => cralApi.cambiaStato([id], 'ripristina'), `${nominativo(s)} ripristinato`).then(r => { if (r) onClose() }) }} />}
+      {azione === 'passa' && <Modale titolo={`${nominativo(s)}: da socio dipendente a socio esterno`} onClose={() => setAzione(null)} piedi={<>
+        <button className={btnSecondario} onClick={() => setAzione(null)}>Annulla</button>
+        <button className={btnPericolo} onClick={() => { void esegui(() => cralApi.passaEsterno(id), r => `${nominativo(s)} ora è socio esterno ${r.socio.id} (ex matricola ${s.matricola})`).then(r => { setAzione(null); if (r) onApri(r.socio.id) }) }}>Passa a socio esterno</button></>}>
+        <ul className="text-sm text-slate-300 list-disc ml-5 space-y-1">
+          <li>Prende un nuovo ID <span className="font-mono">EXT-{String(db.extProssimo).padStart(4, '0')}</span> (o il primo libero) e resta <b>attivo</b>, senza validazione.</li>
+          <li>La matricola <span className="font-mono">{s.matricola}</span> resta come <b>ex matricola</b>: il prossimo libro soci lo riconosce e non crea un doppione.</li>
+          <li>Tessera{s.tessera ? ` ${s.tessera}` : ''}, data d'iscrizione, familiari, eventi, scelte, ordini, richieste e quote lo seguono.</li>
+          <li>Quota {oggi().slice(0, 4)}: la trattenuta in busta paga diventa <b>mensile</b>; i mesi già registrati restano.</li>
+          <li>Negli sconti dei campi chi è già iscritto tiene la categoria bloccata all'iscrizione.</li>
+        </ul>
+      </Modale>}
+      {azione === 'collega' && <Modale titolo={`Trova ${nominativo(s)} in anagrafica PGS`} sotto={s.tipo === 'SE' ? 'Diventa socio dipendente: ID = matricola. Tessera, familiari, scelte, ordini e quote restano.' : 'Resta esterno, con la matricola come ID.'} onClose={() => setAzione(null)}>
+        <div className="flex flex-col gap-3">
+          {s.exMatricola && <button className={btnPiccoloSec + ' self-start'} onClick={() => { void cralApi.anagrafica(s.exMatricola!).then(x => { const a = x.risultati.find(y => y.matricola === s.exMatricola); if (!a) { avviso(`La matricola ${s.exMatricola} non è in anagrafica.`, 'error'); return } void esegui(() => cralApi.collega(id, a.matricola), `${nominativo(s)} di nuovo socio dipendente con matricola ${a.matricola}`).then(r => { setAzione(null); if (r) onApri(r.socio.id) }) }) }}>Usa l'ex matricola {s.exMatricola}</button>}
+          <CercaAnagrafica onScegli={a => { void esegui(() => cralApi.collega(id, a.matricola), `${nominativo(s)} trovato in anagrafica PGS: matricola ${a.matricola}`).then(r => { setAzione(null); if (r) onApri(r.socio.id) }) }} />
+        </div>
+      </Modale>}
     </Modale>
   )
 }
@@ -307,7 +384,7 @@ export function CercaAnagrafica({ onScegli, escludiSoci = true }: { onScegli: (a
   const { db } = useCral()
   const [q, setQ] = useState('')
   const [ris, setRis] = useState<AnagraficaPgs[] | null>(null)
-  const soci = new Set(db.soci.filter(s => s.matricola).map(s => s.matricola))
+  const soci = new Set(db.soci.flatMap(s => [s.matricola, s.exMatricola]).filter((m): m is string => !!m))
   useEffect(() => {
     const t = q.trim()
     if (t.length < 2) { setRis(null); return }

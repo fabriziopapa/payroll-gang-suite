@@ -13,9 +13,15 @@ import * as schema from '../schema.js'
 import type {
   ICralRepository, CralStato, CralSedeRow, CralTipoRow, CralTipologiaRow, CralParametriRow, CralTesseraParam,
   CralSocioRow, CralIniziativaRow, CralCaricoRow, CralRichiestaRow, CralQuotaRow, CralAnagraficaRow,
-  CralNuovaPersona, CralModificaPersona, CralOperazioneImport, CralEsitoImport, CralErrore,
+  CralNuovaPersona, CralModificaPersona, CralOperazioneImport, CralEsitoImport, CralErrore, CralAzioneStato,
+  CralLottoRow, CralVariazioneRow, CralEsitoApplica,
 } from '../IRepository.js'
-import { baseTessera, formatTessera, prossimoDopo, tesseraRiammissione } from '../../lib/cral.js'
+import { baseTessera, erroreDati, prossimoDopo, tesseraRiammissione, usiTolti, type ConfigEvento } from '../../lib/cral.js'
+import {
+  ORDINE_SEZIONI, anniEsentiDopoRipristino, personaDaRiga, statoDi, uguale, valorePersona,
+  type CampoVar, type EventoArch, type PersonaArch, type QuotaArch, type SedeArch, type StatoComposto, type TipoArch, type TipologiaArch,
+  type Variazione,
+} from '../../lib/cralLotti.js'
 
 type DB = PostgresJsDatabase<typeof schema>
 type TX = Parameters<Parameters<DB['transaction']>[0]>[0]
@@ -37,6 +43,19 @@ function violazioneUnica(err: unknown): boolean {
 
 /** Errore applicativo dentro una transazione: la annulla e torna come codice. */
 class Annulla extends Error { constructor(readonly codice: CralErrore) { super(codice) } }
+/** Una variazione del lotto che non si puo' applicare: resta in errore con il motivo. */
+class Salta extends Error {}
+
+interface CtxApplica {
+  userId: string | null; ambiente: string; origine: 'T6' | 'ARCHIVIO'
+  /** username → id degli utenti di qui */
+  utenti: Map<string, string>
+  /** ID dell'archivio → ID di qui (chi entra con un nuovo ID); resta nel lotto fra un'applicazione e l'altra */
+  idMap: Map<string, string>
+  /** ID dell'archivio che qui sono di un'altra persona: senza nuovo ID chi li cita si salta */
+  vietati: Set<string>
+  oggi: string
+}
 
 function toTessera(p: typeof schema.cralParametri.$inferSelect): CralTesseraParam {
   return {
@@ -217,7 +236,9 @@ export class PgCralRepository implements ICralRepository {
     const par = await this.parametri(tx)
     let id: string
     if (p.matricola) {
-      const [gia] = await tx.select({ id: schema.cralSoci.id }).from(schema.cralSoci).where(eq(schema.cralSoci.matricola, p.matricola))
+      // anche chi e' passato a socio esterno con questa matricola: e' la stessa persona
+      const [gia] = await tx.select({ id: schema.cralSoci.id }).from(schema.cralSoci)
+        .where(sql`${schema.cralSoci.matricola} = ${p.matricola} OR ${schema.cralSoci.exMatricola} = ${p.matricola}`)
       if (gia) throw new Annulla('MATRICOLA_GIA_SOCIO')
       id = p.matricola
     } else if (p.tipo === 'FAM') {
@@ -317,9 +338,10 @@ export class PgCralRepository implements ICralRepository {
     })
   }
 
-  async cambiaStato(ids: string[], azione: 'valida' | 'rifiuta' | 'rimetti' | 'cessa' | 'riattiva', userId: string | null): Promise<number> {
+  async cambiaStato(ids: string[], azione: CralAzioneStato, userId: string | null): Promise<number> {
     if (!ids.length) return 0
     const ora = new Date()
+    if (azione === 'elimina' || azione === 'ripristina') return this.eliminaRipristina(this.db, ids, azione, userId, oggi())
     const [da, set]: [string[], Partial<typeof schema.cralSoci.$inferInsert>] = {
       valida:   [['DA_VALIDARE'], { stato: 'ATTIVO', validatoDa: userId, validatoIl: ora }],
       rifiuta:  [['DA_VALIDARE'], { stato: 'RIFIUTATO' }],
@@ -332,6 +354,65 @@ export class PgCralRepository implements ICralRepository {
     const r = await this.db.update(schema.cralSoci).set({ ...set, modificatoDa: userId, modificatoIl: ora })
       .where(and(inArray(schema.cralSoci.id, ids), inArray(schema.cralSoci.stato, da), condTipo)).returning({ id: schema.cralSoci.id })
     return r.length
+  }
+
+  /**
+   * Elimina: da qualunque stato, ricordando quello di prima. Ripristina:
+   * torna allo stato di prima con la stessa tessera; gli anni passati da
+   * eliminato restano esenti dalla quota (decisione del 29/10).
+   */
+  private async eliminaRipristina(conn: Conn, ids: string[], azione: 'elimina' | 'ripristina', userId: string | null, data: string): Promise<number> {
+    const ora = new Date()
+    if (azione === 'elimina') {
+      const r = await conn.update(schema.cralSoci).set({
+        stato: 'ELIMINATO', statoPrima: sql`${schema.cralSoci.stato}`, eliminatoIl: data, eliminatoDa: userId, modificatoDa: userId, modificatoIl: ora,
+      }).where(and(inArray(schema.cralSoci.id, ids), sql`${schema.cralSoci.stato} <> 'ELIMINATO'`)).returning({ id: schema.cralSoci.id })
+      return r.length
+    }
+    const anno = +oggi().slice(0, 4)
+    const r = await conn.update(schema.cralSoci).set({
+      stato: sql`${schema.cralSoci.statoPrima}`, statoPrima: null, eliminatoIl: null, eliminatoDa: null, modificatoDa: userId, modificatoIl: ora,
+      anniEsenti: sql`ARRAY(SELECT DISTINCT y FROM unnest(${schema.cralSoci.anniEsenti} || ARRAY(SELECT generate_series(extract(year FROM ${schema.cralSoci.eliminatoIl})::int, ${anno - 1}::int))::smallint[]) AS y ORDER BY y)::smallint[]`,
+    }).where(and(inArray(schema.cralSoci.id, ids), eq(schema.cralSoci.stato, 'ELIMINATO'))).returning({ id: schema.cralSoci.id })
+    return r.length
+  }
+
+  /** Tipologia in blocco: le stesse regole della scheda, persona per persona; quelle non ammesse si saltano. */
+  async cambiaTipologia(ids: string[], tipo: 'SD' | 'SE' | 'EST', userId: string | null): Promise<number> {
+    let n = 0
+    for (const id of ids) {
+      const r = await this.modificaPersona(id, { tipo }, userId)
+      if (typeof r !== 'string') n++
+    }
+    return n
+  }
+
+  /**
+   * Socio dipendente che lascia l'Ateneo e resta socio: diventa socio
+   * esterno con un nuovo ID EXT-nnnn. La matricola va in ex_matricola;
+   * tessera, data d'iscrizione, familiari, scelte, ordini, richieste e
+   * quote seguono il nuovo ID (ON UPDATE CASCADE). La trattenuta in busta
+   * paga dell'anno in corso (e dei successivi) diventa mensile: i mesi gia'
+   * registrati restano.
+   */
+  async passaEsterno(id: string, userId: string | null): Promise<CralSocioRow | CralErrore> {
+    return this.inTransazione(async tx => {
+      await tx.execute(lucchetto)
+      const [s] = await tx.select().from(schema.cralSoci).where(eq(schema.cralSoci.id, id)).for('update')
+      if (!s) throw new Annulla('SOCIO_NON_TROVATO')
+      if (s.tipo !== 'SD' || !s.matricola || s.stato !== 'ATTIVO') throw new Annulla('STATO_NON_VALIDO')
+      const par = await this.parametri(tx)
+      const nuovo = await this.prossimoId(tx, 'EXT', par.extProssimo)
+      const data = oggi()
+      await tx.update(schema.cralSoci).set({
+        id: nuovo, matricola: null, exMatricola: s.matricola, tipo: 'SE', modificatoDa: userId, modificatoIl: new Date(),
+        note: `${s.note ? `${s.note} · ` : ''}Socio dipendente (matricola ${s.matricola}) fino al ${data.split('-').reverse().join('/')}`.slice(0, 1000),
+      }).where(eq(schema.cralSoci.id, id))
+      await tx.execute(sql`UPDATE cral_scelte SET dati = jsonb_set(dati, '{rif}', to_jsonb(${nuovo}::text)) WHERE dati->>'rif' = ${id}`)
+      await tx.update(schema.cralQuote).set({ modo: 'MENSILE', updatedBy: userId, updatedAt: new Date() })
+        .where(and(eq(schema.cralQuote.socioId, nuovo), eq(schema.cralQuote.modo, 'TRATTENUTA'), sql`${schema.cralQuote.anno} >= ${+data.slice(0, 4)}`))
+      return (await this.socio(nuovo, tx))!
+    })
   }
 
   async riammetti(id: string, userId: string | null): Promise<CralSocioRow | CralErrore> {
@@ -367,11 +448,12 @@ export class PgCralRepository implements ICralRepository {
       const [s] = await tx.select().from(schema.cralSoci).where(eq(schema.cralSoci.id, id)).for('update')
       if (!s) throw new Annulla('SOCIO_NON_TROVATO')
       if (s.matricola || s.tipo === 'FAM' || s.tipo === 'SD') throw new Annulla('STATO_NON_VALIDO')
-      const [gia] = await tx.select({ id: schema.cralSoci.id }).from(schema.cralSoci).where(eq(schema.cralSoci.id, a.matricola))
+      const [gia] = await tx.select({ id: schema.cralSoci.id }).from(schema.cralSoci)
+        .where(sql`${schema.cralSoci.id} = ${a.matricola} OR (${schema.cralSoci.exMatricola} = ${a.matricola} AND ${schema.cralSoci.id} <> ${id})`)
       if (gia) throw new Annulla('MATRICOLA_GIA_SOCIO')
       const [cognome, nome] = a.cognome || a.nome ? [a.cognome ?? '', a.nome ?? ''] : [a.cognNome ?? s.cognome, '']
       await tx.update(schema.cralSoci).set({
-        id: a.matricola, matricola: a.matricola, tipo: s.tipo === 'SE' ? 'SD' : 'EST',
+        id: a.matricola, matricola: a.matricola, tipo: s.tipo === 'SE' ? 'SD' : 'EST', exMatricola: null,
         cognome: cognome || s.cognome, nome: nome || s.nome, nascita: a.nascita ?? s.nascita,
         stato: 'ATTIVO', validatoDa: userId, validatoIl: new Date(), modificatoDa: userId, modificatoIl: new Date(),
         note: `${s.note ? `${s.note} · ` : ''}Era ${s.id}`.slice(0, 1000),
@@ -448,12 +530,10 @@ export class PgCralRepository implements ICralRepository {
     return toIniz(i, part, sce, car, ric, new Map(utenti.map(u => [u.id, u.username])))
   }
 
-  async usiIniziativa(id: string): Promise<{ opz: Set<string>; prodotti: Set<string>; periodi: Set<string>; articoli: Set<string> }> {
-    const [sce, car, ric] = await Promise.all([
-      this.db.select({ dati: schema.cralScelte.dati }).from(schema.cralScelte).where(eq(schema.cralScelte.iniziativaId, id)),
-      this.db.select({ art: schema.cralCarichi.articolo }).from(schema.cralCarichi).where(eq(schema.cralCarichi.iniziativaId, id)),
-      this.db.select({ art: schema.cralRichieste.articolo }).from(schema.cralRichieste).where(eq(schema.cralRichieste.iniziativaId, id)),
-    ])
+  async usiIniziativa(id: string, conn: Conn = this.db): Promise<{ opz: Set<string>; prodotti: Set<string>; periodi: Set<string>; articoli: Set<string> }> {
+    const sce = await conn.select({ dati: schema.cralScelte.dati }).from(schema.cralScelte).where(eq(schema.cralScelte.iniziativaId, id))
+    const car = await conn.select({ art: schema.cralCarichi.articolo }).from(schema.cralCarichi).where(eq(schema.cralCarichi.iniziativaId, id))
+    const ric = await conn.select({ art: schema.cralRichieste.articolo }).from(schema.cralRichieste).where(eq(schema.cralRichieste.iniziativaId, id))
     const opz = new Set<string>(), prodotti = new Set<string>(), periodi = new Set<string>()
     for (const { dati } of sce) {
       const d = dati as { opz?: string; q?: Record<string, number>; per?: Record<string, string> }
@@ -513,10 +593,10 @@ export class PgCralRepository implements ICralRepository {
     return new Map(rows.map(r => [r.socioId, { dati: r.dati as Record<string, unknown>, fonte: r.fonte }]))
   }
 
-  async salvaScelte(id: string, voci: Array<{ socio: string; dati: Record<string, unknown>; fonte: string }>, userId: string | null): Promise<number> {
+  async salvaScelte(id: string, voci: Array<{ socio: string; dati: Record<string, unknown>; fonte: string }>, userId: string | null, conn: Conn = this.db): Promise<number> {
     if (!voci.length) return 0
     const ora = new Date()
-    await this.db.insert(schema.cralScelte)
+    await conn.insert(schema.cralScelte)
       .values(voci.map(v => ({ iniziativaId: id, socioId: v.socio, dati: v.dati, fonte: v.fonte, updatedBy: userId, updatedAt: ora })))
       .onConflictDoUpdate({
         target: [schema.cralScelte.iniziativaId, schema.cralScelte.socioId],
@@ -595,6 +675,492 @@ export class PgCralRepository implements ICralRepository {
     })
   }
 
+  // ── Lotti di variazioni (0023) ─────────────────────────────
+  async creaLotto(
+    l: { origine: 'T6' | 'ARCHIVIO'; file: string; ambiente: string; esportato: string | null; sezioni: string[]; riepilogo: Record<string, unknown> },
+    vs: Variazione[], userId: string | null,
+  ): Promise<string> {
+    return this.db.transaction(async tx => {
+      const [r] = await tx.insert(schema.cralLotti).values({
+        origine: l.origine, file: l.file.slice(0, 200), ambiente: l.ambiente.slice(0, 80), esportato: l.esportato ? new Date(l.esportato) : null,
+        sezioni: l.sezioni, riepilogo: l.riepilogo, creatoDa: userId,
+      }).returning({ id: schema.cralLotti.id })
+      const id = r!.id
+      // in ordine di applicazione: sedi, tabelle, soci (prima i soci, poi i familiari), quote, eventi
+      const ordinate = vs.map((v, k) => ({ v, k })).sort((a, b) => ORDINE_SEZIONI[a.v.sezione] - ORDINE_SEZIONI[b.v.sezione] || a.k - b.k)
+      for (let i = 0; i < ordinate.length; i += 500) {
+        await tx.insert(schema.cralLottiVariazioni).values(ordinate.slice(i, i + 500).map(({ v }, j) => ({
+          lottoId: id, ordine: i + j, sezione: v.sezione, entita: v.entita, chiave: v.chiave.slice(0, 80), tipo: v.tipo, delicata: v.delicata,
+          dati: { etichetta: v.etichetta, campi: v.campi, record: v.record, ...(v.avviso ? { avviso: v.avviso } : {}), ...(v.bloccata ? { bloccata: v.bloccata } : {}) },
+        })))
+      }
+      return id
+    })
+  }
+
+  async lotti(): Promise<CralLottoRow[]> {
+    const [ls, conti, utenti] = await Promise.all([
+      this.db.select().from(schema.cralLotti).orderBy(sql`${schema.cralLotti.creatoIl} DESC`).limit(50),
+      this.db.execute(sql`SELECT lotto_id, esito, count(*)::int AS n FROM cral_lotti_variazioni GROUP BY lotto_id, esito`),
+      this.utenti(this.db),
+    ])
+    const c = new Map<string, Record<string, number>>()
+    for (const r of conti as unknown as Array<{ lottoId: string; esito: string; n: number }>) (c.get(r.lottoId) ?? c.set(r.lottoId, {}).get(r.lottoId)!)[r.esito] = r.n
+    return ls.map(l => ({ ...toLotto(l, utenti), conteggi: c.get(l.id) ?? {} }))
+  }
+
+  async lotto(id: string): Promise<{ lotto: CralLottoRow; variazioni: CralVariazioneRow[] } | null> {
+    const [l] = await this.db.select().from(schema.cralLotti).where(eq(schema.cralLotti.id, id))
+    if (!l) return null
+    const vs = await this.db.select().from(schema.cralLottiVariazioni).where(eq(schema.cralLottiVariazioni.lottoId, id)).orderBy(asc(schema.cralLottiVariazioni.ordine))
+    return { lotto: toLotto(l, await this.utenti(this.db)), variazioni: vs.map(toVariazione) }
+  }
+
+  /**
+   * Accetta o scarta. Una variazione bloccata non si accetta; di una
+   * modifica si accettano solo campi non bloccati. «accettaTutte» salta le
+   * delicate (stati, ID, avvisi): quelle si confermano una per una.
+   */
+  async decidiVariazioni(
+    id: string,
+    d: { voci?: Array<{ id: number; esito: 'ACCETTATA' | 'SCARTATA' | 'ATTESA'; accettati?: string[] }>; sezione?: string; azione?: 'accettaTutte' | 'scartaTutte' | 'azzera' },
+  ): Promise<number | CralErrore> {
+    return this.inTransazione(async tx => {
+      const [l] = await tx.select({ stato: schema.cralLotti.stato }).from(schema.cralLotti).where(eq(schema.cralLotti.id, id)).for('update')
+      if (!l) throw new Annulla('LOTTO_NON_TROVATO')
+      if (l.stato !== 'APERTO') throw new Annulla('LOTTO_CHIUSO')
+      const vs = await tx.select().from(schema.cralLottiVariazioni).where(eq(schema.cralLottiVariazioni.lottoId, id))
+      const perId = new Map(vs.map(v => [v.id, v]))
+      const nuove: Array<{ id: number; esito: string; acc: string[] }> = []
+      const liberi = (v: typeof vs[number]) => ((v.dati as { campi?: CampoVar[] }).campi ?? []).filter(c => !c.blocco).map(c => c.campo)
+      const accetta = (v: typeof vs[number], scelti?: string[]): string[] | null => {
+        if ((v.dati as { bloccata?: string }).bloccata) return null
+        if (v.tipo !== 'MODIFICA') return ['*']
+        const ok = liberi(v).filter(c => !scelti || scelti.includes(c))
+        return ok.length ? ok : null
+      }
+      for (const x of d.voci ?? []) {
+        const v = perId.get(x.id)
+        if (!v || v.esito === 'APPLICATA') continue
+        if (x.esito === 'ACCETTATA') { const acc = accetta(v, x.accettati); if (acc) nuove.push({ id: v.id, esito: 'ACCETTATA', acc }) }
+        else nuove.push({ id: v.id, esito: x.esito, acc: [] })
+      }
+      if (d.azione && d.sezione) {
+        for (const v of vs) {
+          if (v.sezione !== d.sezione || v.esito === 'APPLICATA') continue
+          if (d.azione === 'accettaTutte') {
+            if (v.esito !== 'ATTESA' || v.delicata) continue
+            const acc = accetta(v); if (acc) nuove.push({ id: v.id, esito: 'ACCETTATA', acc })
+          } else nuove.push({ id: v.id, esito: d.azione === 'scartaTutte' ? 'SCARTATA' : 'ATTESA', acc: [] })
+        }
+      }
+      if (!nuove.length) return 0
+      await tx.execute(sql`
+        UPDATE cral_lotti_variazioni v SET esito = j.esito, accettati = ARRAY(SELECT jsonb_array_elements_text(j.acc)), nota = ''
+        FROM jsonb_to_recordset(${JSON.stringify(nuove)}::jsonb) AS j(id int, esito text, acc jsonb)
+        WHERE v.id = j.id AND v.lotto_id = ${id} AND v.esito <> 'APPLICATA'`)
+      return nuove.length
+    })
+  }
+
+  /** Scarta il lotto intero: le variazioni si svuotano, resta il riepilogo. */
+  async scartaLotto(id: string, userId: string | null): Promise<boolean | CralErrore> {
+    return this.inTransazione(async tx => {
+      const [l] = await tx.select({ stato: schema.cralLotti.stato }).from(schema.cralLotti).where(eq(schema.cralLotti.id, id)).for('update')
+      if (!l) throw new Annulla('LOTTO_NON_TROVATO')
+      if (l.stato !== 'APERTO') throw new Annulla('LOTTO_CHIUSO')
+      await this.chiudiLotto(tx, id, 'SCARTATO', userId)
+      return true
+    })
+  }
+
+  private async chiudiLotto(tx: TX, id: string, stato: 'CHIUSO' | 'SCARTATO', userId: string | null): Promise<void> {
+    const conti = await tx.execute(sql`SELECT sezione, esito, count(*)::int AS n FROM cral_lotti_variazioni WHERE lotto_id = ${id} GROUP BY sezione, esito`)
+    const esiti: Record<string, Record<string, number>> = {}
+    for (const r of conti as unknown as Array<{ sezione: string; esito: string; n: number }>) (esiti[r.sezione] ??= {})[r.esito] = r.n
+    await tx.update(schema.cralLotti).set({
+      stato, chiusoDa: userId, chiusoIl: new Date(), riepilogo: sql`${schema.cralLotti.riepilogo} || ${JSON.stringify({ esiti })}::jsonb`,
+    }).where(eq(schema.cralLotti.id, id))
+    // i dati personali copiati nel lotto non servono piu': restano chiave ed esito
+    await tx.update(schema.cralLottiVariazioni).set({ dati: {} }).where(eq(schema.cralLottiVariazioni.lottoId, id))
+  }
+
+  /**
+   * Applica le variazioni accettate, in una transazione: ognuna nel suo
+   * savepoint, cosi' una che fallisce (un vincolo, un dato cambiato nel
+   * frattempo) resta in errore e le altre passano. Un campo il cui valore
+   * qui non e' piu' quello visto nel lotto si salta. Il lotto si chiude
+   * (e si svuota) quando non resta nulla da decidere.
+   */
+  async applicaLotto(id: string, userId: string | null): Promise<CralEsitoApplica | CralErrore> {
+    return this.inTransazione(async tx => {
+      await tx.execute(lucchetto)
+      const [l] = await tx.select().from(schema.cralLotti).where(eq(schema.cralLotti.id, id)).for('update')
+      if (!l) throw new Annulla('LOTTO_NON_TROVATO')
+      if (l.stato !== 'APERTO') throw new Annulla('LOTTO_CHIUSO')
+      const vs = await tx.select().from(schema.cralLottiVariazioni)
+        .where(and(eq(schema.cralLottiVariazioni.lottoId, id), eq(schema.cralLottiVariazioni.esito, 'ACCETTATA'))).orderBy(asc(schema.cralLottiVariazioni.ordine))
+      const utenti = new Map((await tx.select({ id: schema.users.id, username: schema.users.username }).from(schema.users)).map(u => [u.username, u.id]))
+      const rie = l.riepilogo as { mappaId?: Record<string, string>; daRimappare?: string[] }
+      const ctx: CtxApplica = {
+        userId, ambiente: l.ambiente, origine: l.origine as 'T6' | 'ARCHIVIO', utenti, oggi: oggi(),
+        idMap: new Map(Object.entries(rie.mappaId ?? {})), vietati: new Set(rie.daRimappare ?? []),
+      }
+      const esito: CralEsitoApplica = { applicate: 0, errori: 0, campiSaltati: 0, chiuso: false }
+      for (const v of vs) {
+        let ok = false, nota = ''
+        try {
+          const r = await tx.transaction(sp => this.applicaVariazione(sp as unknown as TX, v, ctx))
+          ok = r.fatti > 0; esito.campiSaltati += r.saltati.length
+          nota = r.saltati.length ? `Saltati: ${r.saltati.join('; ')}` : ''
+          if (!ok && !nota) nota = 'Niente da applicare'
+        } catch (e) {
+          nota = e instanceof Salta ? e.message : e instanceof Annulla ? e.codice : violazioneUnica(e) ? 'valore già usato (tessera o matricola)' : `errore del database${(e as { code?: string })?.code ? ` (${(e as { code?: string }).code})` : ''}`
+        }
+        await tx.update(schema.cralLottiVariazioni).set({ esito: ok ? 'APPLICATA' : 'ERRORE', nota: nota.slice(0, 300) }).where(eq(schema.cralLottiVariazioni.id, v.id))
+        if (ok) esito.applicate++; else esito.errori++
+      }
+      if (ctx.idMap.size) {
+        await tx.update(schema.cralLotti).set({ riepilogo: sql`${schema.cralLotti.riepilogo} || ${JSON.stringify({ mappaId: Object.fromEntries(ctx.idMap) })}::jsonb` }).where(eq(schema.cralLotti.id, id))
+      }
+      // i prossimi EXT-/FAM- non devono ripetere un ID arrivato dall'archivio
+      await tx.execute(sql`
+        UPDATE cral_parametri SET
+          ext_prossimo = GREATEST(ext_prossimo, COALESCE((SELECT max(substring(id FROM 5)::int) FROM cral_soci WHERE id LIKE 'EXT-%'), 0) + 1),
+          fam_prossimo = GREATEST(fam_prossimo, COALESCE((SELECT max(substring(id FROM 5)::int) FROM cral_soci WHERE id LIKE 'FAM-%'), 0) + 1)
+        WHERE id = 1`)
+      const [resto] = await tx.select({ n: sql<number>`count(*)::int` }).from(schema.cralLottiVariazioni)
+        // le bloccate non si possono accettare: non tengono aperto il lotto
+        .where(and(eq(schema.cralLottiVariazioni.lottoId, id), sql`(${schema.cralLottiVariazioni.esito} IN ('ACCETTATA', 'ERRORE') OR (${schema.cralLottiVariazioni.esito} = 'ATTESA' AND NOT (${schema.cralLottiVariazioni.dati} ? 'bloccata')))`))
+      if (!resto?.n) { await this.chiudiLotto(tx, id, 'CHIUSO', userId); esito.chiuso = true }
+      return esito
+    })
+  }
+
+  private async applicaVariazione(tx: TX, v: typeof schema.cralLottiVariazioni.$inferSelect, c: CtxApplica): Promise<{ fatti: number; saltati: string[] }> {
+    const d = v.dati as { campi: CampoVar[]; record: unknown }
+    const campi = v.tipo === 'MODIFICA' ? d.campi.filter(x => v.accettati.includes(x.campo) && !x.blocco) : []
+    switch (v.entita) {
+      case 'sede': return this.applicaSede(tx, v.tipo, d.record as SedeArch, campi)
+      case 'tipo': case 'tipologia': return this.applicaTabella(tx, v.entita, v.tipo, d.record as TipoArch | TipologiaArch, campi)
+      case 'tessera': return this.applicaTessera(tx, d.record as CralTesseraParam, campi)
+      case 'quotaAnno': return this.applicaQuotaAnno(tx, v.tipo, d.record as { anno: number; importo: number }, campi, c)
+      case 'persona': return v.tipo === 'MODIFICA' ? this.applicaModificaPersona(tx, v.chiave, d.record as PersonaArch, campi, c)
+        : this.applicaNuovaPersona(tx, v.tipo === 'CONFLITTO', d.record as PersonaArch, d.campi, c)
+      case 'quota': return this.applicaQuota(tx, v.tipo, d.record as QuotaArch, campi, c)
+      case 'evento': return this.applicaEvento(tx, v.tipo, d.record as EventoArch, campi, c)
+      default: throw new Salta('tipo di record sconosciuto')
+    }
+  }
+
+  private async applicaSede(tx: TX, tipo: string, s: SedeArch, campi: CampoVar[]) {
+    const [cur] = await tx.select().from(schema.cralSedi).where(eq(schema.cralSedi.id, s.id))
+    if (tipo !== 'MODIFICA') {
+      if (cur) throw new Salta('la sede c\'è già')
+      await tx.insert(schema.cralSedi).values({ id: s.id, nome: s.nome, attiva: s.attiva, ordine: s.ordine })
+      return { fatti: 1, saltati: [] }
+    }
+    if (!cur) throw new Salta('la sede non c\'è più')
+    return this.aggiornaCampi(campi, toSede(cur) as unknown as Record<string, unknown>, set => tx.update(schema.cralSedi).set({ ...set, updatedAt: new Date() }).where(eq(schema.cralSedi.id, s.id)))
+  }
+
+  private async applicaTabella(tx: TX, entita: 'tipo' | 'tipologia', tipo: string, t: TipoArch | TipologiaArch, campi: CampoVar[]) {
+    if (entita === 'tipo') {
+      const x = t as TipoArch
+      const [cur] = await tx.select().from(schema.cralTipi).where(eq(schema.cralTipi.id, x.id))
+      if (tipo !== 'MODIFICA') {
+        if (cur) throw new Salta('il tipo c\'è già')
+        await tx.insert(schema.cralTipi).values({ id: x.id, nome: x.nome, colore: x.colore, aPagamento: x.pagamento, modo: x.modo, attivo: x.attivo, ordine: x.ordine })
+        return { fatti: 1, saltati: [] }
+      }
+      if (!cur) throw new Salta('il tipo non c\'è più')
+      return this.aggiornaCampi(campi, toTipo(cur) as unknown as Record<string, unknown>,
+        set => tx.update(schema.cralTipi).set(Object.fromEntries(Object.entries(set).map(([k, v]) => [k === 'pagamento' ? 'aPagamento' : k, v]))).where(eq(schema.cralTipi.id, x.id)))
+    }
+    const [cur] = await tx.select().from(schema.cralTipologieProdotto).where(eq(schema.cralTipologieProdotto.id, t.id))
+    if (tipo !== 'MODIFICA') {
+      if (cur) throw new Salta('la tipologia c\'è già')
+      const x = t as TipologiaArch
+      await tx.insert(schema.cralTipologieProdotto).values({ id: x.id, nome: x.nome, attiva: x.attiva, ordine: x.ordine })
+      return { fatti: 1, saltati: [] }
+    }
+    if (!cur) throw new Salta('la tipologia non c\'è più')
+    return this.aggiornaCampi(campi, toTipologia(cur) as unknown as Record<string, unknown>, set => tx.update(schema.cralTipologieProdotto).set(set).where(eq(schema.cralTipologieProdotto.id, t.id)))
+  }
+
+  private async applicaTessera(tx: TX, t: CralTesseraParam, campi: CampoVar[]) {
+    const cur = (await this.parametri(tx)).tessera
+    const col: Record<string, string> = { formato: 'tesseraFormato', prefisso: 'tesseraPrefisso', cifre: 'tesseraCifre', riammissione: 'riammissione', sepSuffisso: 'suffissoSep', cifreSuffisso: 'suffissoCifre' }
+    const r = await this.aggiornaCampi(campi, cur as unknown as Record<string, unknown>,
+      set => tx.update(schema.cralParametri).set(Object.fromEntries(Object.entries(set).map(([k, v]) => [col[k] ?? k, v]))).where(eq(schema.cralParametri.id, 1)))
+    // il prossimo numero non torna mai indietro
+    await tx.update(schema.cralParametri).set({ tesseraProssimo: sql`GREATEST(tessera_prossimo, ${t.prossimo})` }).where(eq(schema.cralParametri.id, 1))
+    return r
+  }
+
+  private async applicaQuotaAnno(tx: TX, tipo: string, a: { anno: number; importo: number }, campi: CampoVar[], c: CtxApplica) {
+    const [cur] = await tx.select().from(schema.cralQuoteAnno).where(eq(schema.cralQuoteAnno.anno, a.anno))
+    if (tipo !== 'MODIFICA') {
+      if (cur) throw new Salta('l\'anno c\'è già')
+      await tx.insert(schema.cralQuoteAnno).values({ anno: a.anno, importoCent: a.importo, updatedBy: c.userId })
+      return { fatti: 1, saltati: [] }
+    }
+    if (!cur) throw new Salta('l\'anno non c\'è più')
+    return this.aggiornaCampi(campi, { importo: cur.importoCent }, set => tx.update(schema.cralQuoteAnno).set({ importoCent: set['importo'] as number, updatedBy: c.userId, updatedAt: new Date() }).where(eq(schema.cralQuoteAnno.anno, a.anno)))
+  }
+
+  /** Per ogni campo accettato: si scrive solo se qui vale ancora quel che si e' visto nel lotto. */
+  private async aggiornaCampi(campi: CampoVar[], attuale: Record<string, unknown>, scrivi: (set: Record<string, unknown>) => Promise<unknown>) {
+    const set: Record<string, unknown> = {}, saltati: string[] = []
+    for (const x of campi) {
+      if (!uguale(attuale[x.campo], x.prima)) { saltati.push(`${x.etichetta} cambiato nel frattempo`); continue }
+      set[x.campo] = x.dopo
+    }
+    if (Object.keys(set).length) await scrivi(set)
+    return { fatti: Object.keys(set).length, saltati }
+  }
+
+  /** L'ID di qui di una persona citata dall'archivio; null = non c'e' (o e' di un'altra persona). */
+  private mappa(c: CtxApplica, id: string): string | null {
+    return c.idMap.get(id) ?? (c.vietati.has(id) ? null : id)
+  }
+
+  private async esiste(tx: TX, id: string): Promise<boolean> {
+    const [x] = await tx.select({ id: schema.cralSoci.id }).from(schema.cralSoci).where(eq(schema.cralSoci.id, id))
+    return !!x
+  }
+  private async sedeEsiste(tx: TX, id: string | null): Promise<boolean> {
+    if (!id) return true
+    const [x] = await tx.select({ id: schema.cralSedi.id }).from(schema.cralSedi).where(eq(schema.cralSedi.id, id))
+    return !!x
+  }
+  private async tesseraLibera(tx: TX, tessera: string, di: string | null): Promise<boolean> {
+    const [x] = await tx.select({ id: schema.cralSoci.id }).from(schema.cralSoci).where(sql`lower(${schema.cralSoci.tessera}) = lower(${tessera})`)
+    return !x || x.id === di
+  }
+
+  private async applicaNuovaPersona(tx: TX, conNuovoId: boolean, p: PersonaArch, campi: CampoVar[], c: CtxApplica) {
+    const saltati: string[] = []
+    const bloccato = (campo: string) => campi.some(x => x.campo === campo && x.blocco)
+    let id = p.id
+    if (conNuovoId) {
+      if (p.matricola) throw new Salta('una matricola non cambia ID')
+      const par = await this.parametri(tx)
+      id = await this.prossimoId(tx, p.tipo === 'FAM' ? 'FAM' : 'EXT', p.tipo === 'FAM' ? par.famProssimo : par.extProssimo)
+    } else if (await this.esiste(tx, id)) throw new Salta('c\'è già: reimporta l\'archivio per vedere le differenze')
+    if (p.matricola || p.exMatricola) {
+      const m = [p.matricola, p.exMatricola].filter((x): x is string => !!x)
+      const [gia] = await tx.select({ id: schema.cralSoci.id }).from(schema.cralSoci)
+        .where(sql`${schema.cralSoci.matricola} IN ${m} OR ${schema.cralSoci.exMatricola} IN ${m}`)
+      if (gia) throw new Salta(`matricola già nel CRAL (${gia.id})`)
+    }
+    let sede = bloccato('sede') ? null : p.sede
+    if (sede && !(await this.sedeEsiste(tx, sede))) { saltati.push(`sede ${sede} non presente`); sede = null }
+    let tessera = (p.tipo === 'SD' || p.tipo === 'SE') && !bloccato('tessera') ? p.tessera : ''
+    if (tessera && !(await this.tesseraLibera(tx, tessera, null))) { saltati.push(`tessera ${tessera} già usata`); tessera = '' }
+    const legami: Array<{ socio: string; relazione: 'CONIUGE' | 'FIGLIO' }> = []
+    for (const l of p.legami) { const s = this.mappa(c, l.socio); if (s && (await this.esiste(tx, s))) legami.push({ socio: s, relazione: l.relazione }) }
+    if (p.tipo === 'FAM' && !legami.length) throw new Salta('nessuno dei suoi soci è presente')
+    if (p.tipo === 'FAM' && legami.length < p.legami.length) saltati.push(`${p.legami.length - legami.length} soci collegati non presenti`)
+    const { u, ignoti } = this.mappaUtenti(c, [p.creatoDa, p.validatoDa, p.eliminatoDa])
+    // da dove viene (e chi l'ha creato o validato, se qui quell'utente non c'e'): nella provenienza, non nelle note
+    const provenienza = [p.provenienza ?? '', `archivio ${c.ambiente || ''}`.trim(), conNuovoId ? `era ${p.id}` : '', ignoti.length ? `utenti ${ignoti.join(', ')}` : '']
+      .filter(Boolean).join(' · ').slice(0, 200)
+    await tx.insert(schema.cralSoci).values({
+      id, tipo: p.tipo, matricola: p.matricola, exMatricola: p.exMatricola, cognome: p.cognome, nome: p.nome, nascita: p.nascita,
+      email: p.email || null, sedeId: sede, tessera: tessera || null, riammissioni: p.riammissioni, stato: p.stato,
+      iscrittoIl: p.iscrittoIl, cessatoIl: p.cessatoIl, eliminatoIl: p.eliminatoIl, eliminatoDa: u(p.eliminatoDa), statoPrima: p.statoPrima,
+      anniEsenti: p.anniEsenti, provenienza, atipico: p.atipico, note: p.note,
+      creatoDa: u(p.creatoDa), creatoIl: p.creatoIl ? new Date(p.creatoIl) : new Date(), validatoDa: u(p.validatoDa),
+      validatoIl: p.validatoIl ? new Date(p.validatoIl) : null, modificatoDa: c.userId, modificatoIl: new Date(),
+    })
+    c.idMap.set(p.id, id)
+    if (legami.length) await tx.insert(schema.cralFamiliariLegami).values(legami.map(l => ({ familiareId: id, socioId: l.socio, relazione: l.relazione })))
+    if (p.storicoTessere.length) await tx.insert(schema.cralSociTessere).values(p.storicoTessere.map(t => ({ socioId: id, tessera: t.tessera, dal: t.dal, al: t.al })))
+    if (tessera) await this.avanzaTessera(tx, (await this.parametri(tx)).tessera, tessera)
+    return { fatti: 1, saltati }
+  }
+
+  /** Utenti dell'altro ambiente: si ricollegano per username; chi non c'e' resta scritto nelle note. */
+  private mappaUtenti(c: CtxApplica, nomi: Array<string | null>) {
+    const ignoti = [...new Set(nomi.filter((n): n is string => !!n && !c.utenti.has(n)))]
+    return { u: (n: string | null) => (n ? c.utenti.get(n) ?? null : null), ignoti }
+  }
+
+  private async applicaModificaPersona(tx: TX, id: string, p: PersonaArch | { id: string }, campi: CampoVar[], c: CtxApplica) {
+    const riga = await this.socio(id, tx)
+    if (!riga) throw new Salta('la persona non c\'è più')
+    const cur = personaDaRiga(riga)
+    const set: Partial<typeof schema.cralSoci.$inferInsert> = {}
+    const saltati: string[] = []
+    let fatti = 0
+    const legamiNuovi: Array<{ socio: string; relazione: 'CONIUGE' | 'FIGLIO' }> = []
+    const storicoNuovo: PersonaArch['storicoTessere'] = []
+    for (const x of campi) {
+      if (!uguale(valorePersona(cur, x.campo), x.prima)) { saltati.push(`${x.etichetta} cambiato nel frattempo`); continue }
+      const dopo = x.dopo as never
+      switch (x.campo) {
+        case 'tipo': set.tipo = dopo; if (dopo === 'EST') set.tessera = null; break
+        case 'cognome': case 'nome': case 'note': set[x.campo] = (dopo ?? '') as string; break
+        case 'nascita': set.nascita = dopo; break
+        case 'email': set.email = (dopo || null) as string | null; break
+        case 'atipico': set.atipico = dopo; break
+        case 'iscrittoIl': set.iscrittoIl = dopo; break
+        case 'exMatricola': set.exMatricola = dopo; break
+        case 'anniEsenti': set.anniEsenti = dopo; break
+        case 'sede':
+          if (!(await this.sedeEsiste(tx, dopo))) { saltati.push(`sede ${String(dopo)} non presente`); continue }
+          set.sedeId = dopo; break
+        case 'tessera':
+          if (dopo && !(await this.tesseraLibera(tx, dopo, id))) { saltati.push(`tessera ${String(dopo)} già usata`); continue }
+          set.tessera = (dopo || null) as string | null; break
+        case 'legami':
+          for (const l of dopo as Array<{ socio: string; relazione: 'CONIUGE' | 'FIGLIO' }>) {
+            const s = this.mappa(c, l.socio)
+            if (s && !cur.legami.some(y => y.socio === s) && (await this.esiste(tx, s))) legamiNuovi.push({ socio: s, relazione: l.relazione })
+          }
+          break
+        case 'storicoTessere':
+          for (const t of dopo as PersonaArch['storicoTessere']) if (!cur.storicoTessere.some(y => y.tessera === t.tessera && y.al === t.al)) storicoNuovo.push(t)
+          break
+        case 'stato': { // dall'archivio: lo stato con le sue date, cosi' com'e'
+          const s = dopo as StatoComposto
+          Object.assign(set, { stato: s.stato, cessatoIl: s.cessatoIl, eliminatoIl: s.eliminatoIl, statoPrima: s.statoPrima, riammissioni: s.riammissioni, eliminatoDa: s.stato === 'ELIMINATO' ? c.userId : null })
+          break
+        }
+        case 'azioneStato': { // dal T6: le stesse azioni della scheda
+          const a = dopo as { azione: string; data: string }
+          if (a.azione === 'cessa') Object.assign(set, { stato: 'CESSATO', cessatoIl: a.data })
+          else if (a.azione === 'elimina') Object.assign(set, { stato: 'ELIMINATO', statoPrima: cur.stato, eliminatoIl: a.data, eliminatoDa: c.userId })
+          else if (a.azione === 'ripristina') Object.assign(set, { stato: cur.statoPrima, statoPrima: null, eliminatoIl: null, eliminatoDa: null, anniEsenti: anniEsentiDopoRipristino(cur.anniEsenti, cur.eliminatoIl ?? c.oggi, c.oggi) })
+          else if (a.azione === 'riattiva') Object.assign(set, { stato: 'ATTIVO', cessatoIl: null })
+          else { saltati.push('azione sconosciuta'); continue }
+          break
+        }
+        default: saltati.push(`${x.etichetta}: non si aggiorna`); continue
+      }
+      fatti++
+    }
+    void p
+    if (Object.keys(set).length) {
+      await tx.update(schema.cralSoci).set({ ...set, modificatoDa: c.userId, modificatoIl: new Date() }).where(eq(schema.cralSoci.id, id))
+      if (set.tessera) await this.avanzaTessera(tx, (await this.parametri(tx)).tessera, set.tessera)
+    }
+    if (legamiNuovi.length) await tx.insert(schema.cralFamiliariLegami).values(legamiNuovi.map(l => ({ familiareId: id, socioId: l.socio, relazione: l.relazione })))
+    if (storicoNuovo.length) await tx.insert(schema.cralSociTessere).values(storicoNuovo.map(t => ({ socioId: id, tessera: t.tessera, dal: t.dal, al: t.al })))
+    return { fatti, saltati }
+  }
+
+  private async applicaQuota(tx: TX, tipo: string, q: QuotaArch, campi: CampoVar[], c: CtxApplica) {
+    const socio = this.mappa(c, q.socio)
+    if (!socio) throw new Salta('la persona qui ha l\'ID di un\'altra: accetta prima il suo conflitto (nuovo ID)')
+    const [s] = await tx.select({ matricola: schema.cralSoci.matricola, tipo: schema.cralSoci.tipo }).from(schema.cralSoci).where(eq(schema.cralSoci.id, socio))
+    if (!s) throw new Salta('la persona non c\'è')
+    if (s.tipo !== 'SD' && s.tipo !== 'SE') throw new Salta('non è un socio')
+    const [a] = await tx.select({ anno: schema.cralQuoteAnno.anno }).from(schema.cralQuoteAnno).where(eq(schema.cralQuoteAnno.anno, q.anno))
+    if (!a) throw new Salta(`l'anno ${q.anno} non è impostato`)
+    const [cur] = await tx.select().from(schema.cralQuote).where(and(eq(schema.cralQuote.anno, q.anno), eq(schema.cralQuote.socioId, socio)))
+    const saltati: string[] = []
+    // senza matricola niente trattenuta in busta paga
+    const modo = (m: string) => (m === 'TRATTENUTA' && !s.matricola ? (saltati.push('trattenuta senza matricola: mensile'), 'MENSILE') : m)
+    if (tipo !== 'MODIFICA') {
+      if (cur) throw new Salta('la quota c\'è già: reimporta per vedere le differenze')
+      await tx.insert(schema.cralQuote).values({ anno: q.anno, socioId: socio, modo: modo(q.modo), mesi: q.mesi, pagataIl: q.pagataIl, note: q.note, updatedBy: c.userId })
+      return { fatti: 1, saltati }
+    }
+    if (!cur) throw new Salta('la quota non c\'è più')
+    const r = await this.aggiornaCampi(campi, toQuota(cur) as unknown as Record<string, unknown>, set => {
+      if (set['modo']) set['modo'] = modo(set['modo'] as string)
+      return tx.update(schema.cralQuote).set({ ...set, updatedBy: c.userId, updatedAt: new Date() }).where(and(eq(schema.cralQuote.anno, q.anno), eq(schema.cralQuote.socioId, socio)))
+    })
+    return { fatti: r.fatti, saltati: [...r.saltati, ...saltati] }
+  }
+
+  private async applicaEvento(tx: TX, tipo: string, e: EventoArch, campi: CampoVar[], c: CtxApplica) {
+    const saltati: string[] = []
+    // chi qui ha l'ID di un'altra persona e non e' entrato con un nuovo ID: '' = si salta
+    const mappa = (id: string) => this.mappa(c, id) ?? ''
+    const [cur] = await tx.select().from(schema.cralIniziative).where(eq(schema.cralIniziative.id, e.id))
+    const accetta = new Set(tipo === 'MODIFICA' ? campi.map(x => x.campo) : ['partecipanti', 'scelte', 'carichi', 'richieste'])
+    let scritti = 0
+    if (tipo !== 'MODIFICA') {
+      if (cur) throw new Salta('l\'evento c\'è già')
+      const [t] = await tx.select({ id: schema.cralTipi.id }).from(schema.cralTipi).where(eq(schema.cralTipi.id, e.tipo))
+      if (!t) throw new Salta(`tipo di evento ${e.tipo} non presente`)
+      const { u } = this.mappaUtenti(c, [e.archiviataDa])
+      await tx.insert(schema.cralIniziative).values({
+        id: e.id, tipoId: e.tipo, titolo: e.titolo, anno: e.anno, data: e.data, scadenza: e.scadenza, stato: e.stato, modalita: e.modalita,
+        partecipanti: e.modoPart, gruppi: e.gruppi, sedi: e.sedi, predefinita: e.predefinita, fornitore: e.fornitore, pagamento: e.pagamento,
+        note: e.note, quotaCent: e.quota, config: e.config, archiviata: e.archiviata, archiviataDa: u(e.archiviataDa),
+        archiviataIl: e.archiviataIl ? new Date(e.archiviataIl) : null, createdBy: c.userId, updatedBy: c.userId,
+      })
+    } else {
+      if (!cur) throw new Salta('l\'evento non c\'è più')
+      const attuale: Record<string, unknown> = {
+        titolo: cur.titolo, anno: cur.anno, data: cur.data, scadenza: cur.scadenza, stato: cur.stato, modalita: cur.modalita, modoPart: cur.partecipanti,
+        gruppi: cur.gruppi, sedi: cur.sedi, predefinita: cur.predefinita, fornitore: cur.fornitore, pagamento: cur.pagamento, note: cur.note,
+        quota: cur.quotaCent, archiviata: cur.archiviata,
+      }
+      const col: Record<string, string> = { modoPart: 'partecipanti', quota: 'quotaCent' }
+      const set: Record<string, unknown> = {}
+      for (const x of campi) {
+        if (x.campo in attuale) {
+          if (!uguale(attuale[x.campo], x.prima)) { saltati.push(`${x.etichetta} cambiato nel frattempo`); continue }
+          set[col[x.campo] ?? x.campo] = x.dopo
+        } else if (x.campo === 'config') {
+          const tolto = usiTolti(e.config as ConfigEvento, await this.usiIniziativa(e.id, tx))
+          if (tolto) { saltati.push(`configurazione: ${tolto}`); continue }
+          set['config'] = e.config
+        }
+      }
+      if (Object.keys(set).length) await tx.update(schema.cralIniziative).set({ ...set, updatedBy: c.userId, updatedAt: new Date() }).where(eq(schema.cralIniziative.id, e.id))
+      scritti = Object.keys(set).length
+    }
+    const [fin] = await tx.select({ config: schema.cralIniziative.config }).from(schema.cralIniziative).where(eq(schema.cralIniziative.id, e.id))
+    const config = fin!.config as ConfigEvento
+    const presenti = async (tutti: string[]) => {
+      const ids = tutti.filter(Boolean)
+      if (!ids.length) return new Set<string>()
+      return new Set((await tx.select({ id: schema.cralSoci.id }).from(schema.cralSoci).where(inArray(schema.cralSoci.id, ids))).map(x => x.id))
+    }
+    let n = scritti ? 1 : 0
+    if (accetta.has('partecipanti') && e.partecipanti.length) {
+      const ok = await presenti(e.partecipanti.map(mappa))
+      const ids = e.partecipanti.map(mappa).filter(x => ok.has(x))
+      if (ids.length < e.partecipanti.length) saltati.push(`${e.partecipanti.length - ids.length} partecipanti non presenti`)
+      if (ids.length) await tx.insert(schema.cralIniziativePartecipanti).values(ids.map(socioId => ({ iniziativaId: e.id, socioId }))).onConflictDoNothing()
+      n++
+    }
+    if (accetta.has('scelte') && e.scelte.length) {
+      const ok = await presenti(e.scelte.map(x => mappa(x.socio)))
+      const voci = e.scelte.map(x => ({ ...x, socio: mappa(x.socio), dati: x.dati.rif ? { ...x.dati, rif: mappa(x.dati.rif) || null } : x.dati }))
+        .filter(x => ok.has(x.socio) && !erroreDati(x.dati, config))
+      if (voci.length < e.scelte.length) saltati.push(`${e.scelte.length - voci.length} scelte non applicabili`)
+      if (voci.length) await this.salvaScelte(e.id, voci.map(x => ({ socio: x.socio, dati: x.dati as Record<string, unknown>, fonte: x.fonte })), c.userId, tx)
+      n++
+    }
+    if (accetta.has('carichi') && e.carichi.length) {
+      await tx.insert(schema.cralCarichi).values(e.carichi.map(k => ({ id: k.id, iniziativaId: e.id, articolo: k.art, quantita: k.qta, data: k.data, note: k.note, createdBy: c.userId }))).onConflictDoNothing()
+      n++
+    }
+    if (accetta.has('richieste') && e.richieste.length) {
+      const ok = await presenti(e.richieste.map(r => mappa(r.persona)))
+      const rr = e.richieste.map(r => ({ ...r, persona: mappa(r.persona) })).filter(r => ok.has(r.persona))
+      if (rr.length < e.richieste.length) saltati.push(`${e.richieste.length - rr.length} richieste di persone non presenti`)
+      for (const r of rr) {
+        const val = { socioId: r.persona, articolo: r.art, quantita: r.qta, dataRichiesta: r.dataRich, stato: r.stato, dataConsegna: r.dataCons, modo: r.modo, pagato: r.pagato, sconto: r.sconto, note: r.note, updatedBy: c.userId, updatedAt: new Date() }
+        await tx.insert(schema.cralRichieste).values({ id: r.id, iniziativaId: e.id, ...val, createdBy: c.userId })
+          .onConflictDoUpdate({ target: schema.cralRichieste.id, set: val, where: sql`${schema.cralRichieste.iniziativaId} = ${e.id}` })
+      }
+      n++
+    }
+    return { fatti: tipo === 'MODIFICA' ? n : 1, saltati }
+  }
+
+  private async utenti(conn: Conn): Promise<Map<string, string>> {
+    return new Map((await conn.select({ id: schema.users.id, username: schema.users.username }).from(schema.users)).map(u => [u.id, u.username]))
+  }
+
   // ── Transazioni con errori applicativi ─────────────────────
   private async inTransazione<T>(fn: (tx: TX) => Promise<T>): Promise<T | CralErrore> {
     try { return await this.db.transaction(fn) }
@@ -646,8 +1212,26 @@ function toSocio(
     provenienza: s.provenienza, atipico: s.atipico, note: s.note,
     creatoDa: u(s.creatoDa), creatoIl: s.creatoIl.toISOString(), validatoDa: u(s.validatoDa), validatoIl: iso(s.validatoIl),
     modificatoDa: u(s.modificatoDa), modificatoIl: iso(s.modificatoIl),
+    eliminatoIl: s.eliminatoIl, eliminatoDa: u(s.eliminatoDa), statoPrima: (s.statoPrima ?? null) as CralSocioRow['statoPrima'],
+    anniEsenti: s.anniEsenti ?? [], exMatricola: s.exMatricola,
     legami: legami.map(l => ({ socio: l.socioId, relazione: l.relazione as 'CONIUGE' | 'FIGLIO' })),
     storicoTessere: storico.map(t => ({ tessera: t.tessera, dal: t.dal, al: t.al })),
+  }
+}
+function toLotto(l: typeof schema.cralLotti.$inferSelect, utenti: Map<string, string>): CralLottoRow {
+  return {
+    id: l.id, origine: l.origine as CralLottoRow['origine'], file: l.file, ambiente: l.ambiente, esportato: iso(l.esportato), sezioni: l.sezioni,
+    stato: l.stato as CralLottoRow['stato'], riepilogo: l.riepilogo as Record<string, unknown>,
+    creatoDa: l.creatoDa ? utenti.get(l.creatoDa) ?? null : null, creatoIl: l.creatoIl.toISOString(),
+    chiusoDa: l.chiusoDa ? utenti.get(l.chiusoDa) ?? null : null, chiusoIl: iso(l.chiusoIl),
+  }
+}
+function toVariazione(v: typeof schema.cralLottiVariazioni.$inferSelect): CralVariazioneRow {
+  const d = v.dati as { etichetta?: string; campi?: CralVariazioneRow['campi']; avviso?: string; bloccata?: string }
+  return {
+    id: v.id, sezione: v.sezione, entita: v.entita, chiave: v.chiave, tipo: v.tipo as CralVariazioneRow['tipo'], delicata: v.delicata,
+    bloccata: d.bloccata ?? null, esito: v.esito as CralVariazioneRow['esito'], accettati: v.accettati, etichetta: d.etichetta ?? v.chiave,
+    campi: d.campi ?? [], avviso: d.avviso ?? null, nota: v.nota,
   }
 }
 function toCarico(r: typeof schema.cralCarichi.$inferSelect): CralCaricoRow {
