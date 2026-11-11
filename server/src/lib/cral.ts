@@ -12,6 +12,14 @@ import { grafie, normalizza, risolviNominativo, type AnagraficaPerRicerca } from
 
 // ── Valori ammessi ───────────────────────────────────────────
 export const TIPI_PERSONA   = ['SD', 'SE', 'EST', 'FAM'] as const
+/**
+ * Gruppi di partecipanti di un evento: le tipologie, con i familiari divisi
+ * in due (26.11.11.3): FAM = familiari dei soci, FEX = familiari di esterni.
+ * FEX non e' una tipologia di persona: e' un familiare i cui riferimenti
+ * attivi sono solo esterni.
+ */
+export const GRUPPI_EVENTO  = [...TIPI_PERSONA, 'FEX'] as const
+export type GruppoEvento = typeof GRUPPI_EVENTO[number]
 export const STATI_PERSONA  = ['ATTIVO', 'DA_VALIDARE', 'RIFIUTATO', 'CESSATO'] as const
 export const MODALITA       = ['SCELTA', 'NESSUNA', 'ORDINE', 'TURNI', 'MAGAZZINO'] as const
 export const CAT_SCONTO     = ['SD', 'SE', 'DIP', 'EST', 'FAM'] as const
@@ -84,7 +92,7 @@ export const iniziativaSchema = z.object({
   stato:       z.enum(['BOZZA', 'APERTA', 'CHIUSA']),
   modalita:    z.enum(MODALITA),
   modoPart:    z.enum(['GRUPPI', 'SINGOLI']),
-  gruppi:      z.array(z.enum(TIPI_PERSONA)).max(4),
+  gruppi:      z.array(z.enum(GRUPPI_EVENTO)).max(5),
   sedi:        z.array(z.string().regex(/^[A-Z0-9]{1,12}$/)).max(50),
   predefinita: ID_LOC.nullable(),
   fornitore:   riga(160),

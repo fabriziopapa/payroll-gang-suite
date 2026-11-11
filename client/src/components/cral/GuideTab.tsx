@@ -115,7 +115,7 @@ const TRACCIATI: Tracciato[] = [
       ['Data di nascita', 'No', 'gg/mm/aaaa, aaaammgg', '07/03/1958', 'Per chi ha la matricola si scrive solo se in PGS manca; se c\'è ed è diversa si segnala e non si sovrascrive.'],
       ['Sede', 'No', 'Codice (CD) o nome della sede', 'ACT', 'Deve esistere. È la colonna «Sede» dell\'export; «Sede (nome)» si ignora.'],
       ['Email · Note', 'No', 'Testo', 'maria.rossi@…', 'Email controllata nel formato.'],
-      ['Tipologia', 'No', 'Socio dipendente · Socio esterno · Esterno', 'Esterno', 'Con la matricola: socio dipendente o esterno; senza: socio esterno o esterno. Un socio con familiari non diventa esterno. Il passaggio a socio esterno di un dipendente si fa dalla scheda (nuovo ID).'],
+      ['Tipologia', 'No', 'Socio dipendente · Socio esterno · Esterno', 'Esterno', 'Con la matricola: socio dipendente o esterno; senza: socio esterno o esterno. Un socio con familiari può diventare esterno: i familiari restano e diventano «familiari di esterno» (lo dice il lotto). Il passaggio a socio esterno di un dipendente si fa dalla scheda (nuovo ID).'],
       ['Telefono', 'No', 'Numero scritto come si vuole', '333 123 4567', 'Si salva nel formato delle API di WhatsApp: +393331234567 (wa_id 393331234567). Senza prefisso prende +39; i fissi tengono lo 0. Un numero nuovo fa ripartire consenso e WhatsApp. Lo stesso numero può stare su più persone: viene segnalato. Riga senza ID né nome: il telefono (o l\'email) fa da chiave.'],
       ['Consenso telefono · Data consenso · Origine consenso', 'No', 'Sì · No · Revocato · gg/mm/aaaa · cartaceo, online, email, a voce', 'Sì · 03/11/2026 · modulo cartaceo', 'Consenso (GDPR) all\'uso del numero. Senza data vale oggi. «No» su un consenso dato = revoca. Dopo una revoca il «Sì» entra solo con una nuova Data consenso, successiva alla revoca.'],
       ['Data revoca', 'No', 'gg/mm/aaaa', '10/11/2026', 'Con «Revocato»; senza data vale oggi.'],
@@ -165,7 +165,7 @@ export function GuideTab() {
   const { vaiA } = useCral()
   const copia = (testo: string) => { navigator.clipboard?.writeText(testo).then(() => avviso('Esempio copiato')).catch(() => avviso('Copia non consentita: seleziona il testo a mano.', 'warning')) }
   return (
-    <div className="flex flex-col gap-4">
+    <div className="pgs-guida flex flex-col gap-4">
       <div className={`${cardCls} p-5 text-sm text-slate-300 flex flex-col gap-2`}>
         <p className="text-white font-medium">Un modello per ogni tracciato</p>
         <p className="text-slate-400 max-w-[80ch]">Ogni importazione ha il suo <b className="text-slate-200">modello Excel</b>, accanto al punto in cui si sceglie il file: in Importazione per libro soci (T1), aggiornamento dati (T6) e quote versate (T7); dentro l'evento per risposte (T2), ordini (T3), partecipanti (T4) e iscrizioni (T5). Il primo foglio è da compilare, con le intestazioni che l'importazione riconosce e le celle in formato testo (numeri di telefono, tessere e date restano come li scrivi); il foglio «Esempio» mostra righe di fantasia. I modelli degli eventi hanno le colonne di quell'evento e possono arrivare già con una riga per partecipante (ID e nominativo).</p>
@@ -224,6 +224,8 @@ export function GuideTab() {
           <li><b className="text-slate-200">Esporta Excel</b> (Soci): tutte le colonne del T6, comprese quelle di contatto, per correggere e ricaricare.</li>
           <li><b className="text-slate-200">Esporta elenco…</b> (Soci, sull'elenco filtrato o sui selezionati; Eventi, sui partecipanti): scegli colonne e ordine, chi entra, Excel o CSV. Modelli pronti: <i>Lista WhatsApp</i> (wa_id, telefono, nome, cognome, sede; solo consenso valido e WhatsApp non escluso), <i>Rubrica telefonica</i>, <i>Esigenze alimentari</i>, <i>Elenco con email</i>. Le tue scelte si salvano come modello, condiviso fra gli amministratori.</li>
           <li><b className="text-slate-200">Eventi</b>: in testa all'evento il conteggio delle esigenze dei partecipanti; in Report › «Esigenze alimentari» l'elenco per chi prepara.</li>
+          <li><b className="text-slate-200">Familiari di esterni</b> (26.11.11.3): un familiare si lega anche a un esterno (campi estivi e non solo) ed è segnato «Familiare di esterno», azzurro tratteggiato. Negli eventi per gruppi è un gruppo a sé, «Familiari di esterni», da spuntare quando serve: «Familiari dei soci» resta quello di prima. Per gli sconti ha la categoria del suo esterno (Esterno, o Dipendente non socio se ha la matricola), mai lo sconto «Familiari».</li>
+          <li><b className="text-slate-200">Rubrica d'Ateneo</b> (26.11.11.3): nella scheda e in Nuova persona, se l'email manca, «Cerca nella rubrica d'Ateneo» la propone dal portale (per matricola, poi per cognome e nome; con omonimi si sceglie). Riempie il campo, non salva. In Parametri lo stato della connessione e la scadenza dei certificati.</li>
         </ul>
         <div className="flex flex-wrap gap-2 pt-1">{([['Soci', 'soci'], ['Prefisso dei numeri', 'parametri'], ['Report', 'report']] as Array<[string, Scheda]>).map(([l, k]) => <button key={l} className={btnPiccoloSec} onClick={() => vaiA(k)}>{l}</button>)}</div>
       </section>

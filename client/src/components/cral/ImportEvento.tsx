@@ -9,7 +9,7 @@ import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { cralApi } from '../../api/endpoints'
 import type { Db, Iniziativa, PatchScelta, Persona } from './tipi'
 import {
-  TIPOLOGIE, destinatari, fmtEuro, fmtQ, nominativo, norm, normNome, parseEuro, prodLabel, spezzaNominativo, tipNome,
+  destinatari, nomeTipologia, fmtEuro, fmtQ, nominativo, norm, normNome, parseEuro, prodLabel, spezzaNominativo, tipNome,
 } from './logica'
 import { agganciaRiga } from './aggancio'
 import { Modelli, type VoceModello } from './ImportDati'
@@ -288,7 +288,7 @@ export function PartecipantiImportModal({ ini, onClose }: { ini: Iniziativa; onC
                 {e.p && <option value={gia.has(e.p.id) ? 'gia' : 'aggiungi'}>{gia.has(e.p.id) ? 'Già partecipante' : 'Aggiungi'}</option>}
                 {!e.p && e.nom && <option value="esterno">Crea nuovo esterno (da validare)</option>}
                 {!e.p && e.a.candidati.length > 0 && <optgroup label="Possibili">{e.a.candidati.map(s => <option key={s.id} value={`id:${s.id}`}>Assegna a {nominativo(s)} ({s.id})</option>)}</optgroup>}
-                {!e.p && ordinaNomi(pool.filter(s => !e.a.candidati.some(c => c.id === s.id))).map(s => <option key={s.id} value={`id:${s.id}`}>Assegna a {nominativo(s)} ({TIPOLOGIE[s.tipo][0]})</option>)}
+                {!e.p && ordinaNomi(pool.filter(s => !e.a.candidati.some(c => c.id === s.id))).map(s => <option key={s.id} value={`id:${s.id}`}>Assegna a {nominativo(s)} ({nomeTipologia(db, s)})</option>)}
                 <option value="ignora">Ignora</option></select></td>
             </tr>))}</tbody>
         </table></Scorrevole></div>}

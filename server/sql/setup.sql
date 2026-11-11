@@ -426,7 +426,7 @@ CREATE TABLE IF NOT EXISTS cral_iniziative (
   stato          VARCHAR(8)    NOT NULL DEFAULT 'BOZZA' CHECK (stato IN ('BOZZA', 'APERTA', 'CHIUSA')),
   modalita       VARCHAR(10)   NOT NULL CHECK (modalita IN ('SCELTA', 'NESSUNA', 'ORDINE', 'TURNI', 'MAGAZZINO')),
   partecipanti   VARCHAR(7)    NOT NULL DEFAULT 'GRUPPI' CHECK (partecipanti IN ('GRUPPI', 'SINGOLI')),
-  gruppi         TEXT[]        NOT NULL DEFAULT '{}' CHECK (gruppi <@ ARRAY['SD', 'SE', 'EST', 'FAM']::text[]),
+  gruppi         TEXT[]        NOT NULL DEFAULT '{}' CHECK (gruppi <@ ARRAY['SD', 'SE', 'EST', 'FAM', 'FEX']::text[]),  -- 0027: FEX = familiari di esterni
   sedi           TEXT[]        NOT NULL DEFAULT '{}',
   predefinita    VARCHAR(20),
   fornitore      VARCHAR(160)  NOT NULL DEFAULT '',

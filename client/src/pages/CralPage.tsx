@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { cralApi } from '../api/endpoints'
 import { useStore } from '../store/useStore'
+import { VistaFluida } from '../components/VistaFluida'
 import { ricordaValore, valoreRicordato } from '../store/paginaRicordata'
 import { showToast } from '../components/ToastManager'
 import { daStato, type Db, type Lotto, type PatchScelta, type QuotaSocio, type Richiesta, type Scelta } from '../components/cral/tipi'
@@ -102,12 +103,12 @@ export function CralPage() {
   const attivi = ctx.db.soci.filter(s => s.stato === 'ATTIVO' && eSocio(s)).length
   return (
     <Ctx.Provider value={ctx}>
-      <div className="p-4 sm:p-6 max-w-6xl mx-auto flex flex-col gap-6">
+      <VistaFluida className="flex flex-col gap-6">
         <div>
           <h2 className="text-xl font-semibold text-white">CRAL · Soci e iniziative</h2>
-          <p className="text-sm text-slate-400 mt-1 max-w-3xl">Soci dipendenti, soci esterni, esterni e familiari dei soci. Per ogni evento (strenne, panettoni, colombe, vendite, gite, campi estivi, cinema) si raccolgono scelte, ordini, iscrizioni o richieste e si stampano le liste.</p>
+          <p className="text-sm text-slate-400 mt-1 pgs-lettura">Soci dipendenti, soci esterni, esterni e familiari (di soci o di esterni). Per ogni evento (strenne, panettoni, colombe, vendite, gite, campi estivi, cinema) si raccolgono scelte, ordini, iscrizioni o richieste e si stampano le liste.</p>
         </div>
-        <div className="flex flex-wrap gap-1 border-b border-slate-800" role="tablist">
+        <div className="pgs-schede flex flex-wrap gap-1 border-b border-slate-800" role="tablist">
           {SCHEDE.map(([k, l]) => (
             <button key={k} role="tab" aria-selected={scheda === k} className={tabCls(scheda === k)} onClick={() => ctx.vaiA(k)}>
               {l}
@@ -125,7 +126,7 @@ export function CralPage() {
         {scheda === 'report' && <ReportTab />}
         {scheda === 'guide' && <GuideTab />}
         {scheda === 'parametri' && <ParametriTab />}
-      </div>
+      </VistaFluida>
     </Ctx.Provider>
   )
 }

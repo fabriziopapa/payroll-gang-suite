@@ -1294,9 +1294,25 @@ export type CralIniziativaBody = Pick<Iniziativa, 'tipo' | 'titolo' | 'anno' | '
 const corpo = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) })
 const enc = encodeURIComponent
 
+/** Rubrica d'Ateneo (26.11.11.3): mai il codice fiscale, solo dati pubblicati. */
+export interface PersonaRubricaApi { idAb: number; cognome: string; nome: string; ruolo: string; afferenza: string; email: string }
+export type EsitoRubricaApi =
+  | { esito: 'TROVATA'; persona: PersonaRubricaApi; come: 'idAb' | 'codice fiscale' | 'nome' }
+  | { esito: 'CANDIDATI'; candidati: PersonaRubricaApi[] }
+  | { esito: 'NON_TROVATA' }
+export interface InfoCertificatoApi { soggetto: string; emittente: string; dal: string; scade: string; giorni: number; impronta: string }
+export interface StatoRubricaApi {
+  intermedio: { ok: boolean; motivo?: string; info?: InfoCertificatoApi; inScadenza: boolean }
+  ultimo: { il: string; esito: 'OK' | 'ERRORE'; errore?: string; server?: InfoCertificatoApi } | null
+  avvisi: string[]
+}
+
 export const cralApi = {
   stato: () => apiFetch<StatoApi>('/cral/stato'),
   anagrafica: (q: string) => apiFetch<{ risultati: AnagraficaPgs[] }>(`/cral/anagrafica?q=${enc(q)}`),
+  rubrica: (q: { socio?: string; matricola?: string; cognome?: string; nome?: string }) =>
+    apiFetch<EsitoRubricaApi>(`/cral/rubrica/cerca?${new URLSearchParams(Object.entries(q).filter(([, v]) => !!v) as Array<[string, string]>).toString()}`, {}, 60_000),
+  rubricaStato: (prova = false) => apiFetch<StatoRubricaApi>(`/cral/rubrica/stato${prova ? '?prova=1' : ''}`, {}, 60_000),
   leggiFile: (nome: string, base64: string) =>
     apiFetch<{ fogli: Record<string, string[][]> }>('/cral/file/leggi', corpo('POST', { nome, base64 }), 60_000),
   abbina: (righe: Array<{ i: number; nominativo: string; matricola?: string; nascita?: string }>) =>

@@ -382,7 +382,7 @@ function confrontaPersona(s: PersonaArch, d: PersonaArch, c: CtxPersona & { conF
   }
   if (s.tipo !== d.tipo) {
     const blocco = !tipiAmmessi(d).includes(s.tipo) ? 'tipologia non compatibile con la matricola'
-      : s.tipo === 'EST' && c.conFamiliari.has(d.id) ? 'ha familiari collegati: un esterno non può averne' : undefined
+      : undefined  // 26.11.11.3: un esterno puo' avere familiari («familiari di esterno»)
     add('tipo', d.tipo, s.tipo, blocco)
   }
   // un valore vuoto nell'archivio non svuota quello di qui
@@ -596,9 +596,10 @@ export function confrontaT6(righe: RigaT6[], soci: PersonaArch[], sedi: Set<stri
     }
     const tipo = v.tipo ?? d.tipo
     if (v.tipo && v.tipo !== d.tipo) {
-      add('tipo', d.tipo, v.tipo, !tipiAmmessi(d).includes(v.tipo) ? (d.matricola ? 'con la matricola: socio dipendente o esterno' : 'senza matricola: socio esterno o esterno')
-        : v.tipo === 'EST' && conFamiliari.has(d.id) ? 'ha familiari collegati: un esterno non può averne' : undefined)
+      add('tipo', d.tipo, v.tipo, !tipiAmmessi(d).includes(v.tipo) ? (d.matricola ? 'con la matricola: socio dipendente o esterno' : 'senza matricola: socio esterno o esterno') : undefined)
     }
+    // 26.11.11.3: un socio con familiari puo' diventare esterno; i familiari diventano «familiari di esterno»
+    const famDiventano = !!v.tipo && v.tipo === 'EST' && (d.tipo === 'SD' || d.tipo === 'SE') && conFamiliari.has(d.id)
     if (v.sede !== undefined) add('sede', d.sede, v.sede, v.sede && !sedi.has(v.sede) ? `sede ${v.sede} sconosciuta` : undefined)
     if (v.nascita !== undefined) {
       const pgs = d.matricola ? nascitaPgs.get(d.matricola) ?? null : null
@@ -617,6 +618,7 @@ export function confrontaT6(righe: RigaT6[], soci: PersonaArch[], sedi: Set<stri
     }
     if (v.note !== undefined) add('note', d.note || null, v.note)
     const avvisi: string[] = []
+    if (famDiventano) avvisi.push('Ha familiari collegati: restano, e diventano «familiari di esterno» (niente sconto «Familiari»).')
     if (v.contatti) {
       const dopo = contattiDopo(d.contatti, v.contatti, oggi, 'FILE')
       if ('errore' in dopo) campi.push({ campo: 'contatti', etichetta: ETICHETTE_PERSONA['contatti']!, prima: d.contatti, dopo: v.contatti, blocco: MESSAGGI_CONTATTI[dopo.errore] })

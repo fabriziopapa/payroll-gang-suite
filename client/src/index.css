@@ -67,3 +67,31 @@
 .pgs-solo-stretta { display: none; }
 [data-stretta='2'] .pgs-solo-stretta { display: inline-block; }
 @media (prefers-reduced-motion: reduce) { .pgs-discreto { scroll-behavior: auto; } }
+
+/* ── Vista Fluida (26.11.11.3) ─────────────────────────────────
+   Contenitore di pagina a tutta larghezza con margine fluido: vedi
+   components/VistaFluida.tsx. Per ora solo nel modulo CRAL. */
+.pgs-fluida {
+  width: 100%;
+  min-width: 0;
+  padding-block: clamp(1rem, 2vw, 1.5rem);
+  padding-inline: max(clamp(0.75rem, 2.5vw, 3rem), env(safe-area-inset-left), env(safe-area-inset-right));
+  padding-bottom: max(clamp(1rem, 2vw, 1.5rem), env(safe-area-inset-bottom));
+  /* niente container-type qui: in alcuni browser il contenitore diventa il
+     riferimento delle finestre «fixed» (Modale) e le chiuderebbe dentro la pagina */
+}
+/* testo da leggere: righe di circa 75 caratteri, anche a tutta larghezza */
+.pgs-fluida .pgs-lettura { max-width: 75ch; }
+.pgs-fluida .pgs-guida li, .pgs-fluida .pgs-guida p { max-width: 110ch; }
+/* riquadri e griglie che vanno a capo da soli in base allo spazio */
+.pgs-griglia-auto { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); }
+/* dispositivi a tocco: bersagli di almeno 44 px, campi a 16 px (niente zoom automatico su iPhone) */
+@media (pointer: coarse) {
+  .pgs-fluida button, .pgs-fluida [role='tab'], .pgs-fluida select, .pgs-fluida input:not([type='checkbox']):not([type='radio']) { min-height: 44px; }
+  .pgs-fluida input, .pgs-fluida select, .pgs-fluida textarea { font-size: max(16px, 1em); }
+}
+/* schermo stretto (telefono, o zoom alto): schede del modulo scorrevoli in orizzontale invece che su piu' righe */
+@media (max-width: 48rem) {
+  .pgs-schede { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .pgs-schede::-webkit-scrollbar { display: none; }
+}

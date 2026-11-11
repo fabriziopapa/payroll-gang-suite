@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { cralApi } from '../../api/endpoints'
 import type { ParametriTessera } from './tipi'
 import { fmtEuro, fmtImp, formatTessera, nominativo, oggi, parseEuro, prossimaTessera, rataMese, tesseraNelFormato } from './logica'
+import { StatoRubrica } from './Rubrica'
 import { Campo, D, Ico, Interruttore, avviso, btnPiccoloSec, btnPrimario, cardCls, etichettaCls, inputCls, inputW, sceltaCls, useCral } from './ui'
 
 interface Voce { id: string; nome: string; colore?: string; flag: boolean; flag2?: boolean }
@@ -147,6 +148,7 @@ export function ParametriTab() {
         <ParametriQuote />
         <ParametriTelefono />
         <ParametriTesseraCard />
+        <StatoRubrica />
       </div>
       <div className="flex flex-col gap-4">
         <ListaParametri titolo="Tipi di evento" sotto="«a pagamento» propone la modalità Ordine quando si crea un evento di quel tipo. Campo estivo e Cinema propongono Turni e Magazzino."

@@ -13,6 +13,14 @@ import type { CralQuotaRow, CralSedeRow, CralSocioRow, CralStato } from '../../d
 import { ORIGINI, contattabile, mostraTelefono, nomiEsigenze } from '../../lib/cralContatti.js'
 
 export const TIPOLOGIA_TESTO: Record<CralSocioRow['tipo'], string> = { SD: 'Socio dipendente', SE: 'Socio esterno', EST: 'Esterno', FAM: 'Familiare' }
+/** 26.11.11.3: familiare i cui riferimenti attivi sono solo esterni (stessa regola di famDiEsterno nel client). */
+export function famDiEsterno(s: CralSocioRow, persone: Map<string, CralSocioRow>): boolean {
+  if (s.tipo !== 'FAM') return false
+  const ls = s.legami.map(l => persone.get(l.socio)).filter((p): p is CralSocioRow => !!p)
+  if (!ls.length) return false
+  const att = ls.filter(p => p.stato === 'ATTIVO')
+  return (att.length ? att : ls).every(p => p.tipo !== 'SD' && p.tipo !== 'SE')
+}
 export const STATO_TESTO: Record<CralSocioRow['stato'], string> = { ATTIVO: 'Attivo', DA_VALIDARE: 'Da validare', RIFIUTATO: 'Rifiutato', CESSATO: 'Cessato', ELIMINATO: 'Eliminato' }
 /** 0025: telefono, consensi, WhatsApp, dati alimentari: in coda al T6, si reimportano cosi' come sono. */
 export const COLONNE_CONTATTI = ['Telefono', 'Consenso telefono', 'Data consenso', 'Origine consenso', 'Data revoca', 'WhatsApp', 'WA ID', 'Consenso dati alimentari', 'Esigenze alimentari', 'Allergie'] as const
@@ -65,7 +73,7 @@ export const COLONNE_ELENCO: ColonnaElenco[] = [
   { id: 'id', nome: 'ID', larghezza: 10, val: s => s.id },
   { id: 'matricola', nome: 'Matricola', larghezza: 10, val: s => s.matricola ?? '' },
   { id: 'tessera', nome: 'Tessera', larghezza: 10, val: s => s.tessera },
-  { id: 'tipologia', nome: 'Tipologia', larghezza: 16, val: s => TIPOLOGIA_TESTO[s.tipo] },
+  { id: 'tipologia', nome: 'Tipologia', larghezza: 20, val: (s, c) => (famDiEsterno(s, c.persone) ? 'Familiare di esterno' : TIPOLOGIA_TESTO[s.tipo]) },
   { id: 'stato', nome: 'Stato', larghezza: 11, val: s => STATO_TESTO[s.stato] },
   { id: 'cognome', nome: 'Cognome', larghezza: 20, val: s => s.cognome },
   { id: 'nome', nome: 'Nome', larghezza: 18, val: s => s.nome },

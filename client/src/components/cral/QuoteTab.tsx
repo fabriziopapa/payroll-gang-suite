@@ -36,7 +36,7 @@ export function QuoteTab() {
         <div className="w-32"><Campo label="Anno"><select className={inputCls} value={anno} onChange={e => setAnno(+e.target.value)}>{anni.map(a => <option key={a} value={a}>{a}</option>)}</select></Campo></div>
         <p className="text-sm text-slate-300 flex-1 min-w-[260px]">Quota {anno}: <b className="text-white tabular-nums">{fmtEuro(imp)}</b> per l'anno solare, oppure 12 rate da <b className="text-white tabular-nums">{fmtEuro(rataMese(imp, 0))}</b>. Si deve <b>per intero</b> anche da chi entra a novembre o recede prima. <button className="text-indigo-400 hover:text-indigo-300" onClick={() => vaiA('parametri')}>Cambia l'importo in Parametri</button></p>
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="pgs-griglia-auto">
         {riquadri.map(([l, n, k]) => <div key={l} className={`${cardCls} px-4 py-3`}><p className={etichettaCls}>{l}</p><p className={`text-xl font-semibold tabular-nums mt-1 ${k}`}>{n}</p></div>)}
       </div>
       <div className={`${cardCls} px-5 py-3 flex flex-wrap gap-3 items-center`}>

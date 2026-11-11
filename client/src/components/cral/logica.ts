@@ -9,7 +9,7 @@
 import { ESIGENZE } from './contatti'
 import type {
   CatSconto, Db, Iniziativa, Modalita, ParametriTessera, Persona, Prodotto, Relazione, Richiesta,
-  ScontoPers, ScontoRegola, StatoPeriodo, TipoPersona, QuotaSocio,
+  ScontoPers, ScontoRegola, StatoPeriodo, TipoPersona, QuotaSocio, Gruppo,
 } from './tipi.ts'
 
 // ── Testo e date ─────────────────────────────────────────────
@@ -56,7 +56,7 @@ export const TIPOLOGIE: Record<TipoPersona, [string, 'nuovo' | 'cf' | 'cyan' | '
   SD:  ['Socio dipendente', 'nuovo', "Dipendente iscritto al CRAL: ID = matricola dell'anagrafica PGS"],
   SE:  ['Socio esterno', 'cf', 'Iscritto al CRAL ma non dipendente: anagrafato a mano o da import, va validato'],
   EST: ['Esterno', 'cyan', 'Non è socio: partecipa solo agli eventi aperti agli esterni o a cui viene aggiunto'],
-  FAM: ['Familiare', 'fam', 'Coniuge o figlio/figlia di uno o più soci (dipendenti o esterni)'],
+  FAM: ['Familiare', 'fam', 'Coniuge o figlio/figlia di uno o più soci o esterni'],
 }
 export const RELAZIONI: Record<Relazione, string> = { CONIUGE: 'Coniuge', FIGLIO: 'Figlio/Figlia' }
 export const STATI: Record<Persona['stato'], string> = { ATTIVO: 'Attivo', DA_VALIDARE: 'Da validare', RIFIUTATO: 'Rifiutato', CESSATO: 'Cessato', ELIMINATO: 'Eliminato' }
@@ -77,6 +77,26 @@ export const relDi = (fam: Persona, socioId: string): Relazione | undefined => f
 /** Un familiare vale solo finché almeno uno dei suoi soci è attivo. */
 export const rifAttivo = (db: Db, s: Persona): boolean => s.tipo !== 'FAM' || s.legami.some(l => persona(db, l.socio)?.stato === 'ATTIVO')
 
+// ── Familiari di esterni (26.11.11.3) ────────────────────────
+/**
+ * Familiare «di esterno»: i suoi riferimenti attivi sono solo esterni (se
+ * nessuno è attivo, conta il tipo di tutti). Un familiare con almeno un
+ * socio attivo resta «dei soci». Non è una tipologia: si ricava dai legami.
+ */
+export function famDiEsterno(db: Db, s: Persona): boolean {
+  if (s.tipo !== 'FAM') return false
+  const ls = sociDi(db, s)
+  if (!ls.length) return false
+  const att = ls.filter(l => l.s.stato === 'ATTIVO')
+  return (att.length ? att : ls).every(l => !eSocio(l.s))
+}
+/** Il gruppo di partecipanti di una persona: FEX per i familiari di esterni. */
+export const gruppoDi = (db: Db, s: Persona): Gruppo => (famDiEsterno(db, s) ? 'FEX' : s.tipo)
+export const GRUPPI_EVENTO: Gruppo[] = ['SD', 'SE', 'EST', 'FAM', 'FEX']
+export const NOMI_GRUPPO: Record<Gruppo, string> = { SD: 'Soci dipendenti', SE: 'Soci esterni', EST: 'Esterni', FAM: 'Familiari dei soci', FEX: 'Familiari di esterni' }
+/** Nome della tipologia da mostrare: «Familiare di esterno» quando lo è. */
+export const nomeTipologia = (db: Db | null | undefined, s: Persona): string => (db && famDiEsterno(db, s) ? 'Familiare di esterno' : TIPOLOGIE[s.tipo][0])
+
 // ── Partecipanti e riepiloghi ────────────────────────────────
 /**
  * GRUPPI: tutte le persone attive delle tipologie scelte, nelle sedi coinvolte;
@@ -85,9 +105,9 @@ export const rifAttivo = (db: Db, s: Persona): boolean => s.tipo !== 'FAM' || s.
 export function destinatari(db: Db, ini: Iniziativa): Persona[] {
   const part = ini.modoPart === 'SINGOLI' ? new Set(ini.partecipanti) : null
   return db.soci.filter(s => s.stato === 'ATTIVO' && rifAttivo(db, s) && (
-    part ? part.has(s.id) : ini.gruppi.includes(s.tipo) && (!ini.sedi.length || (s.sede !== null && ini.sedi.includes(s.sede)))))
+    part ? part.has(s.id) : ini.gruppi.includes(gruppoDi(db, s)) && (!ini.sedi.length || (s.sede !== null && ini.sedi.includes(s.sede)))))
 }
-const NOMI_GRUPPI: Record<TipoPersona, string> = { SD: 'soci dipendenti', SE: 'soci esterni', EST: 'esterni', FAM: 'familiari' }
+const NOMI_GRUPPI: Record<Gruppo, string> = { SD: 'soci dipendenti', SE: 'soci esterni', EST: 'esterni', FAM: 'familiari dei soci', FEX: 'familiari di esterni' }
 export const descrPart = (ini: Iniziativa): string => ini.modoPart === 'SINGOLI'
   ? `${ini.partecipanti.length} partecipanti singoli`
   : `${ini.gruppi.map(g => NOMI_GRUPPI[g]).join(' + ')} · ${ini.sedi.length ? `${ini.sedi.length} sedi` : 'tutte le sedi'}`
@@ -146,7 +166,18 @@ export const regolaCat = (ini: Iniziativa, cat: CatSconto): ScontoRegola | null 
 /** Categoria per lo sconto: socio attivo = la sua tipologia, con matricola = dipendente non socio, altrimenti esterno. */
 export const catSconto = (p: Persona | null | undefined): Exclude<CatSconto, 'FAM'> =>
   !p ? 'EST' : eSocio(p) && p.stato === 'ATTIVO' ? (p.tipo as 'SD' | 'SE') : p.matricola ? 'DIP' : 'EST'
-export const catPersona = (s: Persona | null | undefined): CatSconto => (!s ? 'EST' : s.tipo === 'FAM' ? 'FAM' : catSconto(s))
+/**
+ * Categoria di una persona per gli sconti degli eventi. Il familiare di un
+ * esterno ha la categoria del suo esterno (Esterno, o Dipendente non socio se
+ * ha la matricola): lo sconto «Familiari» è dei familiari dei soci (26.11.11.3).
+ */
+export function catPersona(s: Persona | null | undefined, db?: Db): CatSconto {
+  if (!s) return 'EST'
+  if (s.tipo !== 'FAM') return catSconto(s)
+  if (!db || !famDiEsterno(db, s)) return 'FAM'
+  const ls = sociDi(db, s)
+  return catSconto((ls.find(l => l.s.stato === 'ATTIVO') ?? ls[0])?.s)
+}
 export const persDi = (ini: Iniziativa, sid: string): ScontoPers | null => ini.scelte[sid]?.scontoPers ?? null
 export const conScontiIni = (ini: Iniziativa): boolean =>
   catDiModo(ini.modalita).some(k => regolaCat(ini, k)) || Object.values(ini.scelte).some(v => v.scontoPers) || ini.richieste.some(r => r.sconto)
@@ -160,7 +191,7 @@ export const etichettaPers = (p: ScontoPers | null, regola: ScontoRegola | null)
 export const descrScontoPers = (p: ScontoPers): string => (p.tipo === 'NO' ? 'nessuno (a mano)' : `${fmtSconto(p)} (a mano)`)
 
 export const scontoOrdine = (db: Db, ini: Iniziativa, sid: string): ScontoRegola | ScontoPers | null =>
-  persDi(ini, sid) ?? regolaCat(ini, catPersona(persona(db, sid)))
+  persDi(ini, sid) ?? regolaCat(ini, catPersona(persona(db, sid), db))
 export const nettoSocio = (db: Db, ini: Iniziativa, sid: string): number => applicaSconto(totaleSocio(ini, sid), scontoOrdine(db, ini, sid))
 
 export interface ContiOrdine { dest: Persona[]; ord: Persona[]; lordo: number; sconti: number; totale: number; incassato: number; pezzi: number }
@@ -189,7 +220,7 @@ export function righeOrdiniPerSede(db: Db, ini: Iniziativa): Array<[string, Riga
 
 // ── Cinema (magazzino): la regola € vale a biglietto, lo sconto personale sulla richiesta intera
 export const scontoRichiesta = (db: Db, ini: Iniziativa, r: Richiesta): ScontoRegola | ScontoPers | null =>
-  r.sconto ?? regolaCat(ini, catPersona(persona(db, r.persona)))
+  r.sconto ?? regolaCat(ini, catPersona(persona(db, r.persona), db))
 export const lordoRichiesta = (ini: Iniziativa, r: Richiesta): number => r.qta * (ini.articoli.find(x => x.id === r.art)?.prezzo ?? 0)
 export const importoRichiesta = (db: Db, ini: Iniziativa, r: Richiesta): number =>
   applicaSconto(lordoRichiesta(ini, r), scontoRichiesta(db, ini, r), r.sconto ? 1 : r.qta)

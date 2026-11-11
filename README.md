@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.11.11.2-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.11.11.3-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -55,6 +55,7 @@ payroll-gang-suite/
 │       │   │                    #   tipi.ts (modello), logica.ts (+ test: conti, sconti, turni, quote),
 │       │   │                    #   report.ts (CSV/PDF nel browser), ui.tsx (contesto e componenti)
 │       │   └── certificatoTemplate/  # Editor template certificato
+│       │   ├── VistaFluida.tsx  # contenitore di pagina «Vista Fluida» (tutta larghezza, margine fluido; per ora solo CRAL)
 │       ├── constants/           # csvDefaults, scorporoCoefficients, palette gruppi
 │       ├── hooks/               # useDebounce, usePdfDocument, …
 │       ├── pages/               # Dashboard, Editor, Viewer, Ricerca, Anagrafiche, Voci,
@@ -68,6 +69,7 @@ payroll-gang-suite/
 │                                # meseNome.ts (+ test): mese di liquidazione nel nome della lavorazione
 │                                #   e pillola «liquidazione …» (mese scelto o, in mancanza, dalla data)
 │                                # csvDecimale.test.ts: separatore decimale dei file HR (virgola/punto)
+│                                # perPagina.ts (+ test): righe per pagina scritte a mano (Dashboard), numeri di pagina
 │                                # provvedimento.ts (+ test): ID e estremi del provvedimento, salvataggio vs CSV HR
 │                                # versamentiCsv.ts (+ test): lettura STAMPA_VERSAMENTI (mesi, importi, data di nascita)
 │                                # versamentiModelli.ts / versamentiAllegati.ts / versamentiEml.ts
@@ -86,7 +88,7 @@ payroll-gang-suite/
 │       ├── auth/                # TOTP (RFC 6238) + JWT ES256 + refresh rotante Argon2id
 │       ├── db/
 │       │   ├── schema.ts        # ★ Schema Drizzle — fonte di verità del DB
-│       │   ├── migrations/      # 0001…0026 — applicate da ./pgs-migra.sh, registrate in schema_migrations
+│       │   ├── migrations/      # 0001…0027 — applicate da ./pgs-migra.sh, registrate in schema_migrations
 │       │   │                    #   (già incluse in setup.sql: NON eseguire su install nuova)
 │       │   └── repositories/    # Repository pattern (PgBozze, PgUsers, PgCertificati, …)
 │       ├── lib/                 # clientIp.ts (IP reale dietro Cloudflare) ·
@@ -105,6 +107,9 @@ payroll-gang-suite/
 │       └── services/            # cryptoService, importService, mailerService, cinecaService
 │           ├── emolumenti/      #   risoluzione nominativi → matricole, testate CSA → conto
 │           │                    #   per matricola, tipi conto → TXT (logica pura + test)
+│           ├── rubrica/         #   rubrica d'Ateneo (servizio riusabile): ricerca per cognome, dettaglio per idAb,
+│           │                    #   abbinamento (idAb / CF / nome, il CF non esce mai dal server), certificato
+│           │                    #   intermedio GEANT TLS ECC 1 e controllo delle scadenze (+ test)
 │           ├── cral/            #   fogli.ts: lettura xlsx/xls/csv del libro soci e dei file degli eventi
 │           ├── cedolino/        #   parser PDF cedolino + calculator
 │           ├── certificato/     #   stampa unione DOCX (+ assets)
@@ -337,12 +342,14 @@ Menu *Modulo CRAL → Soci e iniziative*, **solo amministratori** (voce di menu 
 | Socio dipendente (SD) | matricola PGS | dipendente iscritto al CRAL, nome e nascita dall'anagrafica PGS |
 | Socio esterno (SE) | `EXT-nnnn` | iscritto non dipendente; entra **da validare** |
 | Esterno (EST) | `EXT-nnnn` o matricola | non socio; con la matricola e' un **dipendente non socio** |
-| Familiare (FAM) | `FAM-nnnn` | coniuge o figlio/figlia di **uno o piu'** soci (SD o SE); vale finche' almeno uno e' attivo |
+| Familiare (FAM) | `FAM-nnnn` | coniuge o figlio/figlia di **uno o piu'** soci (SD o SE) **o esterni** (EST, dalla 26.11.11.3); vale finche' almeno uno e' attivo |
 
 - *Soci*: elenco di soci ed esterni, i familiari come sottovoce del loro socio; scheda della persona (tipologia, tessera, sede, email, nascita, familiari, storico tessere, cessazione e riammissione).
 - *Sedi*: chi ritira dove; «Esterni» e' una sede come le altre.
 - *Da validare*: soci esterni ed esterni si correggono (tipologia, sede, **tessera dal libro soci**, nominativo, nascita, email) e si validano o rifiutano; **«Trova in anagrafica PGS»** da' la matricola: il socio esterno diventa socio dipendente, l'esterno resta esterno; scelte, ordini e familiari seguono il nuovo ID.
 - **Tessera** (*Parametri*): solo progressivo (default, `0042`) o parte testuale + progressivo (`CRAL-0042`); chi rientra dopo la cessazione prende un **numero nuovo** (default) oppure lo stesso con un suffisso (`0042/01`). Deve essere unica. La validazione non la assegna: viene dal libro soci o si scrive a mano. **Formato obbligatorio** (dalla 26.11.11.2, spento di partenza): acceso, anche le tessere scritte a mano (scheda, nuova persona, *Da validare*) e quelle dei file (T1, T6) devono rispettare il formato. Il solo numero si completa da se' (`175` → `0175`, `1` → `0001`), il resto si rifiuta; il controllo lo fa il server e vale solo per una tessera che **cambia** (quelle gia' assegnate restano come sono e la card elenca quelle fuori formato). Il ripristino da archivio non lo applica.
+- **Familiari di esterni** (dalla 26.11.11.3): un familiare i cui riferimenti attivi sono tutti esterni (non soci) e' un **«Familiare di esterno»** (etichetta azzurra tratteggiata, in elenco, nei report e nelle esportazioni). Negli eventi e' un gruppo a se', **«Familiari di esterni»** (`FEX`), distinto da «Familiari dei soci»: si sceglie con gli altri gruppi (es. campi estivi aperti ai figli degli esterni). Negli sconti conta la categoria dell'esterno di riferimento (esterno o dipendente non socio), mai quella dei «Familiari». Un socio con familiari puo' diventare esterno: i familiari restano e diventano familiari di esterno (la scheda e il T6 lo avvisano).
+- **Rubrica d'Ateneo** (dalla 26.11.11.3): con l'email vuota, nella scheda c'e' **«Cerca nella rubrica d'Ateneo»**; in *Nuova persona* l'email si propone da sola quando si sceglie un dipendente dall'anagrafica. Si cerca per `id_ab` (quello dell'anagrafica PGS), poi per codice fiscale (solo nel server, mai mostrato ne' salvato) e infine per cognome e nome; con piu' omonimi si sceglie dalla lista (ruolo e afferenza). Si propone solo l'email pubblicata: si salva solo premendo *Salva*. Audit `CRAL_RUBRICA_CONSULTATA` (esito, mai l'email). *Parametri › Rubrica d'Ateneo*: ultimo contatto, scadenza del certificato del server e dell'intermedio, avvisi, «Verifica ora».
 - **ATIPICO** del libro soci: per ora solo un'etichetta.
 - In alto il riquadro **Totale soci** (soci dipendenti + soci esterni attivi), cliccabile come gli altri: filtra l'elenco sui soci.
 
@@ -425,7 +432,7 @@ Elenco soci, quote associative e, per ogni evento, riepilogo per sede, scelte/or
 
 ### Cosa salva PGS
 
-`cral_sedi`, `cral_parametri` (tessera e progressivi; dalla 0025 prefisso dei numeri e modelli di esportazione; dalla 0026 `tessera_vincolante`), `cral_tipi`, `cral_tipologie_prodotto`, `cral_soci` (nessun codice fiscale; dalla 0025 telefono, consensi, WhatsApp, esigenze alimentari), `cral_familiari_legami`, `cral_soci_tessere`, `cral_iniziative` (config in JSON validato dal server), `cral_iniziative_partecipanti`, `cral_scelte` (dati in JSON validato contro la config), `cral_carichi`, `cral_richieste`, `cral_quote_anno`, `cral_quote`, `cral_lotti` e `cral_lotti_variazioni` (0023; le variazioni si svuotano alla chiusura del lotto). Importi in centesimi interi.
+`cral_sedi`, `cral_parametri` (tessera e progressivi; dalla 0025 prefisso dei numeri e modelli di esportazione; dalla 0026 `tessera_vincolante`), `cral_tipi`, `cral_tipologie_prodotto`, `cral_soci` (nessun codice fiscale; dalla 0025 telefono, consensi, WhatsApp, esigenze alimentari), `cral_familiari_legami`, `cral_soci_tessere`, `cral_iniziative` (config in JSON validato dal server; `gruppi` fra SD, SE, EST, FAM e, dalla 0027, FEX), `cral_iniziative_partecipanti`, `cral_scelte` (dati in JSON validato contro la config), `cral_carichi`, `cral_richieste`, `cral_quote_anno`, `cral_quote`, `cral_lotti` e `cral_lotti_variazioni` (0023; le variazioni si svuotano alla chiusura del lotto). Importi in centesimi interi.
 
 Audit (entita' `cral`): `CRAL_FILE_LETTO`, `CRAL_IMPORT_ABBINAMENTO`, `CRAL_IMPORT_CONFERMATO`, `CRAL_PERSONA_CREATA` / `_MODIFICATA`, `CRAL_LEGAMI_FAMILIARE`, `CRAL_PERSONE_VALIDA` / `_RIFIUTA` / `_RIMETTI` / `_CESSA` / `_RIATTIVA`, `CRAL_SOCIO_RIAMMESSO`, `CRAL_TROVATO_IN_PGS`, `CRAL_SEDE_ASSEGNATA`, `CRAL_SEDE_*`, `CRAL_TIPO_*`, `CRAL_TIPOLOGIA_*`, `CRAL_PARAMETRI_TESSERA`, `CRAL_EVENTO_CREATO` / `_MODIFICATO` / `_ARCHIVIATO` / `_RIPRISTINATO`, `CRAL_PARTECIPANTI`, `CRAL_SCELTA`, `CRAL_SCELTE_IN_BLOCCO`, `CRAL_CARICO`, `CRAL_RICHIESTA` / `_MODIFICATA`, `CRAL_QUOTA_ANNO`, `CRAL_QUOTA_SOCIO`, `CRAL_TRATTENUTA_MESE`; dalla 26.10.29 `CRAL_PERSONE_ELIMINA` / `_RIPRISTINA`, `CRAL_TIPOLOGIA_IN_BLOCCO`, `CRAL_PASSAGGIO_SOCIO_ESTERNO`, `CRAL_EXPORT_SOCI`, `CRAL_EXPORT_ARCHIVIO` (ambiente, sezioni, conteggi), `CRAL_LOTTO_T6`, `CRAL_LOTTO_T7`, `CRAL_EXPORT_QUOTE`, `CRAL_LOTTO_ARCHIVIO`, `CRAL_LOTTO_APPLICATO`, `CRAL_LOTTO_SCARTATO`.
 
@@ -578,6 +585,16 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.11.11.3
+**Modulo CRAL: rubrica d'Ateneo, familiari di esterni, Vista Fluida; Dashboard con le liquidazioni per pagina a scelta**
+
+- **Rubrica d'Ateneo** (`server/src/services/rubrica/`, servizio riusabile, per ora usato solo dal CRAL): ricerca per cognome e dettaglio per `id_ab` sulle API del portale d'Ateneo; abbinamento per `id_ab`, codice fiscale (che resta nel server e non esce mai) o nome; memoria di 12 ore, un nuovo tentativo su errore di rete/429/5xx. Rotte `GET /api/v1/cral/rubrica/cerca` e `/rubrica/stato`, errore `RUBRICA_NON_RAGGIUNGIBILE` (502), audit `CRAL_RUBRICA_CONSULTATA`. Nel CRAL: «Cerca nella rubrica d'Ateneo» con l'email vuota, proposta automatica in *Nuova persona*.
+- **Certificato intermedio**: il server della rubrica non invia l'intermedio **GEANT TLS ECC 1** (HARICA). PGS lo contiene (`certificati.ts`, impronta SHA-256 controllata a ogni avvio) e lo aggiunge **solo per quell'host**: la verifica TLS resta sempre attiva. **Controllo delle scadenze** in *Parametri › Rubrica d'Ateneo*: certificato del server (avviso a 30 giorni) e intermedio (avviso a 180), emittente inatteso, ultimo contatto fallito con il motivo; se l'intermedio non e' integro o e' scaduto non si usa.
+- **Familiari di esterni**: un familiare puo' essere collegato anche a un esterno; etichetta «Familiare di esterno», gruppo evento **«Familiari di esterni»** (`FEX`), sconti con la categoria dell'esterno. Un socio con familiari puo' diventare esterno (prima era bloccato): i familiari restano. **Migrazione `0027_cral_familiari_esterni.sql`** (solo il vincolo sui gruppi di `cral_iniziative`, idempotente; `setup.sql` allineato).
+- **Vista Fluida** (`client/src/components/VistaFluida.tsx`, stili `.pgs-fluida` in `index.css`): la pagina CRAL usa tutta la larghezza con un margine che cresce con lo schermo (niente vuoto ai lati su monitor larghi o con zoom ridotto), testo lungo limitato a ~75 caratteri, riquadri che vanno a capo da soli, schede scorrevoli sotto 48rem, bersagli da 44 px e campi a 16 px sui dispositivi a tocco. Caratteri mai in `vw` (lo zoom del browser continua a funzionare). **Per ora solo il CRAL**: le altre pagine non cambiano.
+- **Dashboard**: il numero di liquidazioni per pagina si scrive nel campo **«Per pagina»** (1–200, iniziale 10, oltre 200 diventa 200) e si ricorda in questo browser; i numeri di pagina si accorciano con «…».
+- Test: server 159 (+1 saltato), client 127. Migrazione provata su uno schema 26.11.11.2 (due volte) e confrontata con `setup.sql`. Provato nel browser: rubrica (trovata, omonimi, non raggiungibile), familiare di esterno creato e in elenco, socio con familiari passato a esterno, evento col solo gruppo «Familiari di esterni», scheda Parametri, Dashboard (10, 25, 3, ricordato dopo il riavvio), CRAL a 320/390/768/1280/1920/2732/3840 px senza scorrimento orizzontale, finestre a tutto schermo, nessun errore in console. Rubrica reale provata dalla rete d'Ateneo.
 
 ### 26.11.11.2
 **Modulo CRAL: si resta sul modulo dopo l'aggiornamento della pagina; formato della tessera obbligatorio**

@@ -17,6 +17,7 @@ import { esportaSociExcel } from './ImportDati'
 import { CampiContatti, ContattiInBlocco, FORM_ALIMENTARI_VUOTO, FORM_CONTATTI_VUOTO, SegniContatti, formAlimentari, formContatti, patchContatti, type FormAlimentari, type FormContatti } from './Contatti'
 import { contattabile, perWhatsapp } from './contatti'
 import { EsportaElenco } from './Esporta'
+import { CercaRubrica, useEmailDaRubrica } from './Rubrica'
 import {
   Campo, Conferma, D, DiChi, Ico, Modale, Origine, Pill, StatoSocio, avviso, btnPericolo, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario,
   cardCls, etichettaCls, inputCls, inputW, messaggioErrore, sceltaCls, thCls, useCral, Scorrevole
@@ -38,8 +39,8 @@ export function SociTab() {
   const [aperti, setAperti] = useState<Set<string>>(new Set())
   const [sel, setSel] = useState<Set<string>>(new Set())
   const q = norm(cerca)
-  // L'elenco mostra soci dipendenti, soci esterni ed esterni. I familiari stanno sotto i loro soci.
-  const famDi = (s: Persona) => eSocio(s) ? familiariDi(db, s.id).filter(x => x.stato !== 'RIFIUTATO' && x.stato !== 'ELIMINATO') : []
+  // L'elenco mostra soci dipendenti, soci esterni ed esterni. I familiari stanno sotto i loro soci o esterni (26.11.11.3).
+  const famDi = (s: Persona) => eSocio(s) || s.tipo === 'EST' ? familiariDi(db, s.id).filter(x => x.stato !== 'RIFIUTATO' && x.stato !== 'ELIMINATO') : []
   // si cerca anche per numero di telefono (bastano le ultime cifre, comunque sia scritto)
   const cifre = cerca.replace(/\D/g, '').replace(/^(00)?39(?=\d{6})/, '')
   const perTel = (x: Persona) => cifre.length >= 4 && x.contatti.telefono.includes(cifre)
@@ -74,7 +75,7 @@ export function SociTab() {
         {riquadri.map(([l, n, k]) => (
           <button key={l} onClick={() => { setTip(k); setStato(k ? 'ATTIVO' : 'DA_VALIDARE') }} className={`${cardCls} px-4 py-3 text-left hover:border-slate-700 transition-colors`}>
             <p className={etichettaCls}>{l}</p><p className={`text-2xl font-semibold tabular-nums mt-1 ${!k && n ? 'text-amber-400' : k === 'CONFAM' ? 'text-pink-300' : k === 'SOCI' ? 'text-indigo-300' : 'text-white'}`}>{n}</p>
-            {k === 'CONFAM' && <p className="text-[11px] text-slate-500">sotto i loro soci</p>}
+            {k === 'CONFAM' && <p className="text-[11px] text-slate-500">sotto i loro soci o esterni</p>}
             {k === 'SOCI' && <p className="text-[11px] text-slate-500">dipendenti + esterni, attivi</p>}</button>
         ))}
       </div>
@@ -292,6 +293,7 @@ function SocioModal({ id, onClose, onApri }: { id: string; onClose: () => void; 
   const [riammetti, setRiammetti] = useState(false)
   const [azione, setAzione] = useState<null | 'elimina' | 'ripristina' | 'passa' | 'collega'>(null)
   const [salvo, setSalvo] = useState(false)
+  const [notaEmail, setNotaEmail] = useState('')
   const [fc, setFc] = useState<FormContatti>(() => (s ? formContatti(s) : FORM_CONTATTI_VUOTO))
   const [fa, setFa] = useState<FormAlimentari>(() => (s ? formAlimentari(s) : FORM_ALIMENTARI_VUOTO))
   const a = useAnagraficaDi(s?.matricola ?? null)
@@ -343,7 +345,7 @@ function SocioModal({ id, onClose, onApri }: { id: string; onClose: () => void; 
           {s.stato !== 'ELIMINATO' && <button className={btnPiccolo + ' text-red-300 hover:bg-red-950/40 border border-red-900/60'} onClick={() => setAzione('elimina')}><Ico d={D.trash} cls="w-3.5 h-3.5" />Elimina</button>}
         </div>
         {s.tipo === 'FAM' ? <LegamiFamiliare legami={f.legami} onChange={legami => setF({ ...f, legami })} onApri={onApri} /> :
-          <Campo label="Tipologia" hint={f.tipo === 'EST' ? "Esterno: non è socio, niente tessera, non compare nell'elenco soci." : undefined}>
+          <Campo label="Tipologia" hint={f.tipo === 'EST' ? <>Esterno: non è socio, niente tessera, non compare nell'elenco soci.{eSocio(s) && familiariDi(db, s.id).length > 0 && <span className="block text-amber-300">I suoi {familiariDi(db, s.id).length} familiari restano legati e diventano «familiari di esterno»: niente sconto «Familiari», entrano negli eventi col gruppo «Familiari di esterni».</span>}</> : undefined}>
             <select className={inputCls} value={f.tipo} onChange={e => setF({ ...f, tipo: e.target.value as TipoPersona })}>{ammesse.map(k => <option key={k} value={k}>{TIPOLOGIE[k][0]}</option>)}</select></Campo>}
         <div className="grid sm:grid-cols-2 gap-4">
           {conTessera && <Campo label="Tessera CRAL (n. socio)" hint={tes.errore ? <span className="text-red-400">{tes.errore}</span> : doppia ? <span className="text-red-400">Tessera già assegnata a un altro socio.</span> : `Prossimo progressivo: ${prossimaTessera(db.tessera)}`}>
@@ -351,7 +353,10 @@ function SocioModal({ id, onClose, onApri }: { id: string; onClose: () => void; 
               {!f.tessera && <button type="button" className={btnPiccoloSec + ' whitespace-nowrap'} onClick={() => setF({ ...f, tessera: prossimaTessera(db.tessera) })}>Assegna</button>}</div>
           </Campo>}
           <Campo label="Sede di consegna" hint={s.tipo === 'FAM' ? 'Di norma quella del socio' : undefined}><select className={inputCls} value={f.sede} onChange={e => setF({ ...f, sede: e.target.value })}><option value="">— Da indicare</option>{db.sedi.filter(x => x.attiva || x.id === f.sede).map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}</select></Campo>
-          <Campo label="Email" hint="Serve ad agganciare le risposte del modulo"><input className={inputCls} value={f.email} onChange={e => setF({ ...f, email: e.target.value })} /></Campo>
+          <Campo label="Email" hint={notaEmail ? <span className="text-sky-300">{notaEmail}</span> : 'Serve ad agganciare le risposte del modulo'}>
+            <input className={inputCls} value={f.email} onChange={e => { setF({ ...f, email: e.target.value }); setNotaEmail('') }} />
+            {!f.email.trim() && s.tipo !== 'FAM' && <CercaRubrica query={{ socio: s.id }} onEmail={(email, nota) => { setF(x => ({ ...x, email })); setNotaEmail(nota) }} />}
+          </Campo>
           <Campo label="Data di nascita" hint={a?.nascita ? (a.nascita === f.nascita ? 'Come in anagrafica PGS' : <span className="text-amber-400">In anagrafica PGS: {fmtData(a.nascita)}</span>) : f.nascita ? `${eta(f.nascita)} anni` : 'Al posto del codice fiscale: distingue gli omonimi'}>
             <input type="date" className={inputCls} value={f.nascita} disabled={!!a?.nascita && a.nascita === s.nascita} onChange={e => setF({ ...f, nascita: e.target.value })} /></Campo>
           <Campo label="Dal"><input className={inputCls} value={fmtData(s.iscrittoIl)} disabled /></Campo>
@@ -363,7 +368,7 @@ function SocioModal({ id, onClose, onApri }: { id: string; onClose: () => void; 
           {s.stato === 'CESSATO' && <span>Cessato il {fmtData(s.cessatoIl)} · tessera <span className="font-mono text-slate-200">{s.tessera || '—'}</span>{ria && ('errore' in ria ? <span className="text-red-300"> · {ria.errore}</span> : <> · se rientra: <span className="font-mono text-emerald-300">{ria.tessera}</span></>)}</span>}
           {s.stato !== 'CESSATO' && <span>Tessera attuale <span className="font-mono text-slate-200">{s.tessera || '—'}</span> dal {fmtData(s.iscrittoIl)}</span>}
         </div>}
-        {eSocio(s) && <FamiliariSocio socio={s} onApri={onApri} />}
+        {(eSocio(s) || s.tipo === 'EST') && <FamiliariSocio socio={s} onApri={onApri} />}
         {iniz.length > 0 && <p className="text-xs text-slate-400">Tra i partecipanti di: {iniz.map(i => i.titolo).join(' · ')}</p>}
         <Campo label="Note"><textarea rows={2} className={inputCls} value={f.note} onChange={e => setF({ ...f, note: e.target.value })} /></Campo>
         <div className="text-xs text-slate-500 border-t border-slate-800 pt-3 flex flex-col gap-0.5">
@@ -447,14 +452,15 @@ export function CercaSocio({ onScegli, escludi = [] }: { onScegli: (s: Persona) 
   const { db } = useCral()
   const [q, setQ] = useState('')
   const n = norm(q)
-  const ris = n.length < 2 ? [] : db.soci.filter(s => eSocio(s) && s.stato === 'ATTIVO' && !escludi.includes(s.id) && norm(`${nominativo(s)} ${s.id} ${s.tessera}`).includes(n)).slice(0, 8)
+  // 26.11.11.3: anche gli esterni attivi (familiari di esterni, es. campi estivi)
+  const ris = n.length < 2 ? [] : db.soci.filter(s => (eSocio(s) || s.tipo === 'EST') && s.stato === 'ATTIVO' && !escludi.includes(s.id) && norm(`${nominativo(s)} ${s.id} ${s.tessera}`).includes(n)).slice(0, 8)
   return (
     <div className="flex flex-col gap-2">
       <div className="relative"><span className="absolute left-3 top-2.5 text-slate-500"><Ico d={D.search} /></span>
-        <input autoFocus className={inputCls + ' pl-9'} placeholder="Socio di riferimento: cognome, ID o tessera" value={q} onChange={e => setQ(e.target.value)} /></div>
+        <input autoFocus className={inputCls + ' pl-9'} placeholder="Socio o esterno di riferimento: cognome, ID o tessera" value={q} onChange={e => setQ(e.target.value)} /></div>
       {n.length >= 2 && <div className="border border-slate-800 rounded-lg divide-y divide-slate-800 max-h-56 overflow-y-auto pgs-discreto">
         {ris.map(s => <button key={s.id} className="w-full text-left px-3 py-2 hover:bg-slate-800 flex items-center gap-3 text-sm" onClick={() => onScegli(s)}><span className="font-mono text-xs text-slate-400 w-20">{s.id}</span><span className="text-slate-100 flex-1">{nominativo(s)}</span><Origine s={s} /></button>)}
-        {!ris.length && <p className="px-3 py-3 text-sm text-slate-500">Nessun socio attivo con questo nome. Il familiare deve essere legato a un socio dipendente o a un socio esterno.</p>}
+        {!ris.length && <p className="px-3 py-3 text-sm text-slate-500">Nessun socio o esterno attivo con questo nome. Il familiare si lega a un socio (dipendente o esterno) o a un esterno validato.</p>}
       </div>}
     </div>
   )
@@ -472,6 +478,9 @@ export function NuovoSocioModal({ onClose, perIniziativa, tipoIniziale }: { onCl
   const [fc, setFc] = useState<FormContatti>(FORM_CONTATTI_VUOTO)
   const [fa, setFa] = useState<FormAlimentari>(FORM_ALIMENTARI_VUOTO)
   const daAnagrafica = tipo === 'SD' || (tipo === 'EST' && estDaPgs)
+  const [notaEmail, setNotaEmail] = useState('')
+  // dipendente scelto dall'anagrafica PGS: l'email dalla rubrica d'Ateneo, se il campo è vuoto
+  useEmailDaRubrica(daAnagrafica ? scelto?.matricola : null, !f.email.trim(), (email, nota) => { setF(x => (x.email.trim() ? x : { ...x, email })); setNotaEmail(nota) })
   const conTessera = tipo === 'SD' || tipo === 'SE'
   const tes = conTessera ? tesseraDalCampo(db.tessera, null, f.tessera) : { tessera: '' }
   const doppia = conTessera && tesseraDoppia(db, null, tes.tessera)
@@ -505,7 +514,7 @@ export function NuovoSocioModal({ onClose, perIniziativa, tipoIniziale }: { onCl
             <button key={t} onClick={() => { setEstDaPgs(v); setScelto(null) }} className={`flex-1 ${sceltaCls(estDaPgs === v)}`}><p className="text-sm text-white">{t}</p><p className="text-xs text-slate-500">{d}</p></button>)}
         </div>}
         {tipo === 'FAM' && <div className="flex flex-col gap-2">
-          <p className={etichettaCls}>Familiare di (uno o più soci)</p>
+          <p className={etichettaCls}>Familiare di (uno o più soci o esterni)</p>
           {rifs.map((r, k) => <div key={r.s.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-700 px-3 py-2">
             <span className="font-mono text-xs text-slate-400">{r.s.id}</span><span className="text-slate-100 text-sm flex-1">{nominativo(r.s)}</span><Origine s={r.s} />
             <select className={inputW + ' w-44 py-1'} value={r.relazione} onChange={e => setRifs(rifs.map((x, j) => j === k ? { ...x, relazione: e.target.value as Relazione } : x))}>{Object.entries(RELAZIONI).map(([key, l]) => <option key={key} value={key}>{l}</option>)}</select>
@@ -528,12 +537,16 @@ export function NuovoSocioModal({ onClose, perIniziativa, tipoIniziale }: { onCl
             <div className="flex gap-2"><input className={inputCls + ' font-mono'} value={f.tessera} placeholder={tipo === 'SE' ? 'Anche alla validazione' : 'Facoltativa'} onChange={e => setF({ ...f, tessera: e.target.value })} onBlur={() => { if (!tes.errore && tes.tessera !== f.tessera) setF({ ...f, tessera: tes.tessera }) }} />
               <button type="button" className={btnPiccoloSec + ' whitespace-nowrap'} onClick={() => setF({ ...f, tessera: prossimaTessera(db.tessera) })}>{prossimaTessera(db.tessera)}</button></div>
           </Campo>}
-          <Campo label="Email"><input className={inputCls} value={f.email} onChange={e => setF({ ...f, email: e.target.value })} /></Campo>
+          <Campo label="Email" hint={notaEmail ? <span className="text-sky-300">{notaEmail}</span> : undefined}>
+            <input className={inputCls} value={f.email} onChange={e => { setF({ ...f, email: e.target.value }); setNotaEmail('') }} />
+            {!f.email.trim() && tipo !== 'FAM' && (daAnagrafica ? !!scelto : f.cognome.trim().length >= 2) &&
+              <CercaRubrica query={daAnagrafica && scelto ? { matricola: scelto.matricola } : { cognome: f.cognome.trim(), nome: f.nome.trim() }} onEmail={(email, nota) => { setF(x => ({ ...x, email })); setNotaEmail(nota) }} />}
+          </Campo>
           <Campo label="Note"><input className={inputCls} value={f.note} onChange={e => setF({ ...f, note: e.target.value })} /></Campo>
         </div>
         <CampiContatti s={null} fc={fc} fa={fa} onC={setFc} onA={setFa} />
         {(tipo === 'SE' || (tipo === 'EST' && !estDaPgs)) && <p className="text-xs text-amber-400/90">{tipo === 'SE' ? 'Il socio esterno' : "L'esterno"} resta fuori da eventi e report finché non viene validato nella scheda «Da validare»{perIniziativa ? ", anche se è già aggiunto all'evento" : ''}.</p>}
-        {tipo === 'FAM' && <p className="text-xs text-slate-500">Il familiare non si valida a parte: vale finché almeno uno dei suoi soci è attivo.</p>}
+        {tipo === 'FAM' && <p className="text-xs text-slate-500">Il familiare non si valida a parte: vale finché almeno uno dei suoi soci o esterni è attivo. Se è legato solo a esterni è un «familiare di esterno».</p>}
       </div>
     </Modale>
   )

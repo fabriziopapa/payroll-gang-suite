@@ -10,6 +10,8 @@
 import type { Alimentari, Contatti } from './contatti'
 
 export type TipoPersona = 'SD' | 'SE' | 'EST' | 'FAM'
+/** Gruppi di partecipanti di un evento: le tipologie, con FEX = familiari di esterni (26.11.11.3). */
+export type Gruppo = TipoPersona | 'FEX'
 export type StatoPersona = 'ATTIVO' | 'DA_VALIDARE' | 'RIFIUTATO' | 'CESSATO' | 'ELIMINATO'
 export type Relazione = 'CONIUGE' | 'FIGLIO'
 export type Modalita = 'SCELTA' | 'NESSUNA' | 'ORDINE' | 'TURNI' | 'MAGAZZINO'
@@ -83,7 +85,7 @@ export interface Richiesta {
 export interface Iniziativa {
   id: string; tipo: string; titolo: string; anno: number; data: string; scadenza: string | null
   stato: 'BOZZA' | 'APERTA' | 'CHIUSA'; modalita: Modalita
-  modoPart: 'GRUPPI' | 'SINGOLI'; gruppi: TipoPersona[]; sedi: string[]; predefinita: string | null
+  modoPart: 'GRUPPI' | 'SINGOLI'; gruppi: Gruppo[]; sedi: string[]; predefinita: string | null
   fornitore: string; pagamento: string; note: string; quota: number
   opzioni: Opzione[]; prodotti: Prodotto[]; periodi: Periodo[]; articoli: Articolo[]; sconti: Sconti
   archiviata: boolean; archiviataDa: string | null; archiviataIl: string | null
@@ -166,7 +168,7 @@ export function daStato(s: StatoApi): Db {
       periodi: arr<Periodo>(c['periodi']),
       articoli: arr<Articolo>(c['articoli']),
       sconti: (c['sconti'] && typeof c['sconti'] === 'object' ? c['sconti'] : {}) as Sconti,
-      gruppi: i.gruppi as TipoPersona[],
+      gruppi: i.gruppi as Gruppo[],
       scelte: i.scelte as Record<string, Scelta>,
       richieste: i.richieste.map(r => ({ ...r, sconto: (r.sconto ?? null) as ScontoPers | null })),
     }

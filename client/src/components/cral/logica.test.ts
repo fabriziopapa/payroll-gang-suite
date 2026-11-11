@@ -206,3 +206,32 @@ test('tessera nel formato: spento come prima, acceso completa o rifiuta', () => 
   assert.deepEqual(tesseraNelFormato({ ...V, riammissione: 'SUFFISSO' }, '0042/01'), { tessera: '0042/01' })
   assert.deepEqual(tesseraNelFormato({ ...V, riammissione: 'SUFFISSO', sepSuffisso: '' }, '004201'), { tessera: '004201' })
 })
+
+// 26.11.11.3: familiari di esterni
+import { catPersona, famDiEsterno, gruppoDi, nomeTipologia } from './logica.ts'
+test('familiari di esterni: gruppo a sé, sconto dell\'esterno, i familiari dei soci non cambiano', () => {
+  const extra = [
+    P('FAM-0004', 'FAM', 'GIALLI', 'Leo', { legami: [{ socio: 'EXT-0002', relazione: 'FIGLIO' }] }),            // figlio di esterno
+    P('FAM-0005', 'FAM', 'NERI', 'Ada', { legami: [{ socio: '090003', relazione: 'FIGLIO' }] }),                // figlia di dipendente non socio
+    P('FAM-0006', 'FAM', 'ROSSI', 'Bea', { legami: [{ socio: 'EXT-0002', relazione: 'FIGLIO' }, { socio: '090001', relazione: 'FIGLIO' }] }), // anche di un socio
+    P('FAM-0007', 'FAM', 'VIOLA', 'Ivo', { legami: [{ socio: 'EXT-0002', relazione: 'FIGLIO' }, { socio: '090004', relazione: 'FIGLIO' }] }), // socio cessato
+  ]
+  const soci = [...SOCI, ...extra]
+  const d = db({ soci, perId: new Map(soci.map(s => [s.id, s])) })
+  const p = (id: string) => d.perId.get(id)!
+  assert.equal(famDiEsterno(d, p('FAM-0001')), false)
+  assert.equal(famDiEsterno(d, p('FAM-0004')), true)
+  assert.equal(famDiEsterno(d, p('FAM-0006')), false, 'con un socio attivo resta dei soci')
+  assert.equal(famDiEsterno(d, p('FAM-0007')), true, 'il socio è cessato: conta l\'esterno attivo')
+  assert.equal(gruppoDi(d, p('FAM-0004')), 'FEX'); assert.equal(gruppoDi(d, p('FAM-0001')), 'FAM'); assert.equal(gruppoDi(d, p('090001')), 'SD')
+  assert.equal(nomeTipologia(d, p('FAM-0004')), 'Familiare di esterno'); assert.equal(nomeTipologia(d, p('FAM-0001')), 'Familiare')
+  // eventi: il gruppo dei familiari dei soci non prende i familiari di esterni, e viceversa
+  const ids = (g: Iniziativa['gruppi']) => destinatari(d, evento({ gruppi: g })).map(s => s.id).filter(x => x.startsWith('FAM'))
+  assert.deepEqual(ids(['FAM']), ['FAM-0001', 'FAM-0002', 'FAM-0006'])
+  assert.deepEqual(ids(['FEX']), ['FAM-0004', 'FAM-0005', 'FAM-0007'])
+  // sconti: la categoria dell'esterno (o dipendente non socio), mai «Familiari»
+  assert.equal(catPersona(p('FAM-0001'), d), 'FAM')
+  assert.equal(catPersona(p('FAM-0004'), d), 'EST')
+  assert.equal(catPersona(p('FAM-0005'), d), 'DIP')
+  assert.equal(catPersona(p('FAM-0004')), 'FAM', 'senza db resta il comportamento di prima')
+})

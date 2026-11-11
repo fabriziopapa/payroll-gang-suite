@@ -9,7 +9,7 @@ import { nomiEsigenze } from './contatti'
 import { partecipantiEffettivi, riepilogoAlimentare } from './logica'
 import type { Db, Iniziativa, Persona, QuotaSocio, Richiesta, StatoPeriodo } from './tipi'
 import {
-  CAT_SCONTO_1, GRUPPI, MESI, MODI_QUOTA, TIPOLOGIE, aCaricoDi, catSconto, conScontiIni, contenutoTot, contiMagazzino, descrScontoPers,
+  CAT_SCONTO_1, GRUPPI, MESI, nomeTipologia, MODI_QUOTA, TIPOLOGIE, aCaricoDi, catSconto, conScontiIni, contenutoTot, contiMagazzino, descrScontoPers,
   destinatari, dovutoTurni, eSocio, eta, fmtData, fmtImp, fmtQ, fmtSconto, gruppiProdotti, haOrdinato, importoRichiesta, iscrittoTurni,
   movimentiMagazzino, nettoSocio, nomeDi, nominativo, ordineRichieste, pagaPer, perUnita, periodiDovuti, persDi, persona, qta, quotaAnno,
   quotaDi, quotaSocio, regolaCat, regolaTurni, riepilogo, righeOrdiniPerSede, rifDi, scontoOrdine, scontoRichiesta, sedeNome, sociQuota,
@@ -103,7 +103,7 @@ export function costruisciReport(db: Db, cfg: CfgReport, oggiIso: string): Repor
     if (cfg.tipo === 'settimane') {
       const righe: Cella[][] = []
       for (const p of per) ordina(dest.filter(s => pagaPer(statoPer(ini, s.id, p.id)) || (cfg.includiTolte && statoPer(ini, s.id, p.id) === 'T'))).forEach(s =>
-        righe.push([`${p.nome} · ${fmtData(p.dal)} – ${fmtData(p.al)}`, nominativo(s), ...(cfg.eta ? [etaDi(s, ini.data)] : []), TIPOLOGIE[s.tipo][0], ...(cfg.aCarico ? [aCaricoDi(db, ini, s)] : []), stLab[statoPer(ini, s.id, p.id)], ...(cfg.presenze ? ['', '', '', '', ''] : []), ...(cfg.firma ? [''] : [])]))
+        righe.push([`${p.nome} · ${fmtData(p.dal)} – ${fmtData(p.al)}`, nominativo(s), ...(cfg.eta ? [etaDi(s, ini.data)] : []), nomeTipologia(db, s), ...(cfg.aCarico ? [aCaricoDi(db, ini, s)] : []), stLab[statoPer(ini, s.id, p.id)], ...(cfg.presenze ? ['', '', '', '', ''] : []), ...(cfg.firma ? [''] : [])]))
       return { titolo: `${ini.titolo} · elenco per settimana`, intest: ['Settimana', 'Nominativo', ...(cfg.eta ? ['Età'] : []), 'Tipologia', ...(cfg.aCarico ? ['Riferimento'] : []), 'Stato', ...(cfg.presenze ? ['Lun', 'Mar', 'Mer', 'Gio', 'Ven'] : []), ...(cfg.firma ? ['Firma'] : [])], gruppi: true, righe }
     }
     if (cfg.tipo === 'scelte') {
@@ -117,7 +117,7 @@ export function costruisciReport(db: Db, cfg: CfgReport, oggiIso: string): Repor
       const coda = () => [...(cfg.note ? [''] : []), ...(cfg.firma ? [''] : [])]
       const riga = (s: Persona): Cella[] => {
         const dov = dovutoTurni(db, ini, s), ver = ini.scelte[s.id]?.versato ?? 0, pp = persDi(ini, s.id)
-        return [nominativo(s), ...(cfg.eta ? [etaDi(s, ini.data)] : []), TIPOLOGIE[s.tipo][0], ...(conRifCol ? [aCaricoDi(db, ini, s)] : []),
+        return [nominativo(s), ...(cfg.eta ? [etaDi(s, ini.data)] : []), nomeTipologia(db, s), ...(conRifCol ? [aCaricoDi(db, ini, s)] : []),
           ...per.map(p => ({ '': '', P: 'P', F: 'F', T: 'tolta' } as Record<StatoPeriodo, string>)[statoPer(ini, s.id, p.id)]), periodiDovuti(ini, s.id), fmtImp(quotaDi(db, ini, s)),
           pp ? (pp.tipo === 'NO' ? 'nessuno (a mano)' : `${fmtSconto(pp)} sul totale (a mano)`) : (fmtSconto(regolaTurni(db, ini, s)) || '—'),
           fmtImp(dov), fmtImp(ver), fmtImp(dov - ver), ...(cfg.note ? [ini.scelte[s.id]?.note ?? ''] : []), ...(cfg.firma ? [''] : [])]

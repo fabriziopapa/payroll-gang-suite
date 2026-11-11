@@ -12,8 +12,8 @@ import CopiaLiquidazioneModal from '../components/CopiaLiquidazioneModal'
 import { useDebounce } from '../hooks/useDebounce'
 import { hasCriteria, hasTargeted, EMPTY_CRITERIA, type GroupSearchCriteria } from '../utils/groupSearch'
 import ArchiviaLiquidazioneModal from '../components/ArchiviaLiquidazioneModal'
+import { PER_PAGINA_MAX, leggiPerPagina, normalizzaPerPagina, numeriPagina, scriviPerPagina } from '../utils/perPagina'
 
-const PAGE_SIZE = 6
 
 export default function DashboardPage() {
   const {
@@ -25,6 +25,14 @@ export default function DashboardPage() {
 
   const [filter, setFilter]               = useState<'tutte' | 'bozza' | 'archiviata'>('bozza')
   const [page, setPage]                   = useState(1)
+  // 26.11.11.3: liquidazioni per pagina scritte a mano (iniziale 10), ricordate in questo browser
+  const [PAGE_SIZE, setPerPagina]         = useState(() => leggiPerPagina('dashboard'))
+  const [perPaginaTxt, setPerPaginaTxt]   = useState(() => String(leggiPerPagina('dashboard')))
+  const applicaPerPagina = (txt: string) => {
+    const n = normalizzaPerPagina(txt)
+    setPerPaginaTxt(String(n))
+    if (n !== PAGE_SIZE) { setPerPagina(n); scriviPerPagina('dashboard', n); setPage(1) }
+  }
   const [deleting, setDeleting]           = useState<string | null>(null)
   const [archiving, setArchiving]         = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
@@ -317,10 +325,21 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between mt-4 px-1 text-sm text-slate-400">
-              <span>{(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} di {filtered.length}</span>
-              <div className="flex items-center gap-1">
+          {filtered.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 mt-4 px-1 text-sm text-slate-400">
+              <div className="flex flex-wrap items-center gap-3">
+                <span>{(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} di {filtered.length}</span>
+                <label className="flex items-center gap-2">
+                  <span>Per pagina</span>
+                  <input type="number" inputMode="numeric" min={1} max={PER_PAGINA_MAX} value={perPaginaTxt}
+                    onChange={e => setPerPaginaTxt(e.target.value)}
+                    onBlur={e => applicaPerPagina(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') applicaPerPagina((e.target as HTMLInputElement).value) }}
+                    aria-label="Liquidazioni per pagina"
+                    className="w-20 min-h-[2.5rem] px-2 rounded-md bg-slate-950 border border-slate-700 text-slate-100 tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500/50" />
+                </label>
+              </div>
+              {totalPages > 1 && <div className="flex items-center gap-1">
                 <button
                   onClick={() => setPage(p => Math.max(1, p - 1))}
                   disabled={page <= 1}
@@ -328,7 +347,7 @@ export default function DashboardPage() {
                              transition disabled:opacity-30 disabled:cursor-not-allowed
                              flex items-center justify-center"
                 >‹</button>
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                {numeriPagina(totalPages, page).map((p, i) => p === '…' ? <span key={`gap${i}`} className="px-1 text-slate-600" aria-hidden="true">…</span> : (
                   <button
                     key={p}
                     onClick={() => setPage(p)}
@@ -344,7 +363,7 @@ export default function DashboardPage() {
                              transition disabled:opacity-30 disabled:cursor-not-allowed
                              flex items-center justify-center"
                 >›</button>
-              </div>
+              </div>}
             </div>
           )}
         </>

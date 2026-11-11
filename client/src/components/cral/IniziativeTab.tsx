@@ -8,9 +8,9 @@ import { nomiEsigenze } from './contatti'
 import { EsportaElenco } from './Esporta'
 import { useState, type ReactNode } from 'react'
 import { cralApi, type CralIniziativaBody } from '../../api/endpoints'
-import type { Iniziativa, Modalita, Persona, Prodotto, PatchScelta, TipoPersona } from './tipi'
+import type { Gruppo, Iniziativa, Modalita, Persona, Prodotto, PatchScelta } from './tipi'
 import {
-  GRUPPI, TIPOLOGIE, catPersona, contiMagazzino, contiOrdine, contiTurni, descrPart, destinatari, etichettaPers, fmtData, fmtEuro, fmtImp,
+  GRUPPI, GRUPPI_EVENTO, NOMI_GRUPPO, catPersona, gruppoDi, contiMagazzino, contiOrdine, contiTurni, descrPart, destinatari, etichettaPers, fmtData, fmtEuro, fmtImp,
   fmtQ, generaSettimane, gruppiProdotti, haOrdinato, nettoSocio, nominativo, norm, parseEuro, partecipantiEffettivi, riepilogoAlimentare, perUnita, persDi, prodLabel, qta, regolaCat,
   riassuntoSconti, riepilogo, righeOrdiniPerSede, sedeBreve, sedeNome, tipNome, totaleSocio,
 } from './logica'
@@ -84,7 +84,7 @@ export function IniziativeTab() {
 type ProdTxt = Prodotto & { prezzoTxt: string; maxTxt: string; contTxt: string }
 interface FormEvento {
   tipo: string; titolo: string; anno: number; data: string; scadenza: string; stato: Iniziativa['stato']; modalita: Modalita
-  modoPart: Iniziativa['modoPart']; gruppi: TipoPersona[]; sedi: string[]; predefinita: string | null
+  modoPart: Iniziativa['modoPart']; gruppi: Gruppo[]; sedi: string[]; predefinita: string | null
   fornitore: string; pagamento: string; note: string
   opzioni: Iniziativa['opzioni']; prodotti: ProdTxt[]
   periodi: Array<{ id: string; nome: string; dal: string; al: string; postiTxt: string }>
@@ -261,10 +261,10 @@ function IniziativaModal({ id, onClose, onCreata }: { id: string | null; onClose
           {f.modoPart === 'GRUPPI' ? <>
             <div><p className="text-xs text-slate-400 mb-1.5">Gruppi (anche più di uno)</p>
               <div className="flex flex-wrap gap-1.5">
-                {GRUPPI.map(g => { const on = f.gruppi.includes(g); const n = db.soci.filter(x => x.tipo === g && x.stato === 'ATTIVO').length; return <button key={g} onClick={() => setF({ ...f, gruppi: on ? f.gruppi.filter(x => x !== g) : [...f.gruppi, g] })} className={chipCls(on)}>{on && <Ico d={D.check} cls="w-3 h-3" />}{TIPOLOGIE[g][0]} <span className="text-slate-500 tabular-nums">{n}</span></button> })}
+                {GRUPPI_EVENTO.map(g => { const on = f.gruppi.includes(g); const n = db.soci.filter(x => x.stato === 'ATTIVO' && gruppoDi(db, x) === g).length; return <button key={g} onClick={() => setF({ ...f, gruppi: on ? f.gruppi.filter(x => x !== g) : [...f.gruppi, g] })} className={chipCls(on) + (g === 'FEX' ? ' border-dashed' : '')}>{on && <Ico d={D.check} cls="w-3 h-3" />}{NOMI_GRUPPO[g]} <span className="text-slate-500 tabular-nums">{n}</span></button> })}
               </div>
               {!f.gruppi.length && <p className="text-xs text-red-300 mt-1.5">Scegli almeno un gruppo.</p>}
-              {f.gruppi.includes('FAM') && <p className="text-xs text-slate-500 mt-1.5">I familiari partecipano finché il loro socio è attivo.</p>}</div>
+              {(f.gruppi.includes('FAM') || f.gruppi.includes('FEX')) && <p className="text-xs text-slate-500 mt-1.5">I familiari partecipano finché almeno una delle loro persone di riferimento è attiva.{f.gruppi.includes('FEX') ? ' I familiari di esterni hanno la categoria di sconto del loro esterno.' : ''}</p>}</div>
             <div><p className="text-xs text-slate-400 mb-1.5">Sedi coinvolte</p>
               <div className="flex flex-wrap gap-1.5">
                 <button onClick={() => setF({ ...f, sedi: [] })} className={chipCls(!f.sedi.length)}>Tutte</button>
@@ -409,9 +409,9 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
     if (solo === 'dapagare') return haOrdinato(ini, s.id) && !ini.scelte[s.id]?.pagato
     return ini.scelte[s.id]?.opz === solo
   }
-  const lista = dest.filter(s => (!q || norm(`${nominativo(s)} ${s.tessera} ${s.id}`).includes(q)) && (!sede || s.sede === sede) && (!tipF || s.tipo === tipF) && filtroSolo(s)).sort(confronta)
+  const lista = dest.filter(s => (!q || norm(`${nominativo(s)} ${s.tessera} ${s.id}`).includes(q)) && (!sede || s.sede === sede) && (!tipF || gruppoDi(db, s) === tipF) && filtroSolo(s)).sort(confronta)
   const mancanti = dest.filter(s => !ini.scelte[s.id]?.opz).length
-  const esclusi = db.soci.filter(s => s.stato === 'DA_VALIDARE' && (singoli ? partSet.has(s.id) : ini.gruppi.includes(s.tipo))).length
+  const esclusi = db.soci.filter(s => s.stato === 'DA_VALIDARE' && (singoli ? partSet.has(s.id) : ini.gruppi.includes(gruppoDi(db, s)))).length
   const chiusa = ini.stato === 'CHIUSA' || ini.archiviata
   const archivia = (v: boolean) => { void esegui(() => cralApi.archivia(id, v), v ? 'Evento archiviato' : 'Evento ripristinato').then(r => { if (r && v) onBack() }) }
   // la fonte («modulo», «predef.») resta finché non si cambia a mano la scelta o le quantità
@@ -473,7 +473,7 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
                   {conti && <><option value="ordinato">Hanno ordinato ({conti.ord.length})</option><option value="nonordinato">Non hanno ordinato</option><option value="dapagare">Da pagare</option></>}
                   <option value="daconsegnare">Da consegnare</option>
                   {mod === 'SCELTA' && ini.opzioni.map(o => <option key={o.id} value={o.id}>{o.etichetta}</option>)}</select>
-                <select className={inputCls + ' sm:w-44'} value={tipF} onChange={e => setTipF(e.target.value)}><option value="">Tutte le tipologie</option>{GRUPPI.map(g => <option key={g} value={g}>{TIPOLOGIE[g][0]}</option>)}</select>
+                <select className={inputCls + ' sm:w-44'} value={tipF} onChange={e => setTipF(e.target.value)}><option value="">Tutte le tipologie</option>{GRUPPI_EVENTO.map(g => <option key={g} value={g}>{NOMI_GRUPPO[g]}</option>)}</select>
                 <div className="flex gap-1 items-center"><select className={inputCls + ' sm:w-56'} value={ord.k} onChange={e => setOrd({ k: e.target.value, dir: 1 })} title="Ordina per">{Object.entries(CHIAVI_ORD).map(([k, [l]]) => <option key={k} value={k}>Ordina: {l}</option>)}</select>
                   <button className={btnPiccoloSec + ' h-[38px]'} title={ord.dir > 0 ? 'Crescente' : 'Decrescente'} onClick={() => setOrd({ ...ord, dir: ord.dir === 1 ? -1 : 1 })}>{ord.dir > 0 ? 'A→Z' : 'Z→A'}</button></div>
                 {mod === 'SCELTA' && ini.predefinita && mancanti > 0 && !chiusa && <button className={btnPiccoloSec} onClick={() => setConfPred(true)}>Assegna la predefinita ai {mancanti} senza scelta</button>}
@@ -502,7 +502,7 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
                           {sc?.opz && sc.fonte === 'predefinita' && <span className="text-[10px] text-indigo-400 uppercase tracking-wider">predef.</span>}</div></td>}
                         {mod === 'ORDINE' && ini.prodotti.map(p => <td key={p.id} className="px-2 py-1.5 text-center"><input type="number" min="0" step={p.unita === 'kg' ? '0.5' : '1'} max={p.max ?? undefined} disabled={chiusa} className={inputW + ' py-1 w-16 text-center tabular-nums ' + (qta(ini, s.id, p.id) ? 'border-pink-700 text-white' : 'text-slate-500')} value={qta(ini, s.id, p.id)} onChange={e => setQta(s, p, e.target.value)} aria-label={`${prodLabel(db, p)} per ${nominativo(s)}`} /></td>)}
                         {mod === 'ORDINE' && <><td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{ordinato ? <>{nettoSocio(db, ini, s.id) !== totaleSocio(ini, s.id) && <div className="text-[11px] text-slate-500 line-through">{fmtEuro(totaleSocio(ini, s.id))}</div>}<span className="text-white">{fmtEuro(nettoSocio(db, ini, s.id))}</span>
-                          <div><button disabled={chiusa} className={`text-[11px] ${persDi(ini, s.id) ? 'text-amber-300' : 'text-slate-500 hover:text-slate-300'}`} onClick={() => setSpOrd(s)}>{etichettaPers(persDi(ini, s.id), regolaCat(ini, catPersona(s)))}</button></div></> : <span className="text-slate-600">—</span>}</td>
+                          <div><button disabled={chiusa} className={`text-[11px] ${persDi(ini, s.id) ? 'text-amber-300' : 'text-slate-500 hover:text-slate-300'}`} onClick={() => setSpOrd(s)}>{etichettaPers(persDi(ini, s.id), regolaCat(ini, catPersona(s, db)))}</button></div></> : <span className="text-slate-600">—</span>}</td>
                           <td className="px-3 py-2 text-center"><input type="checkbox" disabled={chiusa || !ordinato} className="accent-emerald-500 w-4 h-4" checked={!!sc?.pagato} onChange={e => aggiorna(s.id, { pagato: e.target.checked })} aria-label={`Pagato da ${nominativo(s)}`} /></td>
                           <td className="px-3 py-1.5"><input disabled={chiusa} maxLength={500} className={inputCls + ' py-1 text-xs min-w-[150px]'} defaultValue={sc?.note ?? ''} key={`${s.id}-${sc?.note ?? ''}`} placeholder={ordinato ? 'Es. resto da dare' : ''} onBlur={e => { if (e.target.value !== (sc?.note ?? '')) aggiorna(s.id, { note: e.target.value || null }) }} /></td></>}
                         <td className="px-5 py-2 text-center"><input type="checkbox" disabled={ini.archiviata || ini.stato === 'BOZZA' || (mod === 'ORDINE' && !ordinato)} className="accent-indigo-500 w-4 h-4" checked={!!sc?.consegnato} onChange={e => aggiorna(s.id, { consegnato: e.target.checked })} aria-label={`Consegnato a ${nominativo(s)}`} /></td>
@@ -513,7 +513,7 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
               </table></Scorrevole>
             </div>
           </>}
-      {spOrd && <ScontoPersonaleModal titolo={`Sconto · ${nominativo(spOrd)}`} sotto="Sull'ordine intero" regola={regolaCat(ini, catPersona(spOrd))} valore={persDi(ini, spOrd.id)} lordo={totaleSocio(ini, spOrd.id)} onClose={() => setSpOrd(null)}
+      {spOrd && <ScontoPersonaleModal titolo={`Sconto · ${nominativo(spOrd)}`} sotto="Sull'ordine intero" regola={regolaCat(ini, catPersona(spOrd, db))} valore={persDi(ini, spOrd.id)} lordo={totaleSocio(ini, spOrd.id)} onClose={() => setSpOrd(null)}
         onSalva={v => { aggiorna(spOrd.id, { scontoPers: v }); setSpOrd(null); avviso(v ? 'Sconto personale salvato' : 'Sconto automatico') }} />}
       {edit && <IniziativaModal id={id} onClose={() => setEdit(false)} />}
       {addPar && <AggiungiPartecipanteModal ini={ini} onClose={() => setAddPar(false)} />}

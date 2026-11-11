@@ -8,7 +8,7 @@ import { createContext, useContext, useEffect, type ReactNode } from 'react'
 import { ApiError } from '../../api/client'
 import { showToast } from '../ToastManager'
 import type { AnagraficaPgs, Db, Lotto, PatchScelta, Persona, QuotaSocio, Richiesta } from './tipi'
-import { RELAZIONI, TIPOLOGIE, fmtData, nominativo, sociDi } from './logica'
+import { RELAZIONI, TIPOLOGIE, eSocio, famDiEsterno, fmtData, nominativo, sociDi } from './logica'
 
 export { Scorrevole, useScorrimento } from '../Scorrevole'
 export { btnPrimario, btnSecondario, btnPiccolo, inputCls, cardCls, etichettaCls } from '../versamenti/ui'
@@ -33,8 +33,8 @@ const TONI: Record<Tono, string> = {
   cyan:   'bg-cyan-950/50 text-cyan-300 border-cyan-800',
   fam:    'bg-pink-950/40 text-pink-300 border-pink-800',
 }
-export function Pill({ children, tono = 'neutro', title }: { children: ReactNode; tono?: Tono; title?: string }) {
-  return <span title={title} className={`text-[11px] font-semibold px-1.5 py-0.5 rounded-full border whitespace-nowrap ${TONI[tono]}`}>{children}</span>
+export function Pill({ children, tono = 'neutro', title, tratteggio }: { children: ReactNode; tono?: Tono; title?: string; tratteggio?: boolean }) {
+  return <span title={title} className={`text-[11px] font-semibold px-1.5 py-0.5 rounded-full border whitespace-nowrap ${TONI[tono]}${tratteggio ? ' border-dashed !bg-transparent' : ''}`}>{children}</span>
 }
 
 export const Ico = ({ d, cls = 'w-4 h-4' }: { d: string | string[]; cls?: string }) => (
@@ -113,13 +113,17 @@ export function StatoSocio({ s }: { s: Persona }) {
   if (s.stato === 'ELIMINATO') return <Pill tono="err" title={`Eliminato il ${fmtData(s.eliminatoIl)}${s.statoPrima ? ` · prima: ${s.statoPrima.toLowerCase().replace('_', ' ')}` : ''}`}>Eliminato</Pill>
   return <Pill>Cessato</Pill>
 }
-export function Origine({ s }: { s: Pick<Persona, 'tipo'> }) {
+export function Origine({ s }: { s: Pick<Persona, 'tipo'> & { id?: string } }) {
+  // 26.11.11.3: il familiare di un esterno ha la sua etichetta, azzurra e tratteggiata
+  const c = useContext(Ctx)
+  const p = s.tipo === 'FAM' && s.id ? c?.db.perId.get(s.id) : undefined
+  if (p && c && famDiEsterno(c.db, p)) return <Pill tono="cyan" tratteggio title="Coniuge o figlio/figlia di uno o più esterni (non soci)">Familiare di esterno</Pill>
   const [l, t, d] = TIPOLOGIE[s.tipo]
   return <Pill tono={t} title={d}>{l}</Pill>
 }
 export function DiChi({ db, s }: { db: Db; s: Persona }) {
   const ls = sociDi(db, s)
-  return ls.length ? <span className="text-xs text-slate-500">{ls.map(l => `${RELAZIONI[l.relazione]} di ${nominativo(l.s)}`).join(' · ')}</span> : null
+  return ls.length ? <span className="text-xs text-slate-500">{ls.map(l => `${RELAZIONI[l.relazione]} di ${nominativo(l.s)}${eSocio(l.s) ? '' : ' (esterno)'}`).join(' · ')}</span> : null
 }
 export function TipoChip({ db, id }: { db: Db; id: string }) {
   const t = db.tipi.find(x => x.id === id)
@@ -150,6 +154,7 @@ export async function fileBase64(f: File): Promise<string> {
 const ERRORI: Record<string, string> = {
   TESSERA_DOPPIA: 'Tessera già assegnata a un altro socio.',
   TESSERA_FORMATO: 'La tessera non è nel formato dei Parametri (Parametri › Tessera CRAL).',
+  RUBRICA_NON_RAGGIUNGIBILE: 'Rubrica d\'Ateneo non raggiungibile: riprova più tardi. Il motivo è in Parametri › Rubrica d\'Ateneo.',
   MATRICOLA_GIA_SOCIO: 'Questa matricola è già nel CRAL.',
   SOCIO_NON_TROVATO: 'Persona non trovata: ricarica la pagina.',
   SEDE_SCONOSCIUTA: 'Sede sconosciuta.',

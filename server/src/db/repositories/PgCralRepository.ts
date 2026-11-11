@@ -330,12 +330,12 @@ export class PgCralRepository implements ICralRepository {
     if (!s) throw new Annulla('SEDE_SCONOSCIUTA')
   }
 
-  /** Un familiare si lega solo a soci (dipendenti o esterni), mai a se stesso. */
+  /** Un familiare si lega a soci (dipendenti o esterni) o, dalla 26.11.11.3, a esterni; mai a un familiare ne' a se stesso. */
   private async verificaLegami(tx: Conn, id: string, legami: Array<{ socio: string }>): Promise<void> {
     const ids = [...new Set(legami.map(l => l.socio))]
     if (ids.length !== legami.length || ids.includes(id)) throw new Annulla('LEGAME_NON_VALIDO')
     const soci = await tx.select({ id: schema.cralSoci.id, tipo: schema.cralSoci.tipo }).from(schema.cralSoci).where(inArray(schema.cralSoci.id, ids))
-    if (soci.length !== ids.length || soci.some(s => s.tipo !== 'SD' && s.tipo !== 'SE')) throw new Annulla('LEGAME_NON_VALIDO')
+    if (soci.length !== ids.length || soci.some(s => s.tipo !== 'SD' && s.tipo !== 'SE' && s.tipo !== 'EST')) throw new Annulla('LEGAME_NON_VALIDO')
   }
 
   async modificaPersona(id: string, patch: CralModificaPersona, userId: string | null): Promise<CralSocioRow | CralErrore> {
@@ -358,11 +358,8 @@ export class PgCralRepository implements ICralRepository {
       if (!conTessera) set.tessera = null
       // solo una tessera che cambia passa dal formato: quella gia' assegnata resta com'e'
       else if (patch.tessera !== undefined) set.tessera = patch.tessera && patch.tessera !== s.tessera ? nelFormato((await this.parametri(tx)).tessera, patch.tessera) : patch.tessera || null
-      // Un socio che diventa esterno non puo' piu' avere familiari legati a lui.
-      if (!conTessera && (s.tipo === 'SD' || s.tipo === 'SE')) {
-        const [f] = await tx.select({ id: schema.cralFamiliariLegami.familiareId }).from(schema.cralFamiliariLegami).where(eq(schema.cralFamiliariLegami.socioId, id)).limit(1)
-        if (f) throw new Annulla('LEGAME_NON_VALIDO')
-      }
+      // 26.11.11.3: un socio che diventa esterno tiene i suoi familiari, che diventano
+      // «familiari di esterno» (prima era vietato). Il client lo dice prima di salvare.
       try { await tx.update(schema.cralSoci).set(set).where(eq(schema.cralSoci.id, id)) }
       catch (e) { if (violazioneUnica(e)) throw new Annulla('TESSERA_DOPPIA'); throw e }
       if (set.tessera) await this.avanzaTessera(tx, (await this.parametri(tx)).tessera, set.tessera)

@@ -37,6 +37,8 @@
 //   GET    /export/archivio?sezioni=           archivio JSON per un altro ambiente
 //   POST   /lotti/archivio                     { file, archivio, sezioni } → lotto da validare
 //   POST   /lotti/t6                           { file, righe } → lotto da validare
+//   GET    /rubrica/cerca                      ?socio | ?matricola | ?cognome&nome → email dalla rubrica d'Ateneo (solo lettura)
+//   GET    /rubrica/stato                      [?prova=1] connessione e scadenza dei certificati
 //   POST   /lotti/t7                           { file, righe } quote versate → lotto da validare
 //   POST   /export/quote                       { anno, ids } → Excel delle quote (stesse colonne del T7)
 //   GET    /lotti | GET /lotti/:id             lotti e variazioni
@@ -61,6 +63,9 @@ import {
   SEZIONI, archivioDaStato, archivioSchema, confrontaArchivio, confrontaT6, confrontaT7, conteggi, personaDaRiga, rigaT6Schema, rigaT7Schema, type Sezione,
 } from '../lib/cralLotti.js'
 import { readFileSync } from 'node:fs'
+import { PgAnagraficheRepository } from '../db/repositories/PgAnagraficheRepository.js'
+import { RubricaNonRaggiungibile, rubricaAteneo, statoCertificati } from '../services/rubrica/rubricaAteneo.js'
+import { trovaInRubrica, type EsitoRubrica } from '../services/rubrica/trova.js'
 import { ID_ESIGENZE, ID_ORIGINI, contattabile, perWhatsapp, type PatchAlimentari, type PatchContatti } from '../lib/cralContatti.js'
 
 const VERSIONE = (() => {
@@ -123,6 +128,49 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     const { q } = z.object({ q: z.string().trim().min(2).max(60) }).parse(request.query)
     const righe = await repo.cercaAnagrafica(q, 20)
     return reply.send({ risultati: righe.map(a => ({ ...a, cognome: a.cognome ?? a.cognNome ?? '', nome: a.nome ?? '' })) })
+  })
+
+  // ── Rubrica d'Ateneo (26.11.11.3) ─────────────────────────
+  // Solo lettura: propone l'email, non scrive nulla (si salva dalla scheda).
+  // Per matricola: idAb dell'anagrafica PGS, poi codice fiscale (che resta
+  // qui: nella risposta non c'e'), poi cognome e nome. Nell'audit mai l'email.
+  const anagRepo = new PgAnagraficheRepository(app.db)
+  app.get('/rubrica/cerca', admin, async (request, reply) => {
+    const q = z.object({ socio: ID_PERSONA.optional(), matricola: MATRICOLA.optional(), cognome: riga(100).optional(), nome: riga(100).optional() })
+      .refine(x => x.socio || x.matricola || (x.cognome ?? '').length >= 2, 'serve socio, matricola o cognome').parse(request.query)
+    let matricola = q.matricola ?? null, cognome = q.cognome ?? '', nome = q.nome ?? ''
+    if (q.socio) {
+      const s = await repo.socio(q.socio)
+      if (!s) return errore(reply, 'SOCIO_NON_TROVATO')
+      matricola = s.matricola ?? null; cognome = s.cognome; nome = s.nome
+    }
+    const a = matricola ? (await repo.cercaAnagrafica(matricola, 5)).find(x => x.matricola === matricola) : undefined
+    if (a) { cognome ||= a.cognome ?? ''; nome ||= a.nome ?? '' }
+    let r: EsitoRubrica
+    try {
+      r = a?.idAb ? await trovaInRubrica(rubricaAteneo, { idAb: a.idAb }) : { esito: 'NON_TROVATA' }
+      if (r.esito !== 'TROVATA') {
+        // il codice fiscale solo se l'idAb non basta, e solo per l'abbinamento
+        const codFisc = matricola ? (await anagRepo.getCodFisByMatricole([matricola]))[matricola] ?? null : null
+        r = await trovaInRubrica(rubricaAteneo, { codFisc, cognome, nome })
+      }
+    } catch (e) {
+      if (e instanceof RubricaNonRaggiungibile) {
+        request.log.warn({ motivo: e.motivo }, 'rubrica d\'Ateneo non raggiungibile')
+        return reply.code(502).send({ error: 'RUBRICA_NON_RAGGIUNGIBILE', motivo: e.motivo })
+      }
+      throw e
+    }
+    await audit(request, 'CRAL_RUBRICA_CONSULTATA', q.socio ?? matricola ?? undefined, {
+      per: q.socio ? 'socio' : matricola ? 'matricola' : 'nome', esito: r.esito, ...(r.esito === 'TROVATA' ? { come: r.come } : {}), ...(r.esito === 'CANDIDATI' ? { candidati: r.candidati.length } : {}),
+    })
+    return reply.send(r)
+  })
+  // Stato della connessione e dei certificati (avviso di scadenza); `prova=1` fa una richiesta vera.
+  app.get('/rubrica/stato', admin, async (request, reply) => {
+    const { prova } = z.object({ prova: z.enum(['1']).optional() }).parse(request.query)
+    if (prova) { try { await rubricaAteneo.verifica() } catch { /* l'esito e' nello stato */ } }
+    return reply.send(statoCertificati())
   })
 
   // ── File e import del libro soci ──────────────────────────
