@@ -6,6 +6,8 @@
 // In fondo, i lavori da fare.
 // ============================================================
 
+import { scaricaModello, type VoceModello } from './ImportDati'
+import { oggi } from './logica'
 import { D, Ico, Pill, avviso, btnPiccoloSec, cardCls, etichettaCls, scarica, useCral, type Scheda, Scorrevole } from './ui'
 
 interface Tracciato {
@@ -16,6 +18,9 @@ interface Tracciato {
   /** cosa, dove, scheda */
   mano: Array<[string, string, Scheda]>
 }
+
+/** Tracciati il cui modello Excel non dipende da un evento: si scarica anche da qui. */
+const EXCEL: Record<string, VoceModello['tracciato'] | undefined> = { T1: 'T1', T4: 'T4', T6: 'T6', T7: 'T7', 'T7-V': 'T7V' }
 
 const TRACCIATI: Tracciato[] = [
   {
@@ -48,7 +53,7 @@ const TRACCIATI: Tracciato[] = [
       ['SCELTA (qualsiasi intestazione)', 'Sì', 'Testo uguale a una delle opzioni dell\'evento', 'AL CIOCCOLATO FONDENTE', 'È la prima colonna che non è data/ora né una chiave (matricola, telefono, email, nominativo): per esempio «Panettone».'],
       ['Informazioni cronologiche', 'No', 'Data e ora della risposta', '07/10/2025 12.07.41', 'Si ignora.'],
     ],
-    note: ['* Serve almeno una chiave fra MATRICOLA/ID/TESSERA, TELEFONO, EMAIL o NOMINATIVO: basta anche il solo numero di telefono.', 'Le righe non agganciate, ambigue o in conflitto restano in elenco con il motivo accanto e si assegnano a mano (prima i candidati possibili).', 'Le colonne chiave si riconoscono dai nomi più usati; se una non viene riconosciuta la indichi con «cambia» e la scelta resta per le volte dopo.', 'Un numero nuovo di una persona senza telefono si può proporre in anagrafica: finisce in «Da validare», senza consenso.', 'Una scelta già presente si sovrascrive e diventa di fonte «modulo».'],
+    note: ['* Serve almeno una chiave fra MATRICOLA/ID/TESSERA, TELEFONO, EMAIL o NOMINATIVO: basta anche il solo numero di telefono.', 'Le righe non agganciate, ambigue o in conflitto restano in elenco con il motivo accanto e si assegnano a mano (prima i candidati possibili).', 'Le colonne chiave si riconoscono dai nomi più usati; se una non viene riconosciuta la indichi con «cambia» e la scelta resta per le volte dopo.', 'Un numero nuovo di una persona senza telefono si può proporre in anagrafica: finisce in «Da validare», senza consenso.', 'Una scelta già presente si sovrascrive e diventa di fonte «modulo».', 'Modello Excel dall\'evento, anche con una riga per partecipante: le righe lasciate senza scelta si saltano, non sono errori.'],
     esempio: 'Informazioni cronologiche;Panettone;Indirizzo email;NOMINATIVO;Cellulare\n07/10/2026 12.07.41;AL CIOCCOLATO FONDENTE;maria.rossi@ateneo.example;;\n08/10/2026 09.14.02;TRADIZIONALE - CON UVETTA E CANDITI;;BIANCHI GIULIA;\n08/10/2026 10.30.00;AL CIOCCOLATO FONDENTE;;;333 123 4567',
     mano: [['La scelta di un socio', 'Eventi › apri › colonna «Scelta» sulla riga del socio', 'iniziative'], ['Chi non ha scelto', 'Eventi › apri › «Assegna la predefinita…» oppure riga per riga', 'iniziative'], ['La consegna', 'Eventi › apri › colonna «Consegnato»', 'iniziative']],
   },
@@ -66,7 +71,7 @@ const TRACCIATI: Tracciato[] = [
       ['PAGATO', 'No', 'SI / NO', 'SI', 'Se SI, l\'ordine risulta pagato.'],
       ['NOTE', 'No', 'Testo libero', 'dare 2,50 di resto', 'Nota dell\'ordine, come la colonna NOTE del foglio.'],
     ],
-    note: ['* Serve almeno una chiave fra MATRICOLA/ID/TESSERA, TELEFONO, EMAIL o NOMINATIVO: basta anche il solo telefono. Ambiguità e conflitti si decidono a mano, con il motivo accanto.', 'Prezzi e totali NON si importano: si calcolano dai prezzi dei prodotti nell\'evento.', 'File SENZA intestazione (es. mele: cognome | nome | quantità | importo): si indica cosa c\'è in ogni colonna; la riga di totale in fondo, senza nome, si ignora.', 'Un ordine importato sostituisce quello già presente per la stessa persona. Le righe non agganciate si assegnano a mano.', 'Le persone devono essere tra i partecipanti dell\'evento: dei gruppi scelti o aggiunte come singoli.'],
+    note: ['* Serve almeno una chiave fra MATRICOLA/ID/TESSERA, TELEFONO, EMAIL o NOMINATIVO: basta anche il solo telefono. Ambiguità e conflitti si decidono a mano, con il motivo accanto.', 'Modello Excel dall\'evento, con una colonna per prodotto e, se vuoi, una riga per partecipante: le righe senza quantità si saltano.', 'Prezzi e totali NON si importano: si calcolano dai prezzi dei prodotti nell\'evento.', 'File SENZA intestazione (es. mele: cognome | nome | quantità | importo): si indica cosa c\'è in ogni colonna; la riga di totale in fondo, senza nome, si ignora.', 'Un ordine importato sostituisce quello già presente per la stessa persona. Le righe non agganciate si assegnano a mano.', 'Le persone devono essere tra i partecipanti dell\'evento: dei gruppi scelti o aggiunte come singoli.'],
     esempio: 'NOMINATIVO;LECCINO - ALU DA 5 LT;FRANTOIANO - PET DA 1 LT;CASTAGNE;PAGATO;NOTE\nROSSI Carla;;1;;SI;\nROSSI Maria;1;2;1,5;;dare 2,50 di resto\n\n(senza intestazione, come le mele)\nROSSI;MARIA;4;10\nBIANCHI;GIULIA;6;15\n;;10;',
     mano: [['L\'ordine di una persona', 'Eventi › apri › quantità sulla riga della persona', 'iniziative'], ['Pagato, consegnato, note', 'Eventi › apri › colonne a destra', 'iniziative'], ['Un partecipante non socio', 'Eventi › apri › Nuovo partecipante', 'iniziative']],
   },
@@ -162,7 +167,9 @@ export function GuideTab() {
   return (
     <div className="flex flex-col gap-4">
       <div className={`${cardCls} p-5 text-sm text-slate-300 flex flex-col gap-2`}>
-        <p className="text-white font-medium">Tutto si fa anche a mano</p>
+        <p className="text-white font-medium">Un modello per ogni tracciato</p>
+        <p className="text-slate-400 max-w-[80ch]">Ogni importazione ha il suo <b className="text-slate-200">modello Excel</b>, accanto al punto in cui si sceglie il file: in Importazione per libro soci (T1), aggiornamento dati (T6) e quote versate (T7); dentro l'evento per risposte (T2), ordini (T3), partecipanti (T4) e iscrizioni (T5). Il primo foglio è da compilare, con le intestazioni che l'importazione riconosce e le celle in formato testo (numeri di telefono, tessere e date restano come li scrivi); il foglio «Esempio» mostra righe di fantasia. I modelli degli eventi hanno le colonne di quell'evento e possono arrivare già con una riga per partecipante (ID e nominativo).</p>
+        <p className="text-white font-medium pt-2">Tutto si fa anche a mano</p>
         <p className="text-slate-400 max-w-[80ch]">Ogni importazione ha il suo tracciato record, qui sotto, e un equivalente manuale. Si creano solo a mano, perché non hanno un file da importare: eventi (strenne, panettoni, colombe, vendite, gite, campi, cinema), opzioni, prodotti con prezzo, settimane e quote dei campi, carichi e richieste di biglietti, tipi, tipologie di prodotto, sedi e quote associative. Il codice fiscale non si raccoglie mai: le persone si distinguono con nominativo e data di nascita.</p>
         <div className="flex flex-wrap gap-2 pt-1">
           {([['Nuova persona', 'soci'], ['Composizione sedi', 'sedi'], ['Nuovo evento', 'iniziative'], ['Quote associative', 'quote'], ['Sedi, tipi e tessera', 'parametri']] as Array<[string, Scheda]>).map(([l, k]) => <button key={l} className={btnPiccoloSec} onClick={() => vaiA(k)}>{l}</button>)}
@@ -186,7 +193,9 @@ export function GuideTab() {
             <div className="grid lg:grid-cols-2 gap-4">
               <div className="flex flex-col gap-2 min-w-0"><div className="flex items-center"><span className={etichettaCls + ' flex-1'}>Esempio (CSV)</span>
                 <button className={btnPiccoloSec} onClick={() => copia(t.esempio)}><Ico d={D.copy} cls="w-3.5 h-3.5" />Copia</button>
-                <button className={btnPiccoloSec + ' ml-1.5'} onClick={() => scarica(`CRAL_${t.id}_modello.csv`, new Blob(['\uFEFF' + t.esempio.replace(/\n/g, '\r\n')], { type: 'text/csv;charset=utf-8' }))}><Ico d={D.download} cls="w-3.5 h-3.5" />Modello</button></div>
+                <button className={btnPiccoloSec + ' ml-1.5'} onClick={() => scarica(`CRAL_${t.id}_modello.csv`, new Blob(['\uFEFF' + t.esempio.replace(/\n/g, '\r\n')], { type: 'text/csv;charset=utf-8' }))}><Ico d={D.download} cls="w-3.5 h-3.5" />Modello CSV</button></div>
+                {EXCEL[t.id] ? <button className={btnPiccoloSec + ' self-start'} title="Primo foglio da compilare (celle in formato testo), foglio «Esempio» con righe di fantasia" onClick={() => void scaricaModello({ etichetta: '', tracciato: EXCEL[t.id]!, anno: +oggi().slice(0, 4) })}><Ico d={D.download} cls="w-3.5 h-3.5" />Modello Excel</button>
+                  : <p className="text-xs text-slate-500">Il modello Excel ha le colonne dell'evento ({t.id === 'T2' ? 'le sue opzioni' : t.id === 'T3' ? 'un prodotto per colonna' : 'una settimana per colonna'}) e, se vuoi, una riga per partecipante: si scarica da {t.dove}.</p>}
                 <pre className="text-xs font-mono text-slate-300 bg-slate-950 border border-slate-800 rounded-lg p-3 overflow-x-auto whitespace-pre pgs-discreto">{t.esempio}</pre></div>
               <div className="flex flex-col gap-2"><span className={etichettaCls}>Stessa cosa a mano, una alla volta</span>
                 <div className="rounded-lg border border-slate-800 divide-y divide-slate-800">

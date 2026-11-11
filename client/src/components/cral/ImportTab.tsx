@@ -16,7 +16,7 @@ import type { AnagraficaPgs, Db, Persona } from './tipi'
 import {
   eSocio, fmtData, leggiData, nominativo, norm, numBase, oggi, risolvi, simNome, spezzaNominativo, tesseraDaTesto, trovaIntestazione,
 } from './logica'
-import { ImportArchivio, ImportT6 } from './ImportDati'
+import { ImportArchivio, ImportT6, Modelli } from './ImportDati'
 import { ImportT7 } from './ImportQuote'
 import {
   Campo, D, Ico, Interruttore, Origine, Pill, PersonaPgs, avviso, chipCls, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario, cardCls,
@@ -85,9 +85,9 @@ export function ImportTab() {
       <div className="flex flex-wrap gap-2">
         {STRADE.map(([k, l, d]) => <button key={k} onClick={() => setStrada(k)} className={`${chipCls(strada === k)} !py-2 flex-col !items-start text-left`} title={d}><span>{l}</span><span className="text-[11px] font-normal text-slate-500">{d}</span></button>)}
       </div>
-      {strada === 'T1' && <LibroSoci />}
-      {strada === 'T6' && <ImportT6 />}
-      {strada === 'T7' && <ImportT7 />}
+      {strada === 'T1' && <><Modelli voci={[{ etichetta: 'Modello Excel del libro soci (T1)', tracciato: 'T1' }]} nota="Va bene anche il foglio «LIBRO SOCI» così com'è." /><LibroSoci /></>}
+      {strada === 'T6' && <><Modelli voci={[{ etichetta: 'Modello Excel vuoto (T6)', tracciato: 'T6' }]} nota="Già compilato con le persone: Soci › Esporta Excel." /><ImportT6 /></>}
+      {strada === 'T7' && <><Modelli voci={[{ etichetta: 'Modello: una riga per socio', tracciato: 'T7', anno: +oggi().slice(0, 4) }, { etichetta: 'Modello: una riga per versamento', tracciato: 'T7V', anno: +oggi().slice(0, 4) }]} nota="Già compilato con i soci: Quote associative › Esporta Excel." /><ImportT7 /></>}
       {strada === 'ARCHIVIO' && <ImportArchivio />}
     </div>
   )

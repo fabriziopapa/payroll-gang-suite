@@ -55,6 +55,7 @@ import {
   unisciDati, usiTolti, type AnagraficaCral, type DatiScelta, type ConfigEvento,
 } from '../lib/cral.js'
 import { leggiFogli, MAX_BYTE_FILE } from '../services/cral/fogli.js'
+import { MODALITA_MODELLO, TRACCIATI_MODELLO, costruisciModello, scriviModello } from '../services/cral/modelli.js'
 import { COLONNE_ELENCO, elencoSoci, foglioQuote, foglioSoci, type ColonnaElenco } from '../services/cral/esporta.js'
 import {
   SEZIONI, archivioDaStato, archivioSchema, confrontaArchivio, confrontaT6, confrontaT7, conteggi, personaDaRiga, rigaT6Schema, rigaT7Schema, type Sezione,
@@ -410,6 +411,25 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
       conTelefono: colonne.some(c => c!.dato === 'telefono'), conAlimentari: colonne.some(c => c!.dato === 'alimentari'), ambiente: ambienteDi(request),
     })
     return reply.send({ righe: righe.length, base64: buf.toString('base64') })
+  })
+
+  // Modello Excel di un tracciato (26.11.11.1). Quelli degli eventi sono costruiti sull'evento e, a richiesta,
+  // hanno gia' una riga per partecipante (ID e nominativo: nessun numero di telefono).
+  app.post('/export/modello', admin, async (request, reply) => {
+    const b = z.object({
+      tracciato: z.enum(TRACCIATI_MODELLO), iniziativa: UUID.optional(), ids: z.array(ID_PERSONA).max(50_000).default([]), anno: ANNO.optional(),
+    }).strict().parse(request.body)
+    const modalita = MODALITA_MODELLO[b.tracciato]
+    const ini = modalita ? (b.iniziativa ? await repo.iniziativa(b.iniziativa) : null) : null
+    if (modalita && !ini) return reply.code(404).send({ error: 'EVENTO_NON_TROVATO' })
+    if (modalita && ini && !modalita.includes(ini.modalita)) return reply.code(400).send({ error: 'TRACCIATO_NON_ADATTO' })
+    const st = await repo.stato()
+    const conPersone = ['T2', 'T3', 'T5'].includes(b.tracciato) && b.ids.length > 0
+    const scelti = new Set(b.ids)
+    const persone = conPersone ? st.soci.filter(s => scelti.has(s.id) && s.stato !== 'ELIMINATO') : []
+    const m = costruisciModello(b.tracciato, st, ini, persone, b.anno ?? new Date().getFullYear())
+    await audit(request, 'CRAL_MODELLO_SCARICATO', ini?.id, { tracciato: b.tracciato, persone: m.persone })
+    return reply.send({ file: m.file, base64: scriviModello(m).toString('base64') })
   })
 
   app.post('/export/quote', admin, async (request, reply) => {

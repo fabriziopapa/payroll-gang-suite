@@ -55,7 +55,11 @@ export function leggiFogli(nome: string, buf: Buffer): Record<string, string[][]
     // numero resta un numero (10, 1.5) e non «10,00 €».
     const righe = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '', blankrows: false, raw: true })
       .slice(0, MAX_RIGHE_FOGLIO).map(r => (r as unknown[]).slice(0, MAX_COLONNE).map(testoCella))
-    out[n.slice(0, 80)] = pulisciFoglio(righe)
+    // righe vuote in fondo (le celle «testo» ancora da compilare dei modelli): via. Quelle in mezzo
+    // restano, cosi' il numero di riga nei messaggi e' quello che si vede in Excel.
+    let fine = righe.length
+    while (fine > 0 && righe[fine - 1]!.every(c => c.trim() === '')) fine--
+    out[n.slice(0, 80)] = pulisciFoglio(righe.slice(0, fine))
   }
   return out
 }

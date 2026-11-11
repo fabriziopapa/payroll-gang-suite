@@ -1331,6 +1331,8 @@ export const cralApi = {
   salvaModelliExport: (modelli: ModelloExport[]) => apiFetch<unknown>('/cral/parametri/modelli-export', corpo('PUT', { modelli })),
   esportaElenco: (b: { ids: string[]; colonne: string[]; solo: ModelloExport['solo']; formato: 'xlsx' | 'csv'; separatore: ';' | ','; titolo: string }) =>
     apiFetch<{ righe: number; base64: string }>('/cral/export/elenco', corpo('POST', b), 60_000),
+  modello: (b: { tracciato: 'T1' | 'T2' | 'T3' | 'T4' | 'T5' | 'T6' | 'T7' | 'T7V'; iniziativa?: string; ids?: string[]; anno?: number }) =>
+    apiFetch<{ file: string; base64: string }>('/cral/export/modello', corpo('POST', b), 60_000),
   esportaSoci: (ids: string[]) => apiFetch<{ ambiente: string; base64: string }>('/cral/export/soci', corpo('POST', { ids }), 60_000),
   esportaArchivio: (sezioni: SezioneLotto[]) => apiFetch<ArchivioTestata>(`/cral/export/archivio?sezioni=${enc(sezioni.join(','))}`, undefined, 120_000),
   lotti: () => apiFetch<{ lotti: Lotto[] }>('/cral/lotti'),

@@ -199,6 +199,7 @@ const ERRORI: Record<string, string> = {
   TELEFONO_MANCANTE: 'Consenso e WhatsApp richiedono un numero di telefono.',
   CONSENSO_REVOCATO: 'Il consenso è stato revocato: serve una nuova data di consenso, non precedente alla revoca.',
   DATA_NON_VALIDA: 'Una data è nel futuro.',
+  TRACCIATO_NON_ADATTO: 'Questo modello non è previsto per questo tipo di evento.',
   COLONNA_SCONOSCIUTA: 'Una colonna del modello non esiste più: ricrea il modello.',
 }
 export function messaggioErrore(err: unknown): string {

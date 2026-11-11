@@ -40,6 +40,26 @@ export function scaricaBase64(nome: string, b64: string, tipo: string) {
 }
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
+export interface VoceModello { etichetta: string; tracciato: Parameters<typeof cralApi.modello>[0]['tracciato']; iniziativa?: string; ids?: string[]; anno?: number; titolo?: string }
+/** Scarica il modello Excel di un tracciato (per gli eventi è costruito sull'evento). */
+export async function scaricaModello(v: VoceModello): Promise<void> {
+  try {
+    const r = await cralApi.modello({ tracciato: v.tracciato, ...(v.iniziativa ? { iniziativa: v.iniziativa } : {}), ...(v.ids?.length ? { ids: v.ids } : {}), ...(v.anno ? { anno: v.anno } : {}) })
+    scaricaBase64(r.file, r.base64, XLSX_MIME)
+    avviso(v.ids?.length ? `Modello con ${v.ids.length} persone: completa le colonne e ricaricalo. Contiene nomi: non lasciarlo in giro.` : 'Modello scaricato: il primo foglio è da compilare, «Esempio» mostra come.', 'info')
+  } catch (e) { avviso(messaggioErrore(e), 'error') }
+}
+/** I pulsanti dei modelli, accanto a dove si sceglie il file. */
+export function Modelli({ voci, nota }: { voci: VoceModello[]; nota?: string }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+      <span>Non hai ancora il file?</span>
+      {voci.map(v => <button key={v.etichetta} type="button" className={btnPiccoloSec} title={v.titolo} onClick={() => void scaricaModello(v)}><Ico d={D.download} cls="w-3.5 h-3.5" />{v.etichetta}</button>)}
+      {nota && <span>{nota}</span>}
+    </div>
+  )
+}
+
 /** Esporta le quote dell'anno dei soci indicati nell'Excel del T7. */
 export async function esportaQuoteExcel(anno: number, ids: string[]): Promise<void> {
   try {

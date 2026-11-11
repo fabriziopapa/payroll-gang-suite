@@ -12,6 +12,7 @@ import {
   TIPOLOGIE, destinatari, fmtEuro, fmtQ, nominativo, norm, normNome, parseEuro, prodLabel, spezzaNominativo, tipNome,
 } from './logica'
 import { agganciaRiga } from './aggancio'
+import { Modelli, type VoceModello } from './ImportDati'
 import { CellaAggancio, ColonneChiave, PropostaTelefoni, chiaviDi, daProporre, nelFile, proponiTelefoni, useColonne } from './Aggancio'
 import { Campo, D, Ico, Interruttore, Modale, Origine, Pill, avviso, btnPrimario, btnSecondario, fileBase64, inputCls, messaggioErrore, useCral, Scorrevole } from './ui'
 
@@ -31,8 +32,17 @@ export function useFoglio() {
   return { righe, apri, leggo }
 }
 
-export function SceltaFile({ apri, leggo, spiega }: { apri: (f: File) => Promise<void>; leggo: boolean; spiega: ReactNode }) {
+/** I modelli di un'importazione dentro un evento: vuoto e, se ci sono persone, con una riga per partecipante. */
+export function modelliEvento(tracciato: 'T2' | 'T3' | 'T4' | 'T5', ini: Iniziativa, persone: Persona[] = []): VoceModello[] {
+  return [
+    { etichetta: 'Modello Excel vuoto', tracciato, iniziativa: ini.id, titolo: 'Con le colonne di questo evento' },
+    ...(persone.length ? [{ etichetta: `Modello con i partecipanti (${persone.length})`, tracciato, iniziativa: ini.id, ids: persone.map(s => s.id), titolo: 'Una riga per persona, con ID e nominativo: completi le altre colonne e ricarichi' }] : []),
+  ]
+}
+
+export function SceltaFile({ apri, leggo, spiega, modelli }: { apri: (f: File) => Promise<void>; leggo: boolean; spiega: ReactNode; modelli?: VoceModello[] }) {
   const inp = useRef<HTMLInputElement>(null)
+  if (modelli?.length) return <div className="flex flex-col gap-4"><SceltaFile apri={apri} leggo={leggo} spiega={spiega} /><Modelli voci={modelli} /></div>
   return (
     <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
       <button className={btnPrimario} disabled={leggo} onClick={() => inp.current?.click()}><Ico d={D.upload} />{leggo ? 'Lettura…' : 'Scegli il file'}</button>
@@ -52,7 +62,7 @@ export function ModuloRisposteModal({ ini, onClose }: { ini: Iniziativa; onClose
   const [proponi, setProponi] = useState(true)
   const dest = useMemo(() => destinatari(db, ini), [db, ini])
   const { col, imposta } = useColonne('T2', righe?.[0] ?? null)
-  const esiti = useMemo(() => {
+  const tutte = useMemo(() => {
     if (!righe) return []
     const h = righe[0] ?? []
     const chiavi = new Set(Object.values(col).filter(j => j >= 0))
@@ -64,6 +74,9 @@ export function ModuloRisposteModal({ ini, onClose }: { ini: Iniziativa; onClose
       return { i, k, testo, opz, a: agganciaRiga(dest, k, { prefisso: db.prefissoTel, tessera: db.tessera }) }
     }).filter(e => e.k.email || e.k.nominativo || e.k.telefono || e.k.id || e.testo.trim())
   }, [righe, dest, ini, col, db])
+  // righe con la persona ma senza scelta (il modello con i partecipanti, dove qualcuno non ha risposto): non sono errori
+  const senzaScelta = tutte.filter(e => !e.testo.trim()).length
+  const esiti = tutte.filter(e => e.testo.trim())
   const finale = (e: (typeof esiti)[number]) => e.a.socio ?? dest.find(s => s.id === manuali[e.i])
   const pronte = esiti.filter(e => finale(e) && e.opz)
   const nonAgg = esiti.filter(e => !finale(e))
@@ -79,8 +92,8 @@ export function ModuloRisposteModal({ ini, onClose }: { ini: Iniziativa; onClose
   }
   return (
     <Modale largo titolo="Importa risposte del modulo" sotto="Export del modulo online (CSV o XLSX): data/ora, scelta, email e, se c'è, nominativo (tracciato T2)." onClose={onClose}
-      piedi={righe && <><span className="text-sm text-slate-400 mr-auto self-center">{pronte.length} da registrare · {nonAgg.length} non agganciate</span><button className={btnSecondario} onClick={onClose}>Annulla</button><button className={btnPrimario} disabled={!pronte.length} onClick={() => void applica()}>Registra {pronte.length} scelte</button></>}>
-      {!righe ? <SceltaFile apri={apri} leggo={leggo} spiega="Basta una chiave: matricola/tessera, telefono, email o nominativo. Le righe ambigue o in conflitto le scegli tu, con il motivo accanto." /> : <div className="flex flex-col gap-3">
+      piedi={righe && <><span className="text-sm text-slate-400 mr-auto self-center">{pronte.length} da registrare · {nonAgg.length} non agganciate{senzaScelta ? ` · ${senzaScelta} senza scelta, saltate` : ''}</span><button className={btnSecondario} onClick={onClose}>Annulla</button><button className={btnPrimario} disabled={!pronte.length} onClick={() => void applica()}>Registra {pronte.length} scelte</button></>}>
+      {!righe ? <SceltaFile apri={apri} leggo={leggo} modelli={modelliEvento('T2', ini, dest)} spiega="Basta una chiave: matricola/tessera, telefono, email o nominativo. Le righe ambigue o in conflitto le scegli tu, con il motivo accanto." /> : <div className="flex flex-col gap-3">
         <ColonneChiave intest={righe[0] ?? []} col={col} imposta={imposta} />
         <PropostaTelefoni n={telefoni.length} on={proponi} onChange={setProponi} />
         <Scorrevole><table className="w-full text-sm">
@@ -162,7 +175,10 @@ export function OrdiniImportModal({ ini, onClose }: { ini: Iniziativa; onClose: 
     })
     return { esiti, colProd: c.prod, mancanti: c.prod.filter(([, j]) => j < 0).map(([p]) => prodLabel(db, p)), nTot, cImp: c.imp }
   }, [righe, posEff?.join('|'), senza, dest, ini, db, col])
-  const { esiti, colProd, mancanti, nTot, cImp } = calcolo
+  const { colProd, mancanti, nTot, cImp } = calcolo
+  // righe con la persona ma senza quantità (il modello con i partecipanti, per chi non ha ordinato): si saltano
+  const senzaQta = calcolo.esiti.filter(e => !Object.keys(e.q).length && !e.errori.length).length
+  const esiti = calcolo.esiti.filter(e => Object.keys(e.q).length > 0 || e.errori.length > 0)
   const finale = (e: (typeof esiti)[number]) => e.a.socio ?? dest.find(s => s.id === manuali[e.i])
   const pronte = esiti.filter(e => finale(e) && !e.errori.length && Object.keys(e.q).length)
   const telefoni = pronte.flatMap(e => daProporre(e.a, finale(e), db.soci, e.i + 1))
@@ -185,8 +201,8 @@ export function OrdiniImportModal({ ini, onClose }: { ini: Iniziativa; onClose: 
   const nCol = righe ? Math.max(0, ...righe.map(r => r.length)) : 0
   return (
     <Modale largo titolo="Importa ordini" sotto="Una riga per persona, una colonna per prodotto con la quantità (tracciato T3). Va bene anche un foglio senza intestazione." onClose={onClose}
-      piedi={righe && <><span className="text-sm text-slate-400 mr-auto self-center">{pronte.length} da registrare · {esiti.filter(e => e.errori.length).length} con errori · {esiti.filter(e => !finale(e)).length} non agganciate{nAvvisi ? ` · ${nAvvisi} con importo diverso` : ''}{nTot ? ` · ${nTot === 1 ? 'riga di totale ignorata' : `${nTot} righe senza persona ignorate`}` : ''}</span><button className={btnSecondario} onClick={onClose}>Annulla</button><button className={btnPrimario} disabled={!pronte.length} onClick={() => void applica()}>Registra {pronte.length} ordini</button></>}>
-      {!righe ? <SceltaFile apri={apri} leggo={leggo} spiega="Un ordine importato sostituisce quello già presente per la stessa persona." /> : <div className="flex flex-col gap-3">
+      piedi={righe && <><span className="text-sm text-slate-400 mr-auto self-center">{pronte.length} da registrare · {esiti.filter(e => e.errori.length).length} con errori · {esiti.filter(e => !finale(e)).length} non agganciate{senzaQta ? ` · ${senzaQta} senza quantità, saltate` : ''}{nAvvisi ? ` · ${nAvvisi} con importo diverso` : ''}{nTot ? ` · ${nTot === 1 ? 'riga di totale ignorata' : `${nTot} righe senza persona ignorate`}` : ''}</span><button className={btnSecondario} onClick={onClose}>Annulla</button><button className={btnPrimario} disabled={!pronte.length} onClick={() => void applica()}>Registra {pronte.length} ordini</button></>}>
+      {!righe ? <SceltaFile apri={apri} leggo={leggo} modelli={modelliEvento('T3', ini, dest)} spiega="Un ordine importato sostituisce quello già presente per la stessa persona." /> : <div className="flex flex-col gap-3">
         {senza && posEff && <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3 flex flex-col gap-2">
           <p className="text-xs text-slate-300">Il file <b>non ha la riga di intestazione</b>: indica cosa c'è in ogni colonna. L'ipotesi viene dai contenuti (testo = cognome e nome, numeri = quantità e importo).</p>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{Array.from({ length: nCol }).map((_, j) => {
@@ -258,7 +274,7 @@ export function PartecipantiImportModal({ ini, onClose }: { ini: Iniziativa; onC
   return (
     <Modale largo titolo="Importa partecipanti" sotto="Una riga per persona: basta una chiave fra matricola o ID, telefono, email, nominativo (tracciato T4)." onClose={onClose}
       piedi={righe && <><span className="text-sm text-slate-400 mr-auto self-center">{n('aggiungi')} da aggiungere · {n('gia')} già presenti · {n('esterno')} nuovi esterni{daDecidere ? ` · ${daDecidere} da decidere` : ''}</span><button className={btnSecondario} onClick={onClose}>Annulla</button><button className={btnPrimario} onClick={() => void applica()}>Aggiungi all'evento</button></>}>
-      {!righe ? <SceltaFile apri={apri} leggo={leggo} spiega="Anche con il solo numero di telefono. Chi non c'è e ha un nome diventa un nuovo esterno da validare; ambiguità e conflitti li decidi tu." /> : <div className="flex flex-col gap-3">
+      {!righe ? <SceltaFile apri={apri} leggo={leggo} modelli={modelliEvento('T4', ini)} spiega="Anche con il solo numero di telefono. Chi non c'è e ha un nome diventa un nuovo esterno da validare; ambiguità e conflitti li decidi tu." /> : <div className="flex flex-col gap-3">
         <ColonneChiave intest={righe[0] ?? []} col={col} imposta={imposta} />
         <PropostaTelefoni n={telefoni.length} on={proponi} onChange={setProponi} />
         <Scorrevole><table className="w-full text-sm">

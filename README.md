@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.11.11-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.11.11.1-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -385,6 +385,10 @@ Un solo motore (`client/src/components/cral/aggancio.ts`) per T2–T7: **ID → 
 - **Esporta Excel** (*Soci*): le colonne del T6, comprese quelle di contatto, per correggere e ricaricare.
 - **Esporta elenco…** (*Soci* sull'elenco filtrato o sui selezionati, *Eventi* sui partecipanti): colonne e ordine a scelta, chi entra (tutti, con consenso al numero, lista WhatsApp, con esigenze alimentari), Excel o CSV (virgola o punto e virgola). Modelli pronti — *Lista WhatsApp* (`wa_id`, telefono, nome, cognome, sede), *Rubrica telefonica*, *Esigenze alimentari*, *Elenco con email* — e **modelli salvati**, condivisi fra gli amministratori. Qui il numero esce **solo per chi ha dato il consenso**; le celle sono testo e protette dalle formule.
 
+### Modelli dei tracciati (dalla 26.11.11.1)
+
+Ogni importazione ha il suo **modello Excel**, accanto al punto in cui si sceglie il file: in *Importazione* per T1, T6 e T7 (per socio e per versamento); dentro l'evento per T2, T3, T4 e T5; in *Guide* per quelli che non dipendono da un evento. Il primo foglio ha le sole intestazioni, scritte come l'importazione le riconosce, e le celle in **formato testo** (numeri di telefono, tessere e date restano come si scrivono); il foglio *Esempio* mostra righe di fantasia e non viene letto. I modelli degli eventi sono costruiti sull'evento — le opzioni (T2), una colonna per prodotto (T3), una per settimana (T5) — e a richiesta arrivano con **una riga per partecipante** (ID e nominativo, nessun numero di telefono): si completa e si ricarica, l'aggancio e' per ID e le righe lasciate vuote si saltano. Generati dal server (`services/cral/modelli.ts`, rotta `/export/modello`).
+
 ### Aggiornamento massivo (tracciato T6)
 
 *Importazione › Aggiornamento dati (T6)*: un Excel con persone **gia' presenti** (il piu' comodo e' l'export della scheda *Soci*, che ha le stesse colonne e un secondo foglio *Familiari*). Aggancio per ID (anche l'ex matricola), tessera o nominativo (la data di nascita decide fra gli omonimi); chi non si aggancia si sceglie a mano o si ignora. Colonne aggiornabili, da spuntare una per una: **sede, data di nascita, email, tessera, note, tipologia, stato** (Attivo/Cessato/Eliminato con *Data stato*). Cella vuota = non cambia; `-` = svuota. La data di nascita di chi ha la matricola si scrive **solo se in PGS manca** (se c'e' ed e' diversa si segnala). Il server prepara un **lotto** di variazioni prima → dopo da validare (vedi sotto).
@@ -574,6 +578,15 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.11.11.1
+**Modulo CRAL: un modello Excel per ogni tracciato di importazione**
+
+- **Scarica modello** accanto a ogni importazione: *Importazione* (T1 libro soci, T6 aggiornamento dati, T7 quote per socio e per versamento), dentro l'evento (T2 risposte, T3 ordini, T4 partecipanti, T5 iscrizioni) e in *Guide*.
+- Primo foglio con le intestazioni riconosciute dall'importazione e celle in **formato testo**; foglio **Esempio** separato, che l'importazione non legge.
+- **Modelli degli eventi** costruiti sull'evento (opzioni, prodotti, settimane, con un foglio di promemoria) e, a richiesta, **con una riga per partecipante** (ID e nominativo). Al rientro le righe senza scelta o senza quantita' si saltano e si contano, non sono errori.
+- **Server**: `services/cral/modelli.ts` (con test di andata e ritorno sul lettore dei file), rotta `/export/modello`, audit `CRAL_MODELLO_SCARICATO`; il lettore dei file toglie le righe vuote in coda. Nessuna migrazione.
+- Test: server 149, client 118. Provato nel browser: scaricati tutti i modelli, compilati e ricaricati quelli di T2, T3 e T5, nessun errore in console.
 
 ### 26.11.11
 **Modulo CRAL: telefono (formato API WhatsApp) con consenso GDPR, esigenze alimentari, importazioni col solo numero di telefono, esportazione a scelta, scorrimento senza barre**

@@ -11,12 +11,12 @@ import { Fragment, useMemo, useState, type ReactNode } from 'react'
 import { cralApi } from '../../api/endpoints'
 import type { Iniziativa, PatchScelta, Persona, StatoPeriodo } from './tipi'
 import {
-  CAT_SCONTO_1, GRUPPI, RELAZIONI, aCaricoDi, catSconto, contiTurni, dovutoTurni, etichettaPers, fmtData,
+  CAT_SCONTO_1, GRUPPI, RELAZIONI, aCaricoDi, catSconto, destinatari, contiTurni, dovutoTurni, etichettaPers, fmtData,
   fmtEuro, fmtImp, fmtSconto, ggmm, haSconto, iscrittoTurni, nominativo, norm, normNome, occupati, oggi, pagaPer, parseEuro, periodiDovuti,
   persDi, persona, quotaDi, regolaCat, regolaTurni, relDi, riassuntoSconti, rifAutomatico, rifDi, sociDi, statoPer,
 } from './logica'
 import { ScontoPersonaleModal } from './Sconti'
-import { SceltaFile, useFoglio } from './ImportEvento'
+import { SceltaFile, modelliEvento, useFoglio } from './ImportEvento'
 import { D, Ico, Modale, Origine, Pill, avviso, btnPrimario, btnSecondario, cardCls, etichettaCls, inputCls, inputW, thCls, useCral, Scorrevole } from './ui'
 
 const STATI_PER: Record<StatoPeriodo, [string, string]> = {
@@ -243,7 +243,7 @@ export function IscrizioniImportModal({ ini, onClose }: { ini: Iniziativa; onClo
   return (
     <Modale largo titolo="Importa iscrizioni" sotto="Una riga per persona, una colonna per settimana con X (tracciato T5)." onClose={onClose}
       piedi={righe && <><span className="text-sm text-slate-400 mr-auto self-center">{pronte.length} da registrare · {esiti.filter(e => !finale(e)).length} non agganciate</span><button className={btnSecondario} onClick={onClose}>Annulla</button><button className={btnPrimario} disabled={!pronte.length} onClick={() => void applica()}>Registra {pronte.length} iscrizioni</button></>}>
-      {!righe ? <SceltaFile apri={apri} leggo={leggo} spiega="Le settimane del file si aggiungono a quelle già prenotate (allungamenti compresi). Il versato si somma. Per la persona basta una chiave: matricola, telefono, email o nominativo." /> : <div className="flex flex-col gap-3">
+      {!righe ? <SceltaFile apri={apri} leggo={leggo} modelli={modelliEvento('T5', ini, destinatari(db, ini))} spiega="Le settimane del file si aggiungono a quelle già prenotate (allungamenti compresi). Il versato si somma. Per la persona basta una chiave: matricola, telefono, email o nominativo." /> : <div className="flex flex-col gap-3">
         <ColonneChiave intest={righe[0] ?? []} col={col} imposta={imposta} />
         <PropostaTelefoni n={telefoni.length} on={proponi} onChange={setProponi} />
         <Scorrevole><table className="w-full text-sm">
