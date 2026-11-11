@@ -37,6 +37,7 @@ import VerificaLiquidatoPage from './pages/VerificaLiquidatoPage'
 import PdfRegionTemplatesPage from './pages/PdfRegionTemplatesPage'
 import EmolumentiArea     from './pages/EmolumentiArea'
 import VersamentiEntiPage from './pages/VersamentiEntiPage'
+import { paginaRicordata } from './store/paginaRicordata'
 
 // Lazy: unica pagina che porta pdfjs-dist (canvas rendering, Step 7/usePdfDocument)
 // — code-split dedicato, niente nel bundle principale finché un admin non apre
@@ -147,7 +148,7 @@ export default function App() {
         retryCountRef.current = 0
         setThrottle(null)
         setAccessToken(accessToken)
-        setAuth(user, accessToken)
+        setAuth(user, accessToken, paginaRicordata(user.isAdmin))
       } catch (err) {
         // fetch raw lancia solo su errore di rete (TypeError) o abort
         if (err instanceof TypeError) console.warn('Bootstrap: network unavailable', err)

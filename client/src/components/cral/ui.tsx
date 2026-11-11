@@ -149,6 +149,7 @@ export async function fileBase64(f: File): Promise<string> {
 // ── Errori del server in italiano ────────────────────────────
 const ERRORI: Record<string, string> = {
   TESSERA_DOPPIA: 'Tessera già assegnata a un altro socio.',
+  TESSERA_FORMATO: 'La tessera non è nel formato dei Parametri (Parametri › Tessera CRAL).',
   MATRICOLA_GIA_SOCIO: 'Questa matricola è già nel CRAL.',
   SOCIO_NON_TROVATO: 'Persona non trovata: ricarica la pagina.',
   SEDE_SCONOSCIUTA: 'Sede sconosciuta.',

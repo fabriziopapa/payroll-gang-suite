@@ -17,7 +17,7 @@ import type {
   CralLottoRow, CralVariazioneRow, CralEsitoApplica,
 } from '../IRepository.js'
 import { ALIMENTARI_VUOTI, CONTATTI_VUOTI, alimentariDopo, contattiDopo, type Alimentari, type Contatti } from '../../lib/cralContatti.js'
-import { baseTessera, erroreDati, prossimoDopo, quotaDopoModifica, rataMese, tesseraRiammissione, usiTolti, type ConfigEvento } from '../../lib/cral.js'
+import { baseTessera, erroreDati, prossimoDopo, quotaDopoModifica, rataMese, tesseraNelFormato, tesseraRiammissione, usiTolti, type ConfigEvento } from '../../lib/cral.js'
 import {
   ORDINE_SEZIONI, anniEsentiDopoRipristino, personaDaRiga, statoDi, uguale, valorePersona,
   type CampoVar, type EventoArch, type PersonaArch, type QuotaArch, type SedeArch, type StatoComposto, type TipoArch, type TipologiaArch,
@@ -63,7 +63,15 @@ function toTessera(p: typeof schema.cralParametri.$inferSelect): CralTesseraPara
     formato: p.tesseraFormato as CralTesseraParam['formato'], prefisso: p.tesseraPrefisso, cifre: p.tesseraCifre,
     prossimo: p.tesseraProssimo, riammissione: p.riammissione as CralTesseraParam['riammissione'],
     sepSuffisso: p.suffissoSep as CralTesseraParam['sepSuffisso'], cifreSuffisso: p.suffissoCifre,
+    vincolante: p.tesseraVincolante,
   }
+}
+
+/** 26.11.11.2: una tessera che cambia, col formato obbligatorio, si scrive nel formato o si rifiuta. */
+function nelFormato(t: CralTesseraParam, tessera: string): string {
+  const r = tesseraNelFormato(t, tessera)
+  if ('errore' in r) throw new Annulla('TESSERA_FORMATO')
+  return r.tessera
 }
 
 export class PgCralRepository implements ICralRepository {
@@ -179,6 +187,7 @@ export class PgCralRepository implements ICralRepository {
     await this.db.update(schema.cralParametri).set({
       tesseraFormato: t.formato, tesseraPrefisso: t.prefisso, tesseraCifre: t.cifre, tesseraProssimo: t.prossimo,
       riammissione: t.riammissione, suffissoSep: t.sepSuffisso, suffissoCifre: t.cifreSuffisso,
+      tesseraVincolante: t.vincolante,
       updatedBy: userId, updatedAt: new Date(),
     }).where(eq(schema.cralParametri.id, 1))
   }
@@ -281,7 +290,7 @@ export class PgCralRepository implements ICralRepository {
     if (p.tipo === 'FAM' && !p.legami?.length) throw new Annulla('LEGAME_NON_VALIDO')
     if (p.legami?.length) await this.verificaLegami(tx, id, p.legami)
     if (p.sede) await this.verificaSede(tx, p.sede)
-    const tessera = (p.tipo === 'SD' || p.tipo === 'SE') && p.tessera ? p.tessera : null
+    const tessera = (p.tipo === 'SD' || p.tipo === 'SE') && p.tessera ? nelFormato(par.tessera, p.tessera) || null : null
     const contatti = p.contatti ? contattiDopo(CONTATTI_VUOTI, p.contatti, oggi(), 'MANO') : CONTATTI_VUOTI
     if ('errore' in contatti) throw new Annulla(contatti.errore)
     const alimentari = p.alimentari ? alimentariDopo(ALIMENTARI_VUOTI, p.alimentari, oggi()) : ALIMENTARI_VUOTI
@@ -347,7 +356,8 @@ export class PgCralRepository implements ICralRepository {
       if (patch.atipico !== undefined) set.atipico = patch.atipico
       const conTessera = tipo === 'SD' || tipo === 'SE'
       if (!conTessera) set.tessera = null
-      else if (patch.tessera !== undefined) set.tessera = patch.tessera || null
+      // solo una tessera che cambia passa dal formato: quella gia' assegnata resta com'e'
+      else if (patch.tessera !== undefined) set.tessera = patch.tessera && patch.tessera !== s.tessera ? nelFormato((await this.parametri(tx)).tessera, patch.tessera) : patch.tessera || null
       // Un socio che diventa esterno non puo' piu' avere familiari legati a lui.
       if (!conTessera && (s.tipo === 'SD' || s.tipo === 'SE')) {
         const [f] = await tx.select({ id: schema.cralFamiliariLegami.familiareId }).from(schema.cralFamiliariLegami).where(eq(schema.cralFamiliariLegami.socioId, id)).limit(1)
@@ -519,7 +529,7 @@ export class PgCralRepository implements ICralRepository {
           if (!s) throw new Annulla('SOCIO_NON_TROVATO')
           const set: Partial<typeof schema.cralSoci.$inferInsert> = {}
           if (o.sede !== undefined && o.sede !== s.sedeId) { if (o.sede) await this.verificaSede(tx, o.sede); set.sedeId = o.sede }
-          if (o.tessera && o.tessera !== s.tessera && (s.tipo === 'SD' || s.tipo === 'SE')) { set.tessera = o.tessera; esito.tessere++ }
+          if (o.tessera && o.tessera !== s.tessera && (s.tipo === 'SD' || s.tipo === 'SE')) { set.tessera = nelFormato((await this.parametri(tx)).tessera, o.tessera); esito.tessere++ }
           if (o.atipico && !s.atipico) set.atipico = true
           if (o.nota) set.note = `${s.note ? `${s.note} · ` : ''}${o.nota}`.slice(0, 1000)
           // il telefono del libro soci entra solo se manca (senza consenso): per cambiarlo c'e' il T6
@@ -922,7 +932,7 @@ export class PgCralRepository implements ICralRepository {
 
   private async applicaTessera(tx: TX, t: CralTesseraParam, campi: CampoVar[]) {
     const cur = (await this.parametri(tx)).tessera
-    const col: Record<string, string> = { formato: 'tesseraFormato', prefisso: 'tesseraPrefisso', cifre: 'tesseraCifre', riammissione: 'riammissione', sepSuffisso: 'suffissoSep', cifreSuffisso: 'suffissoCifre' }
+    const col: Record<string, string> = { formato: 'tesseraFormato', prefisso: 'tesseraPrefisso', cifre: 'tesseraCifre', riammissione: 'riammissione', sepSuffisso: 'suffissoSep', cifreSuffisso: 'suffissoCifre', vincolante: 'tesseraVincolante' }
     const r = await this.aggiornaCampi(campi, cur as unknown as Record<string, unknown>,
       set => tx.update(schema.cralParametri).set(Object.fromEntries(Object.entries(set).map(([k, v]) => [col[k] ?? k, v]))).where(eq(schema.cralParametri.id, 1)))
     // il prossimo numero non torna mai indietro

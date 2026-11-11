@@ -631,6 +631,8 @@ export const cralParametri = pgTable('cral_parametri', {
   riammissione:    varchar('riammissione', { length: 8 }).notNull().default('NUOVO'),
   suffissoSep:     varchar('suffisso_sep', { length: 1 }).notNull().default('/'),
   suffissoCifre:   smallint('suffisso_cifre').notNull().default(2),
+  // 0026: il formato vale anche per le tessere scritte a mano e importate
+  tesseraVincolante: boolean('tessera_vincolante').notNull().default(false),
   extProssimo:     integer('ext_prossimo').notNull().default(1),
   famProssimo:     integer('fam_prossimo').notNull().default(1),
   // 0025

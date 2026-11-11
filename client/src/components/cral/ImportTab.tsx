@@ -14,7 +14,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { cralApi, type CralAbbinamentoApi, type CralOperazioneApi } from '../../api/endpoints'
 import type { AnagraficaPgs, Db, Persona } from './tipi'
 import {
-  eSocio, fmtData, leggiData, nominativo, norm, numBase, oggi, risolvi, simNome, spezzaNominativo, tesseraDaTesto, trovaIntestazione,
+  eSocio, fmtData, formatTessera, leggiData, nominativo, norm, numBase, oggi, risolvi, simNome, spezzaNominativo, tesseraDaTesto, tesseraNelFormato, trovaIntestazione,
 } from './logica'
 import { ImportArchivio, ImportT6, Modelli } from './ImportDati'
 import { ImportT7 } from './ImportQuote'
@@ -48,6 +48,8 @@ const TESSERA_OK = /^[A-Za-z0-9 ._/-]{0,30}$/
 
 interface Base {
   i: number; nomin: string; mat: string; sedeTesto: string; sede: string | null | undefined; email: string; telefono: string; tessera: string
+  /** 26.11.11.2: tessera del file fuori dal formato obbligatorio (la riga entra senza) */
+  tesseraFuori?: string
   tipoRich: '' | 'SE' | 'EST' | 'FAM'; atipico: boolean; nascita: string | null
 }
 interface Analisi extends Base {
@@ -153,10 +155,14 @@ function LibroSoci() {
     const t = norm(val('tipologia'))
     const tipoRich: Base['tipoRich'] = /FAMIL/.test(t) ? 'FAM' : /NON SOCIO|PARTECIP/.test(t) ? 'EST' : /ESTERN/.test(t) ? 'SE' : ''
     const tt = val('tessera')
-    const tessera = tipoRich === 'EST' || tipoRich === 'FAM' ? '' : tesseraDaTesto(db.tessera, tt)
+    // col formato obbligatorio (Parametri) una tessera fuori formato non entra: la persona si importa senza
+    const nf = tipoRich === 'EST' || tipoRich === 'FAM' || !tt ? null : db.tessera.vincolante ? tesseraNelFormato(db.tessera, tt) : { tessera: tesseraDaTesto(db.tessera, tt) }
+    const tessera = nf && 'tessera' in nf ? nf.tessera : ''
+    const tesseraFuori = nf && 'errore' in nf ? tt : undefined
     const nascita = map['nascita'] ? leggiData(r[+map['nascita']]) : null
-    return { i, nomin, mat, sedeTesto, sede: mappaSede(db, sedeTesto), email: val('email'), telefono: numeroDi(val('telefono'), db.prefissoTel), tessera, tipoRich, atipico: /ATIPIC/.test(t), nascita }
+    return { i, nomin, mat, sedeTesto, sede: mappaSede(db, sedeTesto), email: val('email'), telefono: numeroDi(val('telefono'), db.prefissoTel), tessera, ...(tesseraFuori ? { tesseraFuori } : {}), tipoRich, atipico: /ATIPIC/.test(t), nascita }
   }), [file, pronto, numRiga, rows, map, db])
+  const fuori = basi.filter(b => b.tesseraFuori)
 
   // Abbinamento sul server (non scrive nulla)
   useEffect(() => {
@@ -347,6 +353,7 @@ function LibroSoci() {
         <div className={`${cardCls} p-5 flex flex-col gap-4`}>
           <div className="flex flex-wrap items-center gap-2"><Ico d={D.doc} cls="w-4 h-4 text-slate-400" /><span className="text-sm text-white font-medium">{file.nome}</span>
             <span className="text-xs text-slate-500">· {numRiga.length} righe nel foglio{hdr > 0 ? ` · intestazione alla riga ${hdr + 1}` : ''}{ripetute ? ` · ${ripetute === 1 ? '1 intestazione ripetuta saltata' : `${ripetute} intestazioni ripetute saltate`}` : ''}</span>
+            {fuori.length > 0 && <span className="text-xs text-amber-400" title={fuori.map(b => `${b.nomin}: «${b.tesseraFuori}»`).join('\n')}>· {fuori.length === 1 ? '1 tessera fuori formato: la persona entra senza tessera' : `${fuori.length} tessere fuori formato: quelle persone entrano senza tessera`} (formato {formatTessera(db.tessera, 42)})</span>}
             <button className="ml-auto text-xs text-slate-400 hover:text-white" onClick={() => setFile(null)}>Chiudi file</button></div>
           {Object.keys(file.fogli).length > 1 && <div className="flex flex-wrap items-center gap-2"><span className={etichettaCls}>Foglio</span>
             {Object.keys(file.fogli).map(n => <button key={n} onClick={() => scegliFoglio(file, n)} className={`${btnPiccolo} border ${n === foglio ? 'bg-indigo-600/20 text-indigo-300 border-indigo-700' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}>{n} <span className="text-slate-500">{Math.max(0, (file.fogli[n]?.length ?? 0) - 1 - trovaIntestazione(file.fogli[n]))}</span></button>)}</div>}

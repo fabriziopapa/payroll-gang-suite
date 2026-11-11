@@ -18,7 +18,7 @@ import { ALIMENTARI_VUOTI, CONTATTI_VUOTI, ID_ESIGENZE, ID_ORIGINI, MESSAGGI_CON
 import { z } from 'zod'
 import {
   MODALITA, rataMese, erroreDati, erroreIniziativa, iniziativaSchema, parametriTesseraSchema, riga, sceltaSchema, scontoPersonale,
-  usiTolti, type ConfigEvento, type ParametriTessera,
+  tesseraNelFormato, usiTolti, type ConfigEvento, type ParametriTessera,
 } from './cral.js'
 import { normalizza } from '../services/emolumenti/nominativi.js'
 import type { CralSocioRow, CralStato } from '../db/IRepository.js'
@@ -249,6 +249,7 @@ export function confrontaArchivio(src: Archivio, dst: Archivio, sezioni: Sezione
     if (dst.tabelle) {
       const campi = campiDiversi(dst.tabelle.tessera, src.tabelle.tessera, {
         formato: 'Formato', prefisso: 'Prefisso', cifre: 'Cifre', riammissione: 'Riammissione', sepSuffisso: 'Separatore del suffisso', cifreSuffisso: 'Cifre del suffisso',
+        vincolante: 'Formato obbligatorio',
       })
       // cambiare il formato della tessera cambia i numeri futuri: si guarda uno per uno
       if (campi.length) out.push({ sezione: 'tabelle', entita: 'tessera', chiave: 'tessera', tipo: 'MODIFICA', delicata: true, etichetta: 'Formato della tessera', campi, record: src.tabelle.tessera })
@@ -575,7 +576,8 @@ export type RigaT6 = z.infer<typeof rigaT6Schema>
  * chi ha la matricola si scrive solo se in PGS manca; se c'e' ed e'
  * diversa si segnala e non si sovrascrive.
  */
-export function confrontaT6(righe: RigaT6[], soci: PersonaArch[], sedi: Set<string>, nascitaPgs: Map<string, string | null>, oggi: string): Variazione[] {
+/** `tessera`: i parametri della tessera; col formato obbligatorio una tessera fuori formato e' bloccata (26.11.11.2). */
+export function confrontaT6(righe: RigaT6[], soci: PersonaArch[], sedi: Set<string>, nascitaPgs: Map<string, string | null>, oggi: string, tessera?: ParametriTessera): Variazione[] {
   const perId = new Map(soci.map(p => [p.id, p]))
   const tessere = new Map(soci.filter(p => p.tessera).map(p => [normTessera(p.tessera), p]))
   const conFamiliari = new Set(soci.flatMap(p => p.legami.map(l => l.socio)))
@@ -604,8 +606,12 @@ export function confrontaT6(righe: RigaT6[], soci: PersonaArch[], sedi: Set<stri
     }
     if (v.email !== undefined) add('email', d.email || null, v.email)
     if (v.tessera !== undefined) {
-      const altro = v.tessera ? tessere.get(normTessera(v.tessera)) : undefined
-      add('tessera', d.tessera || null, v.tessera, tipo !== 'SD' && tipo !== 'SE' && v.tessera ? 'solo i soci hanno la tessera'
+      // col formato obbligatorio: 175 → 0175; fuori formato si blocca (la tessera gia' assegnata non si controlla)
+      const nf = tessera && v.tessera && v.tessera !== d.tessera ? tesseraNelFormato(tessera, v.tessera) : null
+      const val = nf && 'tessera' in nf ? nf.tessera : v.tessera
+      const altro = val ? tessere.get(normTessera(val)) : undefined
+      if (nf && 'errore' in nf) add('tessera', d.tessera || null, v.tessera, nf.errore)
+      else add('tessera', d.tessera || null, val, tipo !== 'SD' && tipo !== 'SE' && val ? 'solo i soci hanno la tessera'
         : altro && altro.id !== d.id ? `tessera già di ${nominativoDi(altro)} (${altro.id})`
           : v.tessera && (tessereNelFile.get(normTessera(v.tessera)) ?? 0) > 1 ? 'tessera ripetuta nel file' : undefined)
     }

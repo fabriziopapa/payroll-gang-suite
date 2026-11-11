@@ -33,7 +33,7 @@ const SOCI: Persona[] = [
 const db = (over: Partial<Db> = {}): Db => ({
   sedi: [{ id: 'S1', nome: 'Sede Uno', attiva: true, ordine: 1 }, { id: 'S2', nome: 'Sede Due', attiva: true, ordine: 2 }],
   tipi: [], tipologie: [{ id: 'TER', nome: 'Terra', attiva: true, ordine: 1 }],
-  tessera: { formato: 'NUM', prefisso: 'CRAL-', cifre: 4, prossimo: 5, riammissione: 'NUOVO', sepSuffisso: '/', cifreSuffisso: 2 },
+  tessera: { formato: 'NUM', prefisso: 'CRAL-', cifre: 4, prossimo: 5, riammissione: 'NUOVO', sepSuffisso: '/', cifreSuffisso: 2, vincolante: false },
   extProssimo: 3, famProssimo: 4, soci: SOCI, perId: new Map(SOCI.map(s => [s.id, s])), iniziative: [],
   quoteAnno: [{ anno: 2026, importo: 6000 }], quote: {}, ...over,
 })
@@ -188,4 +188,21 @@ test('quote (0024): il versato è la somma degli importi; a mano un mese registr
   const q2 = quotaDopoModifica(q, { mesi: [true, true, ...Array<boolean>(10).fill(false)] }, 6000)
   assert.deepEqual(q2.importi.slice(0, 2), [500, 500])
   assert.equal(quotaDopoModifica(q, { pagataIl: '2026-01-10' }, 6000).versatoUnica, 6000)
+})
+
+// 26.11.11.2: stessi casi del server (server/src/lib/cral.test.ts)
+import { tesseraNelFormato } from './logica.ts'
+test('tessera nel formato: spento come prima, acceso completa o rifiuta', () => {
+  const T = { formato: 'NUM' as const, prefisso: 'CRAL-', cifre: 4, prossimo: 5, riammissione: 'NUOVO' as const, sepSuffisso: '/' as const, cifreSuffisso: 2, vincolante: false }
+  assert.deepEqual(tesseraNelFormato(T, ' 175 '), { tessera: '175' })
+  const V = { ...T, vincolante: true }
+  assert.deepEqual(tesseraNelFormato(V, '175'), { tessera: '0175' })
+  assert.deepEqual(tesseraNelFormato(V, '1'), { tessera: '0001' })
+  assert.deepEqual(tesseraNelFormato(V, '0175'), { tessera: '0175' })
+  assert.deepEqual(tesseraNelFormato(V, ''), { tessera: '' })
+  assert.match((tesseraNelFormato(V, '12345') as { errore: string }).errore, /al massimo 4 cifre/)
+  assert.match((tesseraNelFormato(V, 'A12') as { errore: string }).errore, /formato 0042/)
+  assert.deepEqual(tesseraNelFormato({ ...V, formato: 'PREF' }, 'cral-175'), { tessera: 'CRAL-0175' })
+  assert.deepEqual(tesseraNelFormato({ ...V, riammissione: 'SUFFISSO' }, '0042/01'), { tessera: '0042/01' })
+  assert.deepEqual(tesseraNelFormato({ ...V, riammissione: 'SUFFISSO', sepSuffisso: '' }, '004201'), { tessera: '004201' })
 })

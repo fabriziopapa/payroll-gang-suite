@@ -14,7 +14,7 @@ const P = (id: string, tipo: PersonaArch['tipo'], cognome: string, nome: string,
   validatoDa: null, validatoIl: null, modificatoDa: null, modificatoIl: null, eliminatoDa: null, legami: [], storicoTessere: [],
   contatti: { ...CONTATTI_VUOTI }, alimentari: { ...ALIMENTARI_VUOTI }, ...extra,
 })
-const TESSERA = { formato: 'NUM' as const, prefisso: 'CRAL-', cifre: 4, prossimo: 10, riammissione: 'NUOVO' as const, sepSuffisso: '/' as const, cifreSuffisso: 2 }
+const TESSERA = { formato: 'NUM' as const, prefisso: 'CRAL-', cifre: 4, prossimo: 10, riammissione: 'NUOVO' as const, sepSuffisso: '/' as const, cifreSuffisso: 2, vincolante: false }
 const A = (x: Partial<Archivio>): Archivio => ({
   formato: 'pgs-cral-archivio', versione: 1, app: '26.10.29', ambiente: 'pre', esportato: '2026-10-29T10:00:00Z',
   sezioni: ['sedi', 'tabelle', 'soci', 'quote', 'eventi'], sedi: [{ id: 'CD', nome: 'Sede del Centro Direzionale', attiva: true, ordine: 1 }],
@@ -210,4 +210,22 @@ test('archivio 26.10.29 senza contatti: si legge; contatti nuovi diventano varia
     soci: [P('EXT-0001', 'SE', 'VERDI', 'Luca', { contatti: { ...CONTATTI_VUOTI, telefono: '+393331234567', waId: '393331234567', consenso: 'REVOCATO', consensoIl: '2026-05-01', revocatoIl: '2026-09-01' } })] }
   const { variazioni } = confrontaArchivio(src, dst, ['soci'], new Set())
   assert.equal(variazioni.length, 1); assert.match(variazioni[0]!.bloccata ?? '', /revocato dopo/)
+})
+
+test('T6 col formato della tessera obbligatorio: completa, blocca, non tocca quella gia\' assegnata', () => {
+  const soci = [P('090001', 'SD', 'COLOMBO', 'Anna', { tessera: '0001' }), P('090002', 'SD', 'VIOLA', 'Marco', { tessera: '94' }), P('EXT-0001', 'SE', 'NERI', 'Luca')]
+  const V = { ...TESSERA, vincolante: true }
+  const vs = confrontaT6([
+    { socio: 'EXT-0001', riga: 2, valori: { tessera: '175' } },
+    { socio: '090001', riga: 3, valori: { tessera: 'A12' } },
+    { socio: '090002', riga: 4, valori: { tessera: '94' } },
+  ], soci, new Set(['CD']), new Map(), '2026-11-11', V)
+  const a = vs.find(v => v.chiave === 'EXT-0001')!.campi.find(c => c.campo === 'tessera')!
+  assert.equal(a.dopo, '0175'); assert.ok(!a.blocco)
+  const b = vs.find(v => v.chiave === '090001')!.campi.find(c => c.campo === 'tessera')!
+  assert.match(b.blocco ?? '', /formato 0042/)
+  assert.ok(!vs.find(v => v.chiave === '090002'), 'la tessera gia\' assegnata, anche fuori formato, non e\' una variazione')
+  // spento: come prima
+  const vs2 = confrontaT6([{ socio: 'EXT-0001', riga: 2, valori: { tessera: 'A12' } }], soci, new Set(['CD']), new Map(), '2026-11-11', TESSERA)
+  assert.equal(vs2[0]!.campi.find(c => c.campo === 'tessera')!.dopo, 'A12')
 })

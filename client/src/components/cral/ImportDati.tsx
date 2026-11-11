@@ -16,7 +16,7 @@ import { leggiConsenso, leggiEsigenze, leggiOrigine, leggiSiNo, leggiTelefono, l
 import { useMemo, useRef, useState } from 'react'
 import { cralApi, type CralRigaT6 } from '../../api/endpoints'
 import type { ArchivioTestata, Db, Persona, SezioneLotto } from './tipi'
-import { STATI, fmtData, leggiData, nominativo, norm, oggi, tesseraDaTesto, trovaIntestazione } from './logica'
+import { STATI, fmtData, leggiData, nominativo, norm, oggi, tesseraDaTesto, tesseraDalCampo, trovaIntestazione } from './logica'
 import { LottoView, NOMI_SEZIONI } from './Lotto'
 import {
   Campo, D, Ico, Origine, Pill, avviso, btnPiccolo, btnPiccoloSec, btnPrimario, cardCls, etichettaCls, fileBase64, inputCls, inputW,
@@ -193,7 +193,11 @@ export function ImportT6() {
     if (usa.has('sede')) { const t = val('sede'); if (t) { if (svuota(t)) valori.sede = null; else { const s = sedeDaTesto(db, t); if (s) valori.sede = s; else errori.push(`sede «${t}» sconosciuta`) } } }
     if (usa.has('nascita') && nascitaTxt) { if (svuota(nascitaTxt)) valori.nascita = null; else if (nascita) valori.nascita = nascita; else errori.push(`data di nascita «${nascitaTxt}» non valida`) }
     if (usa.has('email')) { const t = val('email'); if (t) { if (svuota(t)) valori.email = null; else if (EMAIL_OK.test(t)) valori.email = t; else errori.push(`email «${t}» non valida`) } }
-    if (usa.has('tessera')) { const t = val('tessera'); if (t) { if (svuota(t)) valori.tessera = null; else { const x = tesseraDaTesto(db.tessera, t); if (/^[A-Za-z0-9 ._/-]{1,30}$/.test(x)) valori.tessera = x; else errori.push(`tessera «${t}» non valida`) } } }
+    if (usa.has('tessera')) { const t = val('tessera'); if (t) { if (svuota(t)) valori.tessera = null; else {
+      // col formato obbligatorio (Parametri) la tessera nuova deve rispettarlo; quella già assegnata non si controlla
+      const f = db.tessera.vincolante ? tesseraDalCampo(db.tessera, socio?.tessera, t) : { tessera: tesseraDaTesto(db.tessera, t) }
+      const x = f.tessera
+      if (f.errore) errori.push(`tessera «${t}»: ${f.errore}`); else if (/^[A-Za-z0-9 ._/-]{1,30}$/.test(x)) valori.tessera = x; else errori.push(`tessera «${t}» non valida`) } } }
     if (usa.has('note')) { const t = val('note'); if (t) valori.note = svuota(t) ? null : t.slice(0, 1000) }
     if (usa.has('tipo')) { const t = val('tipo'); if (t) { const x = tipoDaTesto(t); if (!x) errori.push(`tipologia «${t}» sconosciuta`); else if (x !== 'FAM') valori.tipo = x } }
     if (usa.has('stato')) {

@@ -171,6 +171,8 @@ export function usiTolti(nuova: ConfigEvento, usati: { opz: Set<string>; prodott
 export interface ParametriTessera {
   formato: 'NUM' | 'PREF'; prefisso: string; cifre: number; prossimo: number
   riammissione: 'NUOVO' | 'SUFFISSO'; sepSuffisso: '' | '/' | '-' | '.'; cifreSuffisso: number
+  /** 26.11.11.2: anche le tessere scritte a mano e importate devono rispettare il formato. */
+  vincolante: boolean
 }
 export const parametriTesseraSchema = z.object({
   formato:       z.enum(['NUM', 'PREF']),
@@ -180,6 +182,8 @@ export const parametriTesseraSchema = z.object({
   riammissione:  z.enum(['NUOVO', 'SUFFISSO']),
   sepSuffisso:   z.enum(['', '/', '-', '.']),
   cifreSuffisso: z.number().int().min(1).max(3),
+  // assente negli archivi e nei client prima della 26.11.11.2: spento
+  vincolante:    z.boolean().default(false),
 }).strict()
 
 export const formatTessera = (t: ParametriTessera, n: number): string =>
@@ -196,6 +200,40 @@ export function numeroTessera(t: ParametriTessera, tessera: string): number | nu
 export function tesseraDaFile(t: ParametriTessera, valore: string): string {
   const v = valore.trim()
   return /^\d+$/.test(v) ? formatTessera(t, parseInt(v, 10)) : v
+}
+
+/**
+ * Tessera scritta a mano o arrivata da un file (26.11.11.2). Col formato
+ * obbligatorio (`vincolante`):
+ *  · solo cifre → il formato: 175 → 0175, 1 → 0001 (CRAL-0175 con la parte testuale);
+ *    piu' cifre di quelle previste → errore;
+ *  · gia' nel formato (anche col suffisso del rientro, se previsto) → com'e';
+ *  · tutto il resto → errore.
+ * Senza obbligo resta com'e' (tolti gli spazi in testa e in coda): e' il
+ * comportamento di prima. '' = nessuna tessera, sempre ammessa.
+ * La STESSA funzione vive nel client (cral/logica.ts): tenerle allineate.
+ */
+export function tesseraNelFormato(t: ParametriTessera, valore: string): { tessera: string } | { errore: string } {
+  const v = valore.trim()
+  if (!v || !t.vincolante) return { tessera: v }
+  const pref = t.formato === 'PREF' ? t.prefisso : ''
+  const esempio = formatTessera(t, 42) + (t.riammissione === 'SUFFISSO' ? ` (al rientro ${formatTessera(t, 42)}${t.sepSuffisso}${'1'.padStart(t.cifreSuffisso, '0')})` : '')
+  const numero = (cifre: string): { tessera: string } | { errore: string } => {
+    const n = parseInt(cifre, 10)
+    if (n < 1) return { errore: 'il numero della tessera parte da 1' }
+    if (String(n).length > t.cifre) return { errore: `al massimo ${t.cifre} cifre (es. ${esempio})` }
+    return { tessera: formatTessera(t, n) }
+  }
+  const resto = pref && v.toUpperCase().startsWith(pref.toUpperCase()) ? v.slice(pref.length) : v
+  // senza separatore il suffisso si riconosce solo dalla lunghezza (004201)
+  const suffissoAttaccato = t.riammissione === 'SUFFISSO' && !t.sepSuffisso && resto.length === t.cifre + t.cifreSuffisso
+  if (/^\d+$/.test(resto) && !suffissoAttaccato) return numero(resto)
+  if (t.riammissione === 'SUFFISSO') {
+    const sep = t.sepSuffisso.replace(/[.*+?^${}()|[\]\\/-]/g, '\\$&')
+    const m = resto.match(new RegExp(`^(\\d{${t.cifre}})${sep}(\\d{${t.cifreSuffisso}})$`))
+    if (m && parseInt(m[1]!, 10) >= 1) return { tessera: `${pref}${m[1]}${t.sepSuffisso}${m[2]}` }
+  }
+  return { errore: `la tessera si scrive nel formato ${esempio}` }
 }
 
 /** Dopo aver usato `tessera`, il prossimo numero non deve poterla ripetere. */

@@ -11,7 +11,7 @@ import { cralApi, type CralNuovaPersonaApi } from '../../api/endpoints'
 import type { AnagraficaPgs, Legame, Persona, Relazione, TipoPersona } from './tipi'
 import {
   RELAZIONI, STATI, TIPOLOGIE, destinatari, eSocio, eta, familiariDi, fmtData, nominativo, norm, oggi, prossimaTessera, relDi,
-  rifAttivo, sedeNome, sociDi, tesseraDoppia, tesseraRiammissione, totaleSoci,
+  rifAttivo, sedeNome, sociDi, tesseraDalCampo, tesseraDoppia, tesseraRiammissione, totaleSoci,
 } from './logica'
 import { esportaSociExcel } from './ImportDati'
 import { CampiContatti, ContattiInBlocco, FORM_ALIMENTARI_VUOTO, FORM_CONTATTI_VUOTO, SegniContatti, formAlimentari, formContatti, patchContatti, type FormAlimentari, type FormContatti } from './Contatti'
@@ -297,18 +297,20 @@ function SocioModal({ id, onClose, onApri }: { id: string; onClose: () => void; 
   const a = useAnagraficaDi(s?.matricola ?? null)
   if (!s) return null
   const conTessera = f.tipo === 'SD' || f.tipo === 'SE'
-  const doppia = conTessera && tesseraDoppia(db, id, f.tessera.trim())
+  // col formato obbligatorio (Parametri): 175 → 0175; fuori formato non si salva. Quella già assegnata non si controlla.
+  const tes = conTessera ? tesseraDalCampo(db.tessera, s.tessera, f.tessera) : { tessera: '' }
+  const doppia = conTessera && tesseraDoppia(db, id, tes.tessera)
   // chi ha la matricola è socio dipendente o esterno; chi non ce l'ha è socio esterno o esterno
   const ammesse: TipoPersona[] = s.tipo === 'FAM' ? ['FAM'] : s.matricola ? ['SD', 'EST'] : ['SE', 'EST']
   async function salva() {
-    if (!s || doppia) return
+    if (!s || doppia || tes.errore) return
     const pc = patchContatti(fc, fa, s, db.prefissoTel)
     if ('errore' in pc) { avviso(pc.errore, 'error'); return }
     setSalvo(true)
     const r = await esegui(async () => {
       await cralApi.modificaPersona(id, {
         ...(s.tipo !== 'FAM' && f.tipo !== s.tipo ? { tipo: f.tipo as 'SD' | 'SE' | 'EST' } : {}),
-        tessera: conTessera ? f.tessera.trim() : '', sede: f.sede || null, email: f.email.trim(), nascita: f.nascita || null, note: f.note,
+        tessera: conTessera ? tes.tessera : '', sede: f.sede || null, email: f.email.trim(), nascita: f.nascita || null, note: f.note,
       })
       if (s.tipo === 'FAM' && JSON.stringify(f.legami) !== JSON.stringify(s.legami)) await cralApi.legami(id, f.legami)
       if ('contatti' in pc || 'alimentari' in pc) await cralApi.contatti(id, pc)
@@ -325,7 +327,7 @@ function SocioModal({ id, onClose, onApri }: { id: string; onClose: () => void; 
       {s.stato === 'CESSATO' && <button className={btnSecondario + ' mr-auto'} onClick={() => setRiammetti(true)}>{eSocio(s) ? 'Riammetti' : 'Riattiva'}</button>}
       {s.stato === 'ELIMINATO' && <button className={btnSecondario + ' mr-auto'} onClick={() => setAzione('ripristina')}>Ripristina</button>}
       <button className={btnSecondario} onClick={onClose}>Annulla</button>
-      <button className={btnPrimario} disabled={doppia || salvo || (s.tipo === 'FAM' && !f.legami.length)} onClick={() => void salva()}>Salva</button>
+      <button className={btnPrimario} disabled={doppia || !!tes.errore || salvo || (s.tipo === 'FAM' && !f.legami.length)} onClick={() => void salva()}>Salva</button>
     </>}>
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap gap-2 items-center"><Origine s={s} /><StatoSocio s={s} />{s.atipico && <Pill tono="warn" title="ATIPICO nel libro soci: etichetta provvisoria">ATIPICO</Pill>}
@@ -344,8 +346,8 @@ function SocioModal({ id, onClose, onApri }: { id: string; onClose: () => void; 
           <Campo label="Tipologia" hint={f.tipo === 'EST' ? "Esterno: non è socio, niente tessera, non compare nell'elenco soci." : undefined}>
             <select className={inputCls} value={f.tipo} onChange={e => setF({ ...f, tipo: e.target.value as TipoPersona })}>{ammesse.map(k => <option key={k} value={k}>{TIPOLOGIE[k][0]}</option>)}</select></Campo>}
         <div className="grid sm:grid-cols-2 gap-4">
-          {conTessera && <Campo label="Tessera CRAL (n. socio)" hint={doppia ? <span className="text-red-400">Tessera già assegnata a un altro socio.</span> : `Prossimo progressivo: ${prossimaTessera(db.tessera)}`}>
-            <div className="flex gap-2"><input className={inputCls + ' font-mono'} value={f.tessera} onChange={e => setF({ ...f, tessera: e.target.value })} placeholder="Nessuna" />
+          {conTessera && <Campo label="Tessera CRAL (n. socio)" hint={tes.errore ? <span className="text-red-400">{tes.errore}</span> : doppia ? <span className="text-red-400">Tessera già assegnata a un altro socio.</span> : `Prossimo progressivo: ${prossimaTessera(db.tessera)}`}>
+            <div className="flex gap-2"><input className={inputCls + ' font-mono'} value={f.tessera} onChange={e => setF({ ...f, tessera: e.target.value })} onBlur={() => { if (!tes.errore && tes.tessera !== f.tessera) setF({ ...f, tessera: tes.tessera }) }} placeholder="Nessuna" />
               {!f.tessera && <button type="button" className={btnPiccoloSec + ' whitespace-nowrap'} onClick={() => setF({ ...f, tessera: prossimaTessera(db.tessera) })}>Assegna</button>}</div>
           </Campo>}
           <Campo label="Sede di consegna" hint={s.tipo === 'FAM' ? 'Di norma quella del socio' : undefined}><select className={inputCls} value={f.sede} onChange={e => setF({ ...f, sede: e.target.value })}><option value="">— Da indicare</option>{db.sedi.filter(x => x.attiva || x.id === f.sede).map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}</select></Campo>
@@ -471,8 +473,9 @@ export function NuovoSocioModal({ onClose, perIniziativa, tipoIniziale }: { onCl
   const [fa, setFa] = useState<FormAlimentari>(FORM_ALIMENTARI_VUOTO)
   const daAnagrafica = tipo === 'SD' || (tipo === 'EST' && estDaPgs)
   const conTessera = tipo === 'SD' || tipo === 'SE'
-  const doppia = conTessera && tesseraDoppia(db, null, f.tessera.trim())
-  const ok = (daAnagrafica ? !!scelto : !!f.cognome.trim() && !!f.nome.trim()) && (tipo !== 'FAM' || rifs.length > 0) && !doppia && !salvo
+  const tes = conTessera ? tesseraDalCampo(db.tessera, null, f.tessera) : { tessera: '' }
+  const doppia = conTessera && tesseraDoppia(db, null, tes.tessera)
+  const ok = (daAnagrafica ? !!scelto : !!f.cognome.trim() && !!f.nome.trim()) && (tipo !== 'FAM' || rifs.length > 0) && !doppia && !tes.errore && !salvo
   async function crea() {
     const pc = patchContatti(fc, fa, null, db.prefissoTel)
     if ('errore' in pc) { avviso(pc.errore, 'error'); return }
@@ -480,8 +483,8 @@ export function NuovoSocioModal({ onClose, perIniziativa, tipoIniziale }: { onCl
     const base: CralNuovaPersonaApi = { tipo, sede: f.sede || null, email: f.email.trim(), note: f.note, ...(perIniziativa ? { perIniziativa } : {}), ...pc }
     const body: CralNuovaPersonaApi = tipo === 'FAM'
       ? { ...base, cognome: f.cognome.trim(), nome: f.nome.trim(), nascita: f.nascita || null, sede: f.sede || rifs[0]?.s.sede || null, legami: rifs.map(r => ({ socio: r.s.id, relazione: r.relazione })) }
-      : daAnagrafica && scelto ? { ...base, matricola: scelto.matricola, tessera: conTessera ? f.tessera.trim() : '' }
-        : { ...base, cognome: f.cognome.trim(), nome: f.nome.trim(), nascita: f.nascita || null, tessera: conTessera ? f.tessera.trim() : '' }
+      : daAnagrafica && scelto ? { ...base, matricola: scelto.matricola, tessera: conTessera ? tes.tessera : '' }
+        : { ...base, cognome: f.cognome.trim(), nome: f.nome.trim(), nascita: f.nascita || null, tessera: conTessera ? tes.tessera : '' }
     const daValidare = !daAnagrafica && tipo !== 'FAM'
     const r = await esegui(() => cralApi.creaPersona(body),
       daValidare ? `${TIPOLOGIE[tipo][0]} creato: resta «Da validare» finché qualcuno non lo valida` : `${TIPOLOGIE[tipo][0]} aggiunto`, daValidare ? 'warning' : 'success')
@@ -521,8 +524,8 @@ export function NuovoSocioModal({ onClose, perIniziativa, tipoIniziale }: { onCl
         {daAnagrafica && scelto && <p className="text-xs text-slate-500">Data di nascita dall'anagrafica PGS: <span className="text-slate-300 tabular-nums">{fmtData(scelto.nascita)}</span>. Il codice fiscale non si raccoglie.</p>}
         <div className="grid sm:grid-cols-2 gap-4">
           <Campo label="Sede di consegna"><select className={inputCls} value={f.sede} onChange={e => setF({ ...f, sede: e.target.value })}><option value="">— Da indicare</option>{db.sedi.filter(x => x.attiva).map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}</select></Campo>
-          {conTessera && <Campo label="Tessera CRAL" hint={doppia ? <span className="text-red-400">Tessera già assegnata.</span> : undefined}>
-            <div className="flex gap-2"><input className={inputCls + ' font-mono'} value={f.tessera} placeholder={tipo === 'SE' ? 'Anche alla validazione' : 'Facoltativa'} onChange={e => setF({ ...f, tessera: e.target.value })} />
+          {conTessera && <Campo label="Tessera CRAL" hint={tes.errore ? <span className="text-red-400">{tes.errore}</span> : doppia ? <span className="text-red-400">Tessera già assegnata.</span> : undefined}>
+            <div className="flex gap-2"><input className={inputCls + ' font-mono'} value={f.tessera} placeholder={tipo === 'SE' ? 'Anche alla validazione' : 'Facoltativa'} onChange={e => setF({ ...f, tessera: e.target.value })} onBlur={() => { if (!tes.errore && tes.tessera !== f.tessera) setF({ ...f, tessera: tes.tessera }) }} />
               <button type="button" className={btnPiccoloSec + ' whitespace-nowrap'} onClick={() => setF({ ...f, tessera: prossimaTessera(db.tessera) })}>{prossimaTessera(db.tessera)}</button></div>
           </Campo>}
           <Campo label="Email"><input className={inputCls} value={f.email} onChange={e => setF({ ...f, email: e.target.value })} /></Campo>

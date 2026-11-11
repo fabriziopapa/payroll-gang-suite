@@ -336,6 +336,47 @@ export const formatTessera = (t: ParametriTessera, n: number): string => `${t.fo
 export const prossimaTessera = (t: ParametriTessera): string => formatTessera(t, t.prossimo)
 /** Dal libro soci arriva un intero: 42 → 0042 (o CRAL-0042). */
 export const tesseraDaTesto = (t: ParametriTessera, v: string): string => { const x = v.trim(); return /^\d+$/.test(x) ? formatTessera(t, parseInt(x, 10)) : x }
+/**
+ * Tessera scritta a mano o arrivata da un file (26.11.11.2). Col formato
+ * obbligatorio (`vincolante`):
+ *  · solo cifre → il formato: 175 → 0175, 1 → 0001 (CRAL-0175 con la parte testuale);
+ *    piu' cifre di quelle previste → errore;
+ *  · gia' nel formato (anche col suffisso del rientro, se previsto) → com'e';
+ *  · tutto il resto → errore.
+ * Senza obbligo resta com'e' (tolti gli spazi in testa e in coda): e' il
+ * comportamento di prima. '' = nessuna tessera, sempre ammessa.
+ * La STESSA funzione vive nel server (server/src/lib/cral.ts): tenerle allineate.
+ */
+export function tesseraNelFormato(t: ParametriTessera, valore: string): { tessera: string } | { errore: string } {
+  const v = valore.trim()
+  if (!v || !t.vincolante) return { tessera: v }
+  const pref = t.formato === 'PREF' ? t.prefisso : ''
+  const esempio = formatTessera(t, 42) + (t.riammissione === 'SUFFISSO' ? ` (al rientro ${formatTessera(t, 42)}${t.sepSuffisso}${'1'.padStart(t.cifreSuffisso, '0')})` : '')
+  const numero = (cifre: string): { tessera: string } | { errore: string } => {
+    const n = parseInt(cifre, 10)
+    if (n < 1) return { errore: 'il numero della tessera parte da 1' }
+    if (String(n).length > t.cifre) return { errore: `al massimo ${t.cifre} cifre (es. ${esempio})` }
+    return { tessera: formatTessera(t, n) }
+  }
+  const resto = pref && v.toUpperCase().startsWith(pref.toUpperCase()) ? v.slice(pref.length) : v
+  // senza separatore il suffisso si riconosce solo dalla lunghezza (004201)
+  const suffissoAttaccato = t.riammissione === 'SUFFISSO' && !t.sepSuffisso && resto.length === t.cifre + t.cifreSuffisso
+  if (/^\d+$/.test(resto) && !suffissoAttaccato) return numero(resto)
+  if (t.riammissione === 'SUFFISSO') {
+    const sep = t.sepSuffisso.replace(/[.*+?^${}()|[\]\\/-]/g, '\\$&')
+    const m = resto.match(new RegExp(`^(\\d{${t.cifre}})${sep}(\\d{${t.cifreSuffisso}})$`))
+    if (m && parseInt(m[1]!, 10) >= 1) return { tessera: `${pref}${m[1]}${t.sepSuffisso}${m[2]}` }
+  }
+  return { errore: `la tessera si scrive nel formato ${esempio}` }
+}
+
+/** Tessera scritta in un campo: passa dal formato solo se è diversa da quella già assegnata (`attuale`). */
+export function tesseraDalCampo(t: ParametriTessera, attuale: string | null | undefined, testo: string): { tessera: string; errore?: string } {
+  const v = testo.trim()
+  if (v === (attuale ?? '')) return { tessera: v }
+  const r = tesseraNelFormato(t, v)
+  return 'errore' in r ? { tessera: v, errore: r.errore } : r
+}
 /** Numero della tessera senza prefisso e suffisso: stesso numero anche se scritto diverso (0031/01 e 31). */
 export function numBase(t: ParametriTessera, tessera: string | null | undefined): number {
   const s = String(tessera ?? ''); const x = t.prefisso && s.startsWith(t.prefisso) ? s.slice(t.prefisso.length) : s

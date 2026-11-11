@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.11.11.1-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.11.11.2-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -61,7 +61,7 @@ payroll-gang-suite/
 │       │                        # Capitoli, Certificati, Emolumenti (EmolumentiArea: due schede), PdfRegionEditor,
 │       │                        # Impostazioni, Utenti, VersamentiEnti (stampa versamenti → EML per ente),
 │       │                        # CralPage (Modulo CRAL, solo admin, caricata a richiesta)
-│       ├── store/               # Stato globale Zustand (useStore.ts)
+│       ├── store/               # Stato globale Zustand (useStore.ts); paginaRicordata.ts: pagina da riaprire dopo un aggiornamento del browser
 │       ├── types/               # Interfacce TypeScript + APP_VERSION
 │       └── utils/               # CSV / PDF / EML builder, calcoli scorporo (biz.ts),
 │                                # provvedimentiRiga.ts (+ test): piu' provvedimenti per persona in Emolumenti
@@ -86,7 +86,7 @@ payroll-gang-suite/
 │       ├── auth/                # TOTP (RFC 6238) + JWT ES256 + refresh rotante Argon2id
 │       ├── db/
 │       │   ├── schema.ts        # ★ Schema Drizzle — fonte di verità del DB
-│       │   ├── migrations/      # 0001…0022 — applicate da ./pgs-migra.sh, registrate in schema_migrations
+│       │   ├── migrations/      # 0001…0026 — applicate da ./pgs-migra.sh, registrate in schema_migrations
 │       │   │                    #   (già incluse in setup.sql: NON eseguire su install nuova)
 │       │   └── repositories/    # Repository pattern (PgBozze, PgUsers, PgCertificati, …)
 │       ├── lib/                 # clientIp.ts (IP reale dietro Cloudflare) ·
@@ -342,7 +342,7 @@ Menu *Modulo CRAL → Soci e iniziative*, **solo amministratori** (voce di menu 
 - *Soci*: elenco di soci ed esterni, i familiari come sottovoce del loro socio; scheda della persona (tipologia, tessera, sede, email, nascita, familiari, storico tessere, cessazione e riammissione).
 - *Sedi*: chi ritira dove; «Esterni» e' una sede come le altre.
 - *Da validare*: soci esterni ed esterni si correggono (tipologia, sede, **tessera dal libro soci**, nominativo, nascita, email) e si validano o rifiutano; **«Trova in anagrafica PGS»** da' la matricola: il socio esterno diventa socio dipendente, l'esterno resta esterno; scelte, ordini e familiari seguono il nuovo ID.
-- **Tessera** (*Parametri*): solo progressivo (default, `0042`) o parte testuale + progressivo (`CRAL-0042`); chi rientra dopo la cessazione prende un **numero nuovo** (default) oppure lo stesso con un suffisso (`0042/01`). Deve essere unica. La validazione non la assegna: viene dal libro soci o si scrive a mano.
+- **Tessera** (*Parametri*): solo progressivo (default, `0042`) o parte testuale + progressivo (`CRAL-0042`); chi rientra dopo la cessazione prende un **numero nuovo** (default) oppure lo stesso con un suffisso (`0042/01`). Deve essere unica. La validazione non la assegna: viene dal libro soci o si scrive a mano. **Formato obbligatorio** (dalla 26.11.11.2, spento di partenza): acceso, anche le tessere scritte a mano (scheda, nuova persona, *Da validare*) e quelle dei file (T1, T6) devono rispettare il formato. Il solo numero si completa da se' (`175` → `0175`, `1` → `0001`), il resto si rifiuta; il controllo lo fa il server e vale solo per una tessera che **cambia** (quelle gia' assegnate restano come sono e la card elenca quelle fuori formato). Il ripristino da archivio non lo applica.
 - **ATIPICO** del libro soci: per ora solo un'etichetta.
 - In alto il riquadro **Totale soci** (soci dipendenti + soci esterni attivi), cliccabile come gli altri: filtra l'elenco sui soci.
 
@@ -425,7 +425,7 @@ Elenco soci, quote associative e, per ogni evento, riepilogo per sede, scelte/or
 
 ### Cosa salva PGS
 
-`cral_sedi`, `cral_parametri` (tessera e progressivi; dalla 0025 prefisso dei numeri e modelli di esportazione), `cral_tipi`, `cral_tipologie_prodotto`, `cral_soci` (nessun codice fiscale; dalla 0025 telefono, consensi, WhatsApp, esigenze alimentari), `cral_familiari_legami`, `cral_soci_tessere`, `cral_iniziative` (config in JSON validato dal server), `cral_iniziative_partecipanti`, `cral_scelte` (dati in JSON validato contro la config), `cral_carichi`, `cral_richieste`, `cral_quote_anno`, `cral_quote`, `cral_lotti` e `cral_lotti_variazioni` (0023; le variazioni si svuotano alla chiusura del lotto). Importi in centesimi interi.
+`cral_sedi`, `cral_parametri` (tessera e progressivi; dalla 0025 prefisso dei numeri e modelli di esportazione; dalla 0026 `tessera_vincolante`), `cral_tipi`, `cral_tipologie_prodotto`, `cral_soci` (nessun codice fiscale; dalla 0025 telefono, consensi, WhatsApp, esigenze alimentari), `cral_familiari_legami`, `cral_soci_tessere`, `cral_iniziative` (config in JSON validato dal server), `cral_iniziative_partecipanti`, `cral_scelte` (dati in JSON validato contro la config), `cral_carichi`, `cral_richieste`, `cral_quote_anno`, `cral_quote`, `cral_lotti` e `cral_lotti_variazioni` (0023; le variazioni si svuotano alla chiusura del lotto). Importi in centesimi interi.
 
 Audit (entita' `cral`): `CRAL_FILE_LETTO`, `CRAL_IMPORT_ABBINAMENTO`, `CRAL_IMPORT_CONFERMATO`, `CRAL_PERSONA_CREATA` / `_MODIFICATA`, `CRAL_LEGAMI_FAMILIARE`, `CRAL_PERSONE_VALIDA` / `_RIFIUTA` / `_RIMETTI` / `_CESSA` / `_RIATTIVA`, `CRAL_SOCIO_RIAMMESSO`, `CRAL_TROVATO_IN_PGS`, `CRAL_SEDE_ASSEGNATA`, `CRAL_SEDE_*`, `CRAL_TIPO_*`, `CRAL_TIPOLOGIA_*`, `CRAL_PARAMETRI_TESSERA`, `CRAL_EVENTO_CREATO` / `_MODIFICATO` / `_ARCHIVIATO` / `_RIPRISTINATO`, `CRAL_PARTECIPANTI`, `CRAL_SCELTA`, `CRAL_SCELTE_IN_BLOCCO`, `CRAL_CARICO`, `CRAL_RICHIESTA` / `_MODIFICATA`, `CRAL_QUOTA_ANNO`, `CRAL_QUOTA_SOCIO`, `CRAL_TRATTENUTA_MESE`; dalla 26.10.29 `CRAL_PERSONE_ELIMINA` / `_RIPRISTINA`, `CRAL_TIPOLOGIA_IN_BLOCCO`, `CRAL_PASSAGGIO_SOCIO_ESTERNO`, `CRAL_EXPORT_SOCI`, `CRAL_EXPORT_ARCHIVIO` (ambiente, sezioni, conteggi), `CRAL_LOTTO_T6`, `CRAL_LOTTO_T7`, `CRAL_EXPORT_QUOTE`, `CRAL_LOTTO_ARCHIVIO`, `CRAL_LOTTO_APPLICATO`, `CRAL_LOTTO_SCARTATO`.
 
@@ -578,6 +578,14 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.11.11.2
+**Modulo CRAL: si resta sul modulo dopo l'aggiornamento della pagina; formato della tessera obbligatorio**
+
+- **Aggiornamento del browser**: dentro il modulo CRAL si resta sul CRAL, nella stessa scheda (Soci, Importazione, Parametri…), invece di tornare alla dashboard. La pagina e la scheda si ricordano nella memoria della scheda del browser (`sessionStorage`: solo il nome, nessun dato; sparisce chiudendola). Si riaprono solo le pagine elencate in `client/src/store/paginaRicordata.ts` (per ora il CRAL, solo per gli admin); il login porta sempre alla dashboard. Lo stato interno della scheda (evento aperto, file caricato) non si conserva.
+- **Formato della tessera obbligatorio** (*Parametri › Tessera CRAL*, interruttore spento di partenza): acceso, il solo numero si completa da se' (`175` → `0175`, `1` → `0001`, `CRAL-0175` con la parte testuale; col suffisso del rientro anche `0042/01`), il resto si rifiuta con il formato da usare. Vale per la scheda della persona, *Nuova persona*, *Da validare*, il T1 (la riga entra senza tessera e il riepilogo lo dice) e il T6 (variazione bloccata col motivo). Il controllo e' nel **server** e riguarda solo una tessera che **cambia**: quelle gia' assegnate fuori formato non impediscono di salvare la scheda, e la card le elenca. Il ripristino da archivio non lo applica.
+- **Regola unica** `tesseraNelFormato` in `server/src/lib/cral.ts`, uguale in `client/src/components/cral/logica.ts` (stessi test); nuovo errore `TESSERA_FORMATO` (400). **Migrazione `0026_cral_tessera_vincolante.sql`** (una colonna, additiva, idempotente; `setup.sql` allineato).
+- Test: server 151 (+1 saltato), client 123. Migrazione provata su uno schema 26.11.11.1 (due volte) e confrontata con `setup.sql` (tutte le colonne uguali); regola provata sul database (nuova persona, modifica, tessera gia' assegnata, doppione scritto diverso, libro soci).
 
 ### 26.11.11.1
 **Modulo CRAL: un modello Excel per ogni tracciato di importazione**

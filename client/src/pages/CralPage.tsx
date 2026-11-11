@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { cralApi } from '../api/endpoints'
 import { useStore } from '../store/useStore'
+import { ricordaValore, valoreRicordato } from '../store/paginaRicordata'
 import { showToast } from '../components/ToastManager'
 import { daStato, type Db, type Lotto, type PatchScelta, type QuotaSocio, type Richiesta, type Scelta } from '../components/cral/tipi'
 import { eSocio, quotaDopoModifica } from '../components/cral/logica'
@@ -45,7 +46,9 @@ export function CralPage() {
   const [db, setDb] = useState<Db | null>(null)
   const [lotti, setLotti] = useState<Lotto[]>([])
   const [errore, setErrore] = useState<string | null>(null)
-  const [scheda, setScheda] = useState<Scheda>('soci')
+  // la scheda resta quella aperta anche dopo un aggiornamento del browser
+  const [scheda, setScheda] = useState<Scheda>(() => valoreRicordato('cral.scheda', SCHEDE.map(x => x[0])) ?? 'soci')
+  useEffect(() => { ricordaValore('cral.scheda', scheda) }, [scheda])
 
   const ricarica = useCallback(async () => {
     try {

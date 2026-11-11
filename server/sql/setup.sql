@@ -303,6 +303,8 @@ CREATE TABLE IF NOT EXISTS cral_parametri (
   -- 0025: prefisso dei numeri scritti senza, modelli di esportazione salvati
   prefisso_tel      VARCHAR(4)   NOT NULL DEFAULT '39' CONSTRAINT cral_parametri_prefisso_tel CHECK (prefisso_tel ~ '^[1-9][0-9]{0,3}$'),
   export_modelli    JSONB        NOT NULL DEFAULT '[]',
+  -- 0026: il formato vale anche per le tessere scritte a mano e importate
+  tessera_vincolante BOOLEAN     NOT NULL DEFAULT false,
   updated_by        UUID         REFERENCES users(id) ON DELETE SET NULL,
   updated_at        TIMESTAMPTZ  NOT NULL DEFAULT now()
 );

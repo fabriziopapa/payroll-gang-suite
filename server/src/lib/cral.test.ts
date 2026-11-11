@@ -2,11 +2,11 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   abbina, applicaSconto, baseTessera, configSchema, erroreDati, erroreIniziativa, formatTessera, iniziativaSchema,
-  numeroTessera, prossimoDopo, quotaDopoModifica, rataMese, sceltaSchema, versato, spezzaNominativo, tesseraDaFile, tesseraRiammissione, unisciDati, usiTolti,
+  numeroTessera, prossimoDopo, quotaDopoModifica, rataMese, sceltaSchema, versato, spezzaNominativo, tesseraDaFile, tesseraNelFormato, tesseraRiammissione, unisciDati, usiTolti,
   type AnagraficaCral, type ParametriTessera,
 } from './cral.js'
 
-const T: ParametriTessera = { formato: 'NUM', prefisso: 'CRAL-', cifre: 4, prossimo: 56, riammissione: 'NUOVO', sepSuffisso: '/', cifreSuffisso: 2 }
+const T: ParametriTessera = { formato: 'NUM', prefisso: 'CRAL-', cifre: 4, prossimo: 56, riammissione: 'NUOVO', sepSuffisso: '/', cifreSuffisso: 2, vincolante: false }
 
 test('tessera: formato numerico e con prefisso', () => {
   assert.equal(formatTessera(T, 42), '0042')
@@ -125,4 +125,33 @@ test('quota a mano (0024): accendere un mese registra la rata, spegnerlo la azze
   assert.equal(rataMese(6001, 11), 6001 - 11 * 500)
   const q4 = quotaDopoModifica(q0, { importi: [6000, ...Array<number>(11).fill(0)] }, 6000)
   assert.ok(q4.mesi.every(Boolean), 'un versamento della quota annua copre tutto l\'anno')
+})
+
+test('tessera nel formato (26.11.11.2): spento come prima, acceso completa o rifiuta', () => {
+  // spento: com'e', tolti gli spazi
+  assert.deepEqual(tesseraNelFormato(T, ' 175 '), { tessera: '175' })
+  assert.deepEqual(tesseraNelFormato(T, 'A12'), { tessera: 'A12' })
+  const V = { ...T, vincolante: true }
+  assert.deepEqual(tesseraNelFormato(V, '175'), { tessera: '0175' })
+  assert.deepEqual(tesseraNelFormato(V, '1'), { tessera: '0001' })
+  assert.deepEqual(tesseraNelFormato(V, '0175'), { tessera: '0175' })
+  assert.deepEqual(tesseraNelFormato(V, '9999'), { tessera: '9999' })
+  assert.deepEqual(tesseraNelFormato(V, ''), { tessera: '' })
+  assert.match((tesseraNelFormato(V, '12345') as { errore: string }).errore, /al massimo 4 cifre/)
+  assert.match((tesseraNelFormato(V, '0') as { errore: string }).errore, /parte da 1/)
+  assert.match((tesseraNelFormato(V, 'A12') as { errore: string }).errore, /formato 0042/)
+  assert.ok('errore' in tesseraNelFormato(V, '0175/01'))
+  assert.ok('errore' in tesseraNelFormato(V, '01 75'))
+  // con la parte testuale
+  const P = { ...V, formato: 'PREF' as const }
+  assert.deepEqual(tesseraNelFormato(P, '175'), { tessera: 'CRAL-0175' })
+  assert.deepEqual(tesseraNelFormato(P, 'cral-0175'), { tessera: 'CRAL-0175' })
+  assert.ok('errore' in tesseraNelFormato(P, 'XX-0175'))
+  // col suffisso del rientro
+  const S = { ...V, riammissione: 'SUFFISSO' as const }
+  assert.deepEqual(tesseraNelFormato(S, '0042/01'), { tessera: '0042/01' })
+  assert.match((tesseraNelFormato(S, '42/1') as { errore: string }).errore, /al rientro 0042\/01/)
+  const S0 = { ...S, sepSuffisso: '' as const }
+  assert.deepEqual(tesseraNelFormato(S0, '004201'), { tessera: '004201' })
+  assert.deepEqual(tesseraNelFormato(S0, '42'), { tessera: '0042' })
 })

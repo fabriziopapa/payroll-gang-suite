@@ -892,6 +892,8 @@ export interface CralTipologiaRow { id: string; nome: string; attiva: boolean; o
 export interface CralTesseraParam {
   formato: 'NUM' | 'PREF'; prefisso: string; cifre: number; prossimo: number
   riammissione: 'NUOVO' | 'SUFFISSO'; sepSuffisso: '' | '/' | '-' | '.'; cifreSuffisso: number
+  /** 0026: il formato vale anche per le tessere scritte a mano e importate */
+  vincolante: boolean
 }
 /** 0025: modello di esportazione salvato (colonne, filtri, formato): validato in routes/cral.ts. */
 export interface CralModelloExport { id: string; nome: string; colonne: string[]; solo: 'TUTTI' | 'CONTATTABILI' | 'WHATSAPP' | 'ALIMENTARI'; formato: 'xlsx' | 'csv'; separatore: ';' | ',' }
@@ -974,7 +976,7 @@ export type CralOperazioneImport =
 export interface CralEsitoImport { nuoviPgs: number; nuoviEsterni: number; aggiornati: number; tessere: number; cessati: number }
 
 export type CralErrore =
-  | 'TESSERA_DOPPIA' | 'MATRICOLA_GIA_SOCIO' | 'SOCIO_NON_TROVATO' | 'SEDE_SCONOSCIUTA'
+  | 'TESSERA_DOPPIA' | 'TESSERA_FORMATO' | 'MATRICOLA_GIA_SOCIO' | 'SOCIO_NON_TROVATO' | 'SEDE_SCONOSCIUTA'
   | 'LEGAME_NON_VALIDO' | 'STATO_NON_VALIDO' | 'SUFFISSI_ESAURITI' | 'NOME_GIA_USATO' | 'TIPO_SCONOSCIUTO'
   | 'LOTTO_NON_TROVATO' | 'LOTTO_CHIUSO'
   | 'TELEFONO_NON_VALIDO' | 'TELEFONO_MANCANTE' | 'CONSENSO_REVOCATO' | 'DATA_NON_VALIDA'

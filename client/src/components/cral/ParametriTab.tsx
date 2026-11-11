@@ -7,7 +7,7 @@
 import { useState } from 'react'
 import { cralApi } from '../../api/endpoints'
 import type { ParametriTessera } from './tipi'
-import { fmtEuro, fmtImp, formatTessera, oggi, parseEuro, prossimaTessera, rataMese } from './logica'
+import { fmtEuro, fmtImp, formatTessera, nominativo, oggi, parseEuro, prossimaTessera, rataMese, tesseraNelFormato } from './logica'
 import { Campo, D, Ico, Interruttore, avviso, btnPiccoloSec, btnPrimario, cardCls, etichettaCls, inputCls, inputW, sceltaCls, useCral } from './ui'
 
 interface Voce { id: string; nome: string; colore?: string; flag: boolean; flag2?: boolean }
@@ -83,6 +83,8 @@ function ParametriTesseraCard() {
   const suf = (n: number) => `${es}${t.sepSuffisso}${String(n).padStart(t.cifreSuffisso, '0')}`
   const max = 10 ** t.cifreSuffisso - 1
   const prefOk = /^[A-Za-z0-9 ._/-]{0,10}$/.test(t.prefisso)
+  // 26.11.11.2: le tessere già assegnate che col formato scelto non sarebbero accettate (non si cambiano da sole)
+  const fuori = t.vincolante ? db.soci.filter(p => p.tessera && p.stato !== 'ELIMINATO').filter(p => { const r = tesseraNelFormato(t, p.tessera); return 'errore' in r || r.tessera !== p.tessera }) : []
   const scelta = (on: boolean, onClick: () => void, titolo: string, desc: string) => <button onClick={onClick} className={sceltaCls(on)}><p className="text-sm font-medium text-white">{titolo}</p><p className="text-xs text-slate-500 font-mono">{desc}</p></button>
   return (
     <div className={`${cardCls} p-5 flex flex-col gap-4`}>
@@ -96,6 +98,16 @@ function ParametriTesseraCard() {
         <Campo label="Parte testuale" hint={prefOk ? undefined : <span className="text-red-400">Solo lettere, cifre, spazio e . _ / -</span>}><input disabled={t.formato !== 'PREF'} maxLength={10} className={inputCls + ' font-mono disabled:opacity-40'} value={t.prefisso} onChange={e => set({ prefisso: e.target.value })} /></Campo>
         <Campo label="Cifre" hint="Con zeri iniziali"><input type="number" min={1} max={8} className={inputCls} value={t.cifre} onChange={e => set({ cifre: Math.max(1, Math.min(8, +e.target.value || 1)) })} /></Campo>
         <Campo label="Prossimo n."><input type="number" min={1} className={inputCls} value={t.prossimo} onChange={e => set({ prossimo: Math.max(1, Math.min(99_999_999, +e.target.value || 1)) })} /></Campo>
+      </div>
+      <div className="flex flex-col gap-2">
+        <Interruttore on={t.vincolante} onChange={v => set({ vincolante: v })} label={<span>Formato obbligatorio <span className="text-slate-500">· anche le tessere scritte a mano e importate</span></span>} />
+        <p className="text-xs text-slate-500">{t.vincolante
+          ? <>Scrivendo solo il numero si completa da sé: <span className="font-mono text-slate-300">175</span> → <span className="font-mono text-slate-300">{formatTessera(t, 175)}</span>, <span className="font-mono text-slate-300">1</span> → <span className="font-mono text-slate-300">{formatTessera(t, 1)}</span>. Una tessera fuori formato non si salva. Quelle già assegnate restano come sono.</>
+          : 'Spento: la tessera scritta a mano entra così come la scrivi (deve solo essere unica).'}</p>
+        {fuori.length > 0 && <div className="rounded-lg border border-amber-900/60 bg-amber-950/20 px-3 py-2 text-xs text-amber-200 flex flex-col gap-1">
+          <span>{fuori.length === 1 ? '1 tessera già assegnata non è' : `${fuori.length} tessere già assegnate non sono`} nel formato: restano come sono, si correggono a mano o col T6.</span>
+          <span className="text-amber-300/80">{fuori.slice(0, 12).map(p => `${nominativo(p)} «${p.tessera}»`).join(' · ')}{fuori.length > 12 ? ` · e altre ${fuori.length - 12}` : ''}</span>
+        </div>}
       </div>
       <div className="flex flex-col gap-2"><span className={etichettaCls}>Chi rientra dopo la cessazione</span>
         <div className="grid sm:grid-cols-2 gap-2">
@@ -111,7 +123,7 @@ function ParametriTesseraCard() {
         <span className={etichettaCls}>Anteprima</span>
         <span>Nuovo socio: <span className="font-mono text-slate-100">{prossimaTessera(t)}</span></span>
         <span>Socio con tessera <span className="font-mono text-slate-200">{es}</span> che rientra: <span className="font-mono text-emerald-300">{t.riammissione === 'SUFFISSO' ? suf(1) : prossimaTessera(t)}</span>{t.riammissione === 'SUFFISSO' && <>, al secondo rientro <span className="font-mono text-emerald-300">{suf(2)}</span></>}</span>
-        <span>La tessera si può sempre scrivere a mano: deve solo essere unica.</span>
+        <span>{t.vincolante ? `Scritta a mano: nel formato ${formatTessera(t, 42)}, e unica.` : 'La tessera si può sempre scrivere a mano: deve solo essere unica.'}</span>
       </div>
       <div className="flex gap-2 justify-end">
         {cambiata && <button className={btnPiccoloSec} onClick={() => setT(db.tessera)}>Annulla le modifiche</button>}

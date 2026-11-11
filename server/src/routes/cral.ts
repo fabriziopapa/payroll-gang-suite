@@ -97,7 +97,7 @@ const ANNO       = z.coerce.number().int().min(2000).max(2100)
 const MAX_IDS    = 5000
 
 const STATO_HTTP: Record<CralErrore, number> = {
-  TESSERA_DOPPIA: 409, MATRICOLA_GIA_SOCIO: 409, NOME_GIA_USATO: 409, SOCIO_NON_TROVATO: 404,
+  TESSERA_DOPPIA: 409, TESSERA_FORMATO: 400, MATRICOLA_GIA_SOCIO: 409, NOME_GIA_USATO: 409, SOCIO_NON_TROVATO: 404,
   SEDE_SCONOSCIUTA: 400, LEGAME_NON_VALIDO: 400, STATO_NON_VALIDO: 409, SUFFISSI_ESAURITI: 409, TIPO_SCONOSCIUTO: 400,
   LOTTO_NON_TROVATO: 404, LOTTO_CHIUSO: 409,
   TELEFONO_NON_VALIDO: 400, TELEFONO_MANCANTE: 400, CONSENSO_REVOCATO: 409, DATA_NON_VALIDA: 400,
@@ -482,7 +482,7 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     const anag = await repo.anagrafica()
     const nascita = new Map(anag.map(a => [a.matricola, a.nascita]))
     const oggi = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Rome' }).format(new Date())
-    const variazioni = confrontaT6(b.righe, st.soci.map(personaDaRiga), new Set(st.sedi.map(s => s.id)), nascita, oggi)
+    const variazioni = confrontaT6(b.righe, st.soci.map(personaDaRiga), new Set(st.sedi.map(s => s.id)), nascita, oggi, st.parametri.tessera)
     if (!variazioni.length) return reply.send({ id: null, variazioni: 0 })
     const riepilogo = { variazioni: conteggi(variazioni), righe: b.righe.length }
     const id = await repo.creaLotto({ origine: 'T6', file: b.file, ambiente: ambienteDi(request), esportato: null, sezioni: ['soci'], riepilogo }, variazioni, uid(request))

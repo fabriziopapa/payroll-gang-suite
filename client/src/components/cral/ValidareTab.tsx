@@ -7,7 +7,7 @@
 import { useState } from 'react'
 import { cralApi } from '../../api/endpoints'
 import type { Persona } from './tipi'
-import { TIPOLOGIE, fmtData, nominativo, tesseraDaTesto, tesseraDoppia } from './logica'
+import { TIPOLOGIE, fmtData, nominativo, tesseraDaTesto, tesseraDalCampo, tesseraDoppia } from './logica'
 import { CercaAnagrafica } from './SociTab'
 import { ElencoLotti } from './Lotto'
 import {
@@ -58,7 +58,10 @@ function SezioneValidazione({ tipo, titolo, spiega, onCollega, onRifiuta }: {
   const senzaTessera = socio ? lista.filter(s => !s.tessera).length : 0
   const aggiorna = (s: Persona, p: Parameters<typeof cralApi.modificaPersona>[1], ok?: string) => esegui(() => cralApi.modificaPersona(s.id, p), ok, 'info')
   function salvaTessera(s: Persona, txt: string) {
-    const v = tesseraDaTesto(db.tessera, txt)
+    // col formato obbligatorio (Parametri) la stessa regola della scheda; altrimenti come prima: 42 → 0042
+    const f = db.tessera.vincolante ? tesseraDalCampo(db.tessera, s.tessera, txt) : { tessera: tesseraDaTesto(db.tessera, txt) }
+    if (f.errore) { avviso(`Tessera «${txt.trim()}»: ${f.errore}`, 'error'); return }
+    const v = f.tessera
     setTTxt(x => { const n = { ...x }; delete n[s.id]; return n })
     if (v === s.tessera) return
     if (tesseraDoppia(db, s.id, v)) { avviso(`La tessera ${v} è già di un altro socio`, 'error'); return }

@@ -40,6 +40,8 @@ export interface Tipologia { id: string; nome: string; attiva: boolean; ordine: 
 export interface ParametriTessera {
   formato: 'NUM' | 'PREF'; prefisso: string; cifre: number; prossimo: number
   riammissione: 'NUOVO' | 'SUFFISSO'; sepSuffisso: '' | '/' | '-' | '.'; cifreSuffisso: number
+  /** 26.11.11.2: anche le tessere scritte a mano e importate devono rispettare il formato. */
+  vincolante: boolean
 }
 
 export interface ScontoRegola { tipo: '%' | '€'; val: number }

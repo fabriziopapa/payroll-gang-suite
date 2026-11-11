@@ -17,6 +17,7 @@ import type { UserApi, AnagraficaApi, VoceApi, BozzaApi, CapitoloAnagApi } from 
 import { DEFAULT_COEFFICIENTI_SCORPORO } from '../constants/scorporoCoefficients'
 import { DEFAULT_CSV_PARAMS, PALETTE_DETTAGLIO, TAG_BUILTIN } from '../constants/csvDefaults'
 import { setAccessToken } from '../api/client'
+import { ricordaPagina } from './paginaRicordata'
 
 // ── Tipi ─────────────────────────────────────────────────────
 
@@ -110,7 +111,8 @@ interface AppStore {
   globalError: string | null
 
   // ── Actions Auth
-  setAuth:        (user: UserApi, token: string) => void
+  /** `pagina`: solo al ripristino della sessione (aggiornamento del browser); il login porta alla dashboard. */
+  setAuth:        (user: UserApi, token: string, pagina?: PageId | null) => void
   clearAuth:      () => void
   setBootstrap:   (done: boolean) => void
 
@@ -178,11 +180,11 @@ export const useStore = create<AppStore>()(
     globalError:       null,
 
     // ── Auth ─────────────────────────────────────────────────
-    setAuth: (user, token) => {
+    setAuth: (user, token, pagina) => {
       set(s => {
         s.user         = user
         s.accessToken  = token
-        s.currentPage  = 'dashboard'
+        s.currentPage  = pagina ?? 'dashboard'
         s.bootstrapDone = true
       })
       setAccessToken(token)
@@ -380,3 +382,7 @@ export const useStore = create<AppStore>()(
     setGlobalError: (e) => set(s => { s.globalError = e }),
   })),
 )
+
+// Pagina da riaprire dopo un aggiornamento del browser (paginaRicordata.ts):
+// ogni cambio di pagina, da qualunque azione, aggiorna il ricordo.
+useStore.subscribe((s, prima) => { if (s.currentPage !== prima.currentPage) ricordaPagina(s.currentPage) })
