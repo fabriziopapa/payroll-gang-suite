@@ -7,6 +7,8 @@
 // ini.prodotti invece di ini.config.prodotti.
 // ============================================================
 
+import type { Alimentari, Contatti } from './contatti'
+
 export type TipoPersona = 'SD' | 'SE' | 'EST' | 'FAM'
 export type StatoPersona = 'ATTIVO' | 'DA_VALIDARE' | 'RIFIUTATO' | 'CESSATO' | 'ELIMINATO'
 export type Relazione = 'CONIUGE' | 'FIGLIO'
@@ -26,6 +28,8 @@ export interface Persona {
   /** Eliminato (con lo stato di prima), anni esenti dalla quota, ex matricola di chi è passato a socio esterno. */
   eliminatoIl: string | null; eliminatoDa: string | null; statoPrima: Exclude<StatoPersona, 'ELIMINATO'> | null
   anniEsenti: number[]; exMatricola: string | null
+  /** Telefono (E.164), consenso, WhatsApp; esigenze alimentari (0025). */
+  contatti: Contatti; alimentari: Alimentari
   legami: Legame[]
   storicoTessere: Array<{ tessera: string; dal: string | null; al: string }>
 }
@@ -93,7 +97,12 @@ export interface QuotaSocio {
   importi: number[]; versatoUnica: number | null
 }
 
+/** Modello di esportazione salvato: colonne (in ordine), chi entra, formato. */
+export interface ModelloExport { id: string; nome: string; colonne: string[]; solo: 'TUTTI' | 'CONTATTABILI' | 'WHATSAPP' | 'ALIMENTARI'; formato: 'xlsx' | 'csv'; separatore: ';' | ',' }
+
 export interface Db {
+  /** Prefisso dato ai numeri scritti senza (39) e modelli di esportazione salvati. */
+  prefissoTel: string; modelliExport: ModelloExport[]
   sedi: Sede[]; tipi: TipoEvento[]; tipologie: Tipologia[]
   tessera: ParametriTessera; extProssimo: number; famProssimo: number
   soci: Persona[]
@@ -107,7 +116,7 @@ export interface Db {
 // ── Risposta del server ──────────────────────────────────────
 export interface StatoApi {
   sedi: Sede[]; tipi: TipoEvento[]; tipologie: Tipologia[]
-  parametri: { tessera: ParametriTessera; extProssimo: number; famProssimo: number }
+  parametri: { tessera: ParametriTessera; extProssimo: number; famProssimo: number; prefissoTel?: string; modelliExport?: ModelloExport[] }
   soci: Persona[]
   iniziative: Array<Omit<Iniziativa, 'opzioni' | 'prodotti' | 'periodi' | 'articoli' | 'sconti' | 'scelte' | 'richieste'> & {
     config: unknown; scelte: Record<string, Record<string, unknown>>; richieste: Array<Omit<Richiesta, 'sconto'> & { sconto: unknown }>
@@ -162,6 +171,7 @@ export function daStato(s: StatoApi): Db {
   })
   return {
     sedi: s.sedi, tipi: s.tipi, tipologie: s.tipologie,
+    prefissoTel: s.parametri.prefissoTel ?? '39', modelliExport: s.parametri.modelliExport ?? [],
     tessera: s.parametri.tessera, extProssimo: s.parametri.extProssimo, famProssimo: s.parametri.famProssimo,
     soci: s.soci, perId: new Map(s.soci.map(p => [p.id, p])),
     iniziative, quoteAnno: s.quoteAnno, quote: s.quote,

@@ -54,6 +54,8 @@ export function CralPage() {
     } catch (e) { setErrore(messaggioErrore(e)) }
   }, [])
   useEffect(() => { void ricarica() }, [ricarica])
+  // nell'area CRAL anche la barra della pagina è sottile e si vede solo al passaggio
+  useEffect(() => { const m = document.querySelector('main'); m?.classList.add('pgs-discreto'); return () => m?.classList.remove('pgs-discreto') }, [])
 
   const ctx = useMemo<CralCtx | null>(() => !db ? null : ({
     db,

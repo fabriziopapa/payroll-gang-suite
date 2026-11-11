@@ -11,11 +11,12 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import * as schema from '../schema.js'
 import type {
-  ICralRepository, CralStato, CralSedeRow, CralTipoRow, CralTipologiaRow, CralParametriRow, CralTesseraParam,
+  ICralRepository, CralModelloExport, CralPatchContatti, CralStato, CralSedeRow, CralTipoRow, CralTipologiaRow, CralParametriRow, CralTesseraParam,
   CralSocioRow, CralIniziativaRow, CralCaricoRow, CralRichiestaRow, CralQuotaRow, CralAnagraficaRow,
   CralNuovaPersona, CralModificaPersona, CralOperazioneImport, CralEsitoImport, CralErrore, CralAzioneStato,
   CralLottoRow, CralVariazioneRow, CralEsitoApplica,
 } from '../IRepository.js'
+import { ALIMENTARI_VUOTI, CONTATTI_VUOTI, alimentariDopo, contattiDopo, type Alimentari, type Contatti } from '../../lib/cralContatti.js'
 import { baseTessera, erroreDati, prossimoDopo, quotaDopoModifica, rataMese, tesseraRiammissione, usiTolti, type ConfigEvento } from '../../lib/cral.js'
 import {
   ORDINE_SEZIONI, anniEsentiDopoRipristino, personaDaRiga, statoDi, uguale, valorePersona,
@@ -140,7 +141,38 @@ export class PgCralRepository implements ICralRepository {
   async parametri(conn: Conn = this.db): Promise<CralParametriRow> {
     const [p] = await conn.select().from(schema.cralParametri).where(eq(schema.cralParametri.id, 1))
     if (!p) throw new Error('cral_parametri vuota: applicare la migrazione 0022')
-    return { tessera: toTessera(p), extProssimo: p.extProssimo, famProssimo: p.famProssimo }
+    return { tessera: toTessera(p), extProssimo: p.extProssimo, famProssimo: p.famProssimo, prefissoTel: p.prefissoTel, modelliExport: (p.exportModelli ?? []) as CralModelloExport[] }
+  }
+
+  async salvaParametriContatti(p: { prefissoTel?: string; modelliExport?: CralModelloExport[] }, userId: string | null): Promise<void> {
+    await this.db.update(schema.cralParametri).set({
+      ...(p.prefissoTel !== undefined ? { prefissoTel: p.prefissoTel } : {}),
+      ...(p.modelliExport !== undefined ? { exportModelli: p.modelliExport } : {}),
+      updatedBy: userId, updatedAt: new Date(),
+    }).where(eq(schema.cralParametri.id, 1))
+  }
+
+  /**
+   * Contatti (telefono, consenso, WhatsApp) e dati alimentari. Una persona
+   * sola: l'errore torna; piu' persone: chi non puo' (es. senza numero) si salta.
+   */
+  async salvaContatti(ids: string[], patch: CralPatchContatti, userId: string | null): Promise<{ fatte: number; saltate: number } | CralErrore> {
+    return this.inTransazione(async tx => {
+      const righe = await tx.select().from(schema.cralSoci).where(inArray(schema.cralSoci.id, ids)).for('update')
+      if (ids.length === 1 && !righe.length) throw new Annulla('SOCIO_NON_TROVATO')
+      const data = oggi()
+      let fatte = 0, saltate = 0
+      for (const s of righe) {
+        const prima = contattiDiRiga(s), primaA = alimentariDiRiga(s)
+        const dopo = patch.contatti ? contattiDopo(prima, patch.contatti, data, 'MANO') : prima
+        if ('errore' in dopo) { if (ids.length === 1) throw new Annulla(dopo.errore); saltate++; continue }
+        const dopoA = patch.alimentari ? alimentariDopo(primaA, patch.alimentari, data) : primaA
+        if (JSON.stringify(dopo) === JSON.stringify(prima) && JSON.stringify(dopoA) === JSON.stringify(primaA)) continue
+        await tx.update(schema.cralSoci).set({ ...colonneContatti(dopo), ...colonneAlimentari(dopoA), modificatoDa: userId, modificatoIl: new Date() }).where(eq(schema.cralSoci.id, s.id))
+        fatte++
+      }
+      return { fatte, saltate }
+    })
   }
 
   async salvaTessera(t: CralTesseraParam, userId: string | null): Promise<void> {
@@ -250,11 +282,14 @@ export class PgCralRepository implements ICralRepository {
     if (p.legami?.length) await this.verificaLegami(tx, id, p.legami)
     if (p.sede) await this.verificaSede(tx, p.sede)
     const tessera = (p.tipo === 'SD' || p.tipo === 'SE') && p.tessera ? p.tessera : null
+    const contatti = p.contatti ? contattiDopo(CONTATTI_VUOTI, p.contatti, oggi(), 'MANO') : CONTATTI_VUOTI
+    if ('errore' in contatti) throw new Annulla(contatti.errore)
+    const alimentari = p.alimentari ? alimentariDopo(ALIMENTARI_VUOTI, p.alimentari, oggi()) : ALIMENTARI_VUOTI
     try {
       await tx.insert(schema.cralSoci).values({
         id, tipo: p.tipo, matricola: p.matricola ?? null, cognome: p.cognome, nome: p.nome, nascita: p.nascita,
         email: p.email || null, sedeId: p.sede, tessera, stato: p.stato, provenienza: p.provenienza ?? 'Inserimento manuale',
-        atipico: !!p.atipico, note: p.note, creatoDa: userId,
+        atipico: !!p.atipico, note: p.note, creatoDa: userId, ...colonneContatti(contatti), ...colonneAlimentari(alimentari),
         ...(p.stato === 'ATTIVO' ? { validatoDa: userId, validatoIl: new Date() } : {}),
       })
     } catch (e) { if (violazioneUnica(e)) throw new Annulla('TESSERA_DOPPIA'); throw e }
@@ -487,6 +522,8 @@ export class PgCralRepository implements ICralRepository {
           if (o.tessera && o.tessera !== s.tessera && (s.tipo === 'SD' || s.tipo === 'SE')) { set.tessera = o.tessera; esito.tessere++ }
           if (o.atipico && !s.atipico) set.atipico = true
           if (o.nota) set.note = `${s.note ? `${s.note} · ` : ''}${o.nota}`.slice(0, 1000)
+          // il telefono del libro soci entra solo se manca (senza consenso): per cambiarlo c'e' il T6
+          if (o.telefono && !s.telefono) Object.assign(set, colonneContatti({ ...CONTATTI_VUOTI, telefono: o.telefono, waId: o.telefono.slice(1) }))
           if (!Object.keys(set).length) continue
           try { await tx.update(schema.cralSoci).set({ ...set, modificatoDa: userId, modificatoIl: ora }).where(eq(schema.cralSoci.id, o.socio)) }
           catch (e) { if (violazioneUnica(e)) throw new Annulla('TESSERA_DOPPIA'); throw e }
@@ -495,13 +532,13 @@ export class PgCralRepository implements ICralRepository {
         } else if (o.op === 'nuovoPgs') {
           await this.nuovaPersona(tx, {
             tipo: o.tipo, matricola: o.matricola, cognome: o.cognome, nome: o.nome, nascita: o.nascita, email: o.email,
-            sede: o.sede, tessera: o.tessera, note: o.nota, atipico: o.atipico, stato: 'ATTIVO', provenienza: `Import ${file}`,
+            sede: o.sede, tessera: o.tessera, note: o.nota, atipico: o.atipico, stato: 'ATTIVO', provenienza: `Import ${file}`, ...(o.telefono ? { contatti: { telefono: o.telefono } } : {}),
           }, userId)
           esito.nuoviPgs++
         } else if (o.op === 'nuovoEsterno') {
           await this.nuovaPersona(tx, {
             tipo: o.tipo, cognome: o.cognome, nome: o.nome, nascita: o.nascita, email: o.email,
-            sede: o.sede, tessera: o.tessera, note: o.nota, atipico: o.atipico, stato: 'DA_VALIDARE', provenienza: `Import ${file}`,
+            sede: o.sede, tessera: o.tessera, note: o.nota, atipico: o.atipico, stato: 'DA_VALIDARE', provenienza: `Import ${file}`, ...(o.telefono ? { contatti: { telefono: o.telefono } } : {}),
           }, userId)
           esito.nuoviEsterni++
         } else {
@@ -966,6 +1003,7 @@ export class PgCralRepository implements ICralRepository {
       email: p.email || null, sedeId: sede, tessera: tessera || null, riammissioni: p.riammissioni, stato: p.stato,
       iscrittoIl: p.iscrittoIl, cessatoIl: p.cessatoIl, eliminatoIl: p.eliminatoIl, eliminatoDa: u(p.eliminatoDa), statoPrima: p.statoPrima,
       anniEsenti: p.anniEsenti, provenienza, atipico: p.atipico, note: p.note,
+      ...colonneContatti(bloccato('contatti') ? CONTATTI_VUOTI : p.contatti), ...colonneAlimentari(bloccato('alimentari') ? ALIMENTARI_VUOTI : p.alimentari),
       creatoDa: u(p.creatoDa), creatoIl: p.creatoIl ? new Date(p.creatoIl) : new Date(), validatoDa: u(p.validatoDa),
       validatoIl: p.validatoIl ? new Date(p.validatoIl) : null, modificatoDa: c.userId, modificatoIl: new Date(),
     })
@@ -1002,6 +1040,8 @@ export class PgCralRepository implements ICralRepository {
         case 'atipico': set.atipico = dopo; break
         case 'iscrittoIl': set.iscrittoIl = dopo; break
         case 'exMatricola': set.exMatricola = dopo; break
+        case 'contatti': Object.assign(set, colonneContatti(dopo as Contatti)); break
+        case 'alimentari': Object.assign(set, colonneAlimentari(dopo as Alimentari)); break
         case 'anniEsenti': set.anniEsenti = dopo; break
         case 'sede':
           if (!(await this.sedeEsiste(tx, dopo))) { saltati.push(`sede ${String(dopo)} non presente`); continue }
@@ -1202,6 +1242,26 @@ function toAnag(r: Record<string, unknown>): CralAnagraficaRow {
     idAb: r['idAb'] == null ? null : Number(r['idAb']), nascita: d(r['dtNascita']), finRap: d(r['finRap']),
   }
 }
+function contattiDiRiga(s: RigaSocio): Contatti {
+  return {
+    telefono: s.telefono ?? '', waId: s.waId ?? '', consenso: s.telConsenso as Contatti['consenso'], consensoIl: s.telConsensoIl,
+    origine: (s.telConsensoOrigine ?? null) as Contatti['origine'], revocatoIl: s.telRevocatoIl,
+    whatsapp: s.whatsapp as Contatti['whatsapp'], waIl: s.waVerificatoIl, waFonte: (s.waFonte ?? null) as Contatti['waFonte'],
+  }
+}
+function alimentariDiRiga(s: RigaSocio): Alimentari {
+  return { consenso: s.alimConsenso, consensoIl: s.alimConsensoIl, esigenze: (s.esigenze ?? []) as Alimentari['esigenze'], allergie: s.allergie ?? '' }
+}
+function colonneContatti(c: Contatti) {
+  return {
+    telefono: c.telefono || null, waId: c.telefono ? c.waId || c.telefono.slice(1) : null, telConsenso: c.consenso, telConsensoIl: c.consensoIl,
+    telConsensoOrigine: c.origine, telRevocatoIl: c.revocatoIl, whatsapp: c.whatsapp, waVerificatoIl: c.waIl, waFonte: c.waFonte,
+  }
+}
+function colonneAlimentari(a: Alimentari) {
+  return a.consenso ? { alimConsenso: true, alimConsensoIl: a.consensoIl, esigenze: a.esigenze as string[], allergie: a.allergie }
+    : { alimConsenso: false, alimConsensoIl: null, esigenze: [] as string[], allergie: '' }
+}
 function toSocio(
   s: RigaSocio, legami: Array<typeof schema.cralFamiliariLegami.$inferSelect>, storico: Array<typeof schema.cralSociTessere.$inferSelect>,
   utenti: Map<string, string>,
@@ -1216,6 +1276,7 @@ function toSocio(
     modificatoDa: u(s.modificatoDa), modificatoIl: iso(s.modificatoIl),
     eliminatoIl: s.eliminatoIl, eliminatoDa: u(s.eliminatoDa), statoPrima: (s.statoPrima ?? null) as CralSocioRow['statoPrima'],
     anniEsenti: s.anniEsenti ?? [], exMatricola: s.exMatricola,
+    contatti: contattiDiRiga(s), alimentari: alimentariDiRiga(s),
     legami: legami.map(l => ({ socio: l.socioId, relazione: l.relazione as 'CONIUGE' | 'FIGLIO' })),
     storicoTessere: storico.map(t => ({ tessera: t.tessera, dal: t.dal, al: t.al })),
   }

@@ -5,17 +5,19 @@
 // sotto i suoi iscritti, con il totale della famiglia.
 // ============================================================
 
+import { agganciaRiga } from './aggancio'
+import { CellaAggancio, ColonneChiave, PropostaTelefoni, chiaviDi, daProporre, nelFile, proponiTelefoni, useColonne } from './Aggancio'
 import { Fragment, useMemo, useState, type ReactNode } from 'react'
 import { cralApi } from '../../api/endpoints'
 import type { Iniziativa, PatchScelta, Persona, StatoPeriodo } from './tipi'
 import {
-  CAT_SCONTO_1, GRUPPI, RELAZIONI, TIPOLOGIE, aCaricoDi, agganciaPersona, catSconto, contiTurni, dovutoTurni, etichettaPers, fmtData,
+  CAT_SCONTO_1, GRUPPI, RELAZIONI, aCaricoDi, catSconto, contiTurni, dovutoTurni, etichettaPers, fmtData,
   fmtEuro, fmtImp, fmtSconto, ggmm, haSconto, iscrittoTurni, nominativo, norm, normNome, occupati, oggi, pagaPer, parseEuro, periodiDovuti,
   persDi, persona, quotaDi, regolaCat, regolaTurni, relDi, riassuntoSconti, rifAutomatico, rifDi, sociDi, statoPer,
 } from './logica'
 import { ScontoPersonaleModal } from './Sconti'
 import { SceltaFile, useFoglio } from './ImportEvento'
-import { D, Ico, Modale, Origine, Pill, avviso, btnPrimario, btnSecondario, cardCls, etichettaCls, inputCls, inputW, thCls, useCral } from './ui'
+import { D, Ico, Modale, Origine, Pill, avviso, btnPrimario, btnSecondario, cardCls, etichettaCls, inputCls, inputW, thCls, useCral, Scorrevole } from './ui'
 
 const STATI_PER: Record<StatoPeriodo, [string, string]> = {
   '': ['—', 'text-slate-500'], P: ['Prenotata', 'text-indigo-300 border-indigo-700'], F: ['Frequentata', 'text-emerald-300 border-emerald-700'], T: ['Tolta', 'text-red-300 border-red-900 line-through'],
@@ -114,7 +116,7 @@ export function TurniCorpo({ ini, chiusa, nomeCella }: { ini: Iniziativa; chiusa
       </div>
       <div className={`${cardCls} overflow-hidden`}>
         <div className="px-5 py-3 border-b border-slate-800"><p className="text-sm font-medium text-white">Riepilogo per settimana</p></div>
-        <div className="overflow-x-auto"><table className="w-full text-sm">
+        <Scorrevole><table className="w-full text-sm">
           <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 bg-slate-900/60"><th className="px-5 py-2.5 font-semibold">Settimana</th><th className={thCls}>Dal – al</th><th className={thCls + ' text-right'}>Prenotate</th><th className={thCls + ' text-right'}>Frequentate</th><th className={thCls + ' text-right'}>Tolte</th><th className={thCls + ' text-right'}>Posti</th><th className="px-5 py-2.5 font-semibold text-right">Importo</th></tr></thead>
           <tbody className="divide-y divide-slate-800/70 tabular-nums">
             {ini.periodi.map(p => {
@@ -124,7 +126,7 @@ export function TurniCorpo({ ini, chiusa, nomeCella }: { ini: Iniziativa; chiusa
                 <tr key={p.id}><td className="px-5 py-2 text-slate-100">{p.nome}</td><td className="px-3 py-2 text-slate-400">{fmtData(p.dal)} – {fmtData(p.al)}</td><td className="px-3 py-2 text-right text-indigo-300">{n('P')}</td><td className="px-3 py-2 text-right text-emerald-300">{n('F')}</td><td className="px-3 py-2 text-right text-red-300/80">{n('T')}</td>
                   <td className={`px-3 py-2 text-right ${p.posti && occ >= p.posti ? 'text-amber-400' : 'text-slate-400'}`}>{p.posti ? `${occ}/${p.posti}` : occ}</td><td className="px-5 py-2 text-right text-white">{fmtEuro(imp)}</td></tr>)
             })}
-          </tbody></table></div>
+          </tbody></table></Scorrevole>
       </div>
       <div className={`${cardCls} overflow-hidden`}>
         <div className="px-5 py-3 border-b border-slate-800 flex flex-wrap gap-3 items-end">
@@ -135,7 +137,7 @@ export function TurniCorpo({ ini, chiusa, nomeCella }: { ini: Iniziativa; chiusa
             {ini.periodi.map(p => <option key={p.id} value={p.id}>Iscritti a {p.nome}</option>)}</select>
           <select className={inputCls + ' sm:w-56'} value={ord} onChange={e => setOrd(e.target.value)}><option value="nom">Ordina: Nominativo</option><option value="tip">Ordina: Tipologia</option><option value="saldo">Ordina: Saldo (maggiore prima)</option></select>
         </div>
-        <div className="overflow-x-auto max-h-[620px] overflow-y-auto"><table className="w-full text-sm">
+        <Scorrevole className="max-h-[620px]"><table className="w-full text-sm">
           <thead className="sticky top-0 bg-slate-900 z-10 text-left text-[11px] uppercase tracking-wider text-slate-500"><tr>
             <th className="px-5 py-2.5 font-semibold">{vista === 'rif' ? 'Socio / dipendente › iscritto' : 'Iscritto'}</th><th className={thCls}>Quota</th>
             {ini.periodi.map(p => <th key={p.id} className="px-2 py-2 font-semibold text-center normal-case tracking-normal whitespace-nowrap">{p.nome}<div className="font-normal text-slate-600 tabular-nums">{ggmm(p.dal)}–{ggmm(p.al)}</div></th>)}
@@ -144,7 +146,7 @@ export function TurniCorpo({ ini, chiusa, nomeCella }: { ini: Iniziativa; chiusa
             {vista === 'rif' ? gruppi.map(g => <Fragment key={g.k}>{testaGruppo(g)}{g.membri.map(s => riga(s, true))}</Fragment>) : lista.map(s => riga(s, false))}
             {!lista.length && <tr><td colSpan={20} className="px-5 py-10 text-center text-slate-500">{ini.modoPart === 'SINGOLI' ? 'Nessun iscritto: usa «Nuovo partecipante» o «Importa iscrizioni».' : 'Nessuno con questi filtri.'}</td></tr>}
           </tbody>
-        </table></div>
+        </table></Scorrevole>
         <p className="px-5 py-3 border-t border-slate-800 text-xs text-slate-500">Prenotata e Frequentata si pagano per intero, anche con pochi giorni di presenza. «Tolta» = settimana prenotata ma non fatta: non si paga. Un allungamento è una settimana in più messa a «Prenotata». La quota è piena o scontata secondo la tipologia della persona di riferimento; il pulsante sotto la quota mette uno sconto personale (percentuale, importo fisso o nessuno) per un solo iscritto. Saldo negativo = versato in più (da restituire o compensare).</p>
       </div>
       {spPer && <ScontoPersonaleModal titolo={`Sconto · ${nominativo(spPer)}`} sotto={`${periodiDovuti(ini, spPer.id)} settimane · quota piena ${fmtEuro(ini.quota)}`} regola={regolaTurni(db, ini, spPer)} valore={persDi(ini, spPer.id)} lordo={periodiDovuti(ini, spPer.id) * ini.quota} onClose={() => setSpPer(null)}
@@ -181,7 +183,7 @@ function RiferimentoModal({ ini, s, onScegli, onClose }: { ini: Iniziativa; s: P
         <div><p className={etichettaCls + ' mb-1.5'}>Cerca fra soci ed esterni (anche dipendenti non iscritti)</p>
           <div className="relative"><span className="absolute left-3 top-2.5 text-slate-500"><Ico d={D.search} /></span>
             <input autoFocus className={inputCls + ' pl-9'} placeholder="Cognome, matricola, ID o tessera" value={q} onChange={e => setQ(e.target.value)} /></div>
-          {n.length >= 2 && <div className="mt-2 border border-slate-800 rounded-lg divide-y divide-slate-800 max-h-56 overflow-y-auto">
+          {n.length >= 2 && <div className="mt-2 border border-slate-800 rounded-lg divide-y divide-slate-800 max-h-56 overflow-y-auto pgs-discreto">
             {ris.map(x => voce(x, x.tipo === 'EST' && x.matricola ? 'dipendente non socio' : ''))}
             {!ris.length && <p className="px-3 py-3 text-sm text-slate-500">Nessuno con questo nome. Un genitore che non è nel CRAL non serve: lascia «nessun riferimento» e scrivilo nelle note.</p>}
           </div>}</div>
@@ -196,25 +198,30 @@ export function IscrizioniImportModal({ ini, onClose }: { ini: Iniziativa; onClo
   const { db, esegui } = useCral()
   const { righe, apri, leggo } = useFoglio()
   const [manuali, setManuali] = useState<Record<number, string>>({})
+  const [proponi, setProponi] = useState(true)
   const pool = useMemo(() => db.soci.filter(s => s.stato === 'ATTIVO' || s.stato === 'DA_VALIDARE'), [db])
   const per = ini.periodi
+  const { col, imposta } = useColonne('T5', righe?.[0] ?? null)
   const esiti = useMemo(() => {
     if (!righe) return []
     const h = righe[0] ?? []; const ci = (re: RegExp) => h.findIndex(x => re.test(x))
-    const cId = ci(/matricola|^id|tessera/i), cEm = ci(/mail/i), cNom = ci(/nominativo|cognome/i), cVer = ci(/versato/i), cNote = ci(/^note$/i), cRif = ci(/riferimento|genitore|a carico/i)
+    const cVer = ci(/versato/i), cNote = ci(/^note$/i), cRif = ci(/riferimento|genitore|a carico/i)
+    const opz = { prefisso: db.prefissoTel, tessera: db.tessera }
     const adulti = db.soci.filter(x => x.tipo !== 'FAM' && x.stato === 'ATTIVO')
     const colP = per.map(p => [p, h.findIndex(x => normNome(x) === normNome(p.nome))] as const)
     const v = (r: string[], j: number) => (j >= 0 ? (r[j] ?? '').trim() : '')
     return righe.slice(1).map((r, i) => {
-      const [s, via] = agganciaPersona(pool, v(r, cId), v(r, cEm), v(r, cNom))
+      const k = chiaviDi(r, col)
+      const a = agganciaRiga(pool, k, opz); const s = a.socio
       const sett = colP.filter(([, c]) => c >= 0 && /^(X|SI|SÌ|1|P)$/i.test(v(r, c))).map(([p]) => p.id)
       const rifTxt = v(r, cRif)
-      const [rif] = rifTxt ? agganciaPersona(adulti, /^[\dA-Z-]+$/i.test(rifTxt) && /\d/.test(rifTxt) ? rifTxt : '', '', rifTxt) : [null]
-      return { i, s, via, rifTxt, rif, nom: v(r, cNom) || v(r, cId), sett, versato: cVer >= 0 ? parseEuro(v(r, cVer) || '0') ?? 0 : 0, note: v(r, cNote) }
+      const rif = rifTxt ? agganciaRiga(adulti, /^[\dA-Z-]+$/i.test(rifTxt) && /\d/.test(rifTxt) ? { id: rifTxt } : { nominativo: rifTxt }, opz).socio : null
+      return { i, s, a, rifTxt, rif, nom: nelFile(k), sett, versato: cVer >= 0 ? parseEuro(v(r, cVer) || '0') ?? 0 : 0, note: v(r, cNote) }
     }).filter(e => e.sett.length)
-  }, [righe, pool, per, db])
+  }, [righe, pool, per, db, col])
   const finale = (e: (typeof esiti)[number]) => e.s ?? pool.find(x => x.id === manuali[e.i])
   const pronte = esiti.filter(e => finale(e))
+  const telefoni = pronte.flatMap(e => daProporre(e.a, finale(e), db.soci, e.i + 2))
   async function applica() {
     const voci = pronte.map(e => {
       const p = finale(e)!; const prima = ini.scelte[p.id] ?? {}
@@ -228,23 +235,25 @@ export function IscrizioniImportModal({ ini, onClose }: { ini: Iniziativa; onClo
     })
     const r = await esegui(async () => {
       if (ini.modoPart === 'SINGOLI') await cralApi.partecipanti(ini.id, [...new Set(voci.map(x => x.socio))])
-      return cralApi.scelteInBlocco(ini.id, voci, 'modulo')
-    }, `${voci.length} iscrizioni registrate`)
-    if (r) onClose()
+      await cralApi.scelteInBlocco(ini.id, voci, 'modulo')
+      return proponi ? proponiTelefoni(`iscrizioni «${ini.titolo}»`, telefoni) : 0
+    }, n => `${voci.length} iscrizioni registrate${n ? ` · ${n} numeri di telefono in «Da validare»` : ''}`)
+    if (r !== null) onClose()
   }
   return (
     <Modale largo titolo="Importa iscrizioni" sotto="Una riga per persona, una colonna per settimana con X (tracciato T5)." onClose={onClose}
-      piedi={righe && <><span className="text-sm text-slate-400 mr-auto self-center">{pronte.length} da registrare · {esiti.filter(e => !e.s).length} non agganciate</span><button className={btnSecondario} onClick={onClose}>Annulla</button><button className={btnPrimario} disabled={!pronte.length} onClick={() => void applica()}>Registra {pronte.length} iscrizioni</button></>}>
-      {!righe ? <SceltaFile apri={apri} leggo={leggo} spiega="Le settimane del file si aggiungono a quelle già prenotate (allungamenti compresi). Il versato si somma." /> :
-        <div className="overflow-x-auto"><table className="w-full text-sm">
+      piedi={righe && <><span className="text-sm text-slate-400 mr-auto self-center">{pronte.length} da registrare · {esiti.filter(e => !finale(e)).length} non agganciate</span><button className={btnSecondario} onClick={onClose}>Annulla</button><button className={btnPrimario} disabled={!pronte.length} onClick={() => void applica()}>Registra {pronte.length} iscrizioni</button></>}>
+      {!righe ? <SceltaFile apri={apri} leggo={leggo} spiega="Le settimane del file si aggiungono a quelle già prenotate (allungamenti compresi). Il versato si somma. Per la persona basta una chiave: matricola, telefono, email o nominativo." /> : <div className="flex flex-col gap-3">
+        <ColonneChiave intest={righe[0] ?? []} col={col} imposta={imposta} />
+        <PropostaTelefoni n={telefoni.length} on={proponi} onChange={setProponi} />
+        <Scorrevole><table className="w-full text-sm">
           <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500"><th className="px-3 py-2 font-semibold">Nel file</th>{per.map(p => <th key={p.id} className="px-2 py-2 font-semibold text-center normal-case tracking-normal">{p.nome}</th>)}<th className="px-3 py-2 font-semibold">Persona</th><th className="px-3 py-2 font-semibold">Riferimento</th></tr></thead>
           <tbody className="divide-y divide-slate-800/70">{esiti.map(e => (
             <tr key={e.i}><td className="px-3 py-2 text-xs text-slate-300 whitespace-nowrap">{e.nom}</td>
               {per.map(p => <td key={p.id} className="px-2 py-2 text-center">{e.sett.includes(p.id) ? <span className="text-indigo-300">●</span> : <span className="text-slate-700">·</span>}</td>)}
-              <td className="px-3 py-2">{e.s ? <span className="inline-flex items-center gap-2 text-slate-100 whitespace-nowrap">{nominativo(e.s)} <Origine s={e.s} /></span> :
-                <div className="flex items-center gap-2"><Pill tono="warn">Non agganciata</Pill><select className={inputCls + ' py-1 text-xs'} value={manuali[e.i] ?? ''} onChange={ev => setManuali({ ...manuali, [e.i]: ev.target.value })}><option value="">Assegna a…</option>{pool.slice().sort((a, b) => nominativo(a).localeCompare(nominativo(b))).map(x => <option key={x.id} value={x.id}>{nominativo(x)} ({TIPOLOGIE[x.tipo][0]})</option>)}</select></div>}</td>
+              <td className="px-3 py-2"><CellaAggancio e={e.a} scelta={manuali[e.i] ?? ''} onScelta={id => setManuali({ ...manuali, [e.i]: id })} elenco={pool} /></td>
               <td className="px-3 py-2 text-xs whitespace-nowrap">{e.rif ? <span className="text-slate-200">{nominativo(e.rif)} <span className="text-slate-500">· {CAT_SCONTO_1[catSconto(e.rif)]}</span></span> : e.rifTxt ? <span className="text-amber-400">«{e.rifTxt}» non trovato: automatico</span> : <span className="text-slate-600">automatico</span>}</td></tr>))}</tbody>
-        </table></div>}
+        </table></Scorrevole></div>}
     </Modale>
   )
 }

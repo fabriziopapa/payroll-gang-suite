@@ -633,6 +633,9 @@ export const cralParametri = pgTable('cral_parametri', {
   suffissoCifre:   smallint('suffisso_cifre').notNull().default(2),
   extProssimo:     integer('ext_prossimo').notNull().default(1),
   famProssimo:     integer('fam_prossimo').notNull().default(1),
+  // 0025
+  prefissoTel:     varchar('prefisso_tel', { length: 4 }).notNull().default('39'),
+  exportModelli:   jsonb('export_modelli').notNull().default(sql`'[]'::jsonb`),
   updatedBy:       uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
   updatedAt:       timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
@@ -683,6 +686,20 @@ export const cralSoci = pgTable('cral_soci', {
   statoPrima:   varchar('stato_prima', { length: 12 }),
   anniEsenti:   smallint('anni_esenti').array().notNull().default(sql`'{}'`),
   exMatricola:  varchar('ex_matricola', { length: 10 }),
+  // 0025: telefono (E.164), consensi, WhatsApp, esigenze alimentari
+  telefono:           varchar('telefono', { length: 16 }),
+  waId:               varchar('wa_id', { length: 15 }),
+  telConsenso:        varchar('tel_consenso', { length: 8 }).notNull().default('NO'),
+  telConsensoIl:      date('tel_consenso_il'),
+  telConsensoOrigine: varchar('tel_consenso_origine', { length: 8 }),
+  telRevocatoIl:      date('tel_revocato_il'),
+  whatsapp:           varchar('whatsapp', { length: 2 }).notNull().default('NV'),
+  waVerificatoIl:     date('wa_verificato_il'),
+  waFonte:            varchar('wa_fonte', { length: 4 }),
+  alimConsenso:       boolean('alim_consenso').notNull().default(false),
+  alimConsensoIl:     date('alim_consenso_il'),
+  esigenze:           varchar('esigenze', { length: 12 }).array().notNull().default(sql`'{}'`),
+  allergie:           varchar('allergie', { length: 300 }).notNull().default(''),
 })
 
 export const cralFamiliariLegami = pgTable('cral_familiari_legami', {

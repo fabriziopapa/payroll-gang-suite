@@ -4,13 +4,15 @@ import {
   anniEsentiDopoRipristino, archivioSchema, azioneStato, confrontaArchivio, confrontaT6, confrontaT7, tenutoQuota,
   type Archivio, type PersonaArch,
 } from './cralLotti.js'
+import { ALIMENTARI_VUOTI, CONTATTI_VUOTI } from './cralContatti.js'
 
 // Nomi di fantasia (regola PII del progetto)
 const P = (id: string, tipo: PersonaArch['tipo'], cognome: string, nome: string, extra: Partial<PersonaArch> = {}): PersonaArch => ({
   id, tipo, matricola: /^\d/.test(id) ? id : null, exMatricola: null, cognome, nome, nascita: null, email: '', sede: 'CD',
   tessera: '', riammissioni: 0, stato: 'ATTIVO', iscrittoIl: '2025-01-10', cessatoIl: null, eliminatoIl: null, statoPrima: null,
   anniEsenti: [], provenienza: null, atipico: false, note: '', creatoDa: 'admin', creatoIl: '2025-01-10T09:00:00.000Z',
-  validatoDa: null, validatoIl: null, modificatoDa: null, modificatoIl: null, eliminatoDa: null, legami: [], storicoTessere: [], ...extra,
+  validatoDa: null, validatoIl: null, modificatoDa: null, modificatoIl: null, eliminatoDa: null, legami: [], storicoTessere: [],
+  contatti: { ...CONTATTI_VUOTI }, alimentari: { ...ALIMENTARI_VUOTI }, ...extra,
 })
 const TESSERA = { formato: 'NUM' as const, prefisso: 'CRAL-', cifre: 4, prossimo: 10, riammissione: 'NUOVO' as const, sepSuffisso: '/' as const, cifreSuffisso: 2 }
 const A = (x: Partial<Archivio>): Archivio => ({
@@ -173,4 +175,39 @@ test('T7: importo che copre la rata = mese pagato; quota annua in un colpo = ann
   const u = confrontaT7([{ socio: 'EXT-0001', riga: 2, anno: 2026, unica: { importo: 'X', data: '2026-02-01' } }], soci, [], anni, '2026-10-29')
   assert.deepEqual(u[0]!.campi.find(x => x.campo === 'unica')!.dopo, { pagataIl: '2026-02-01', versatoUnica: 6000 })
   void z
+})
+
+// ── 0025: telefono, consensi, dati alimentari ────────────────
+test('T6: telefono e consenso; revoca non scavalcata; alimentari solo col consenso', () => {
+  const tel = { ...CONTATTI_VUOTI, telefono: '+393331234567', waId: '393331234567' }
+  const soci = [
+    P('1001', 'SD', 'ROSSI', 'Mario'),
+    P('1002', 'SD', 'BIANCHI', 'Anna', { contatti: { ...tel, consenso: 'REVOCATO', consensoIl: '2026-01-10', revocatoIl: '2026-06-01' } }),
+    P('EXT-0001', 'SE', 'VERDI', 'Luca', { contatti: tel }),
+  ]
+  const v = confrontaT6([
+    { socio: '1001', riga: 2, valori: { contatti: { telefono: '+393331234567', consenso: 'SI', origine: 'CARTACEO', whatsapp: 'SI' }, alimentari: { consenso: true, esigenze: ['VEGANO'], allergie: 'arachidi' } } },
+    { socio: '1002', riga: 3, valori: { contatti: { consenso: 'SI' }, alimentari: { esigenze: ['CELIACO'] } } },
+    { socio: 'EXT-0001', riga: 4, valori: { contatti: { telefono: '+393331234567' } } },
+  ], soci, new Set(['CD']), new Map(), '2026-11-11')
+  assert.equal(v.length, 2)
+  const a = v.find(x => x.chiave === '1001')!
+  const c = a.campi.find(x => x.campo === 'contatti')!.dopo as typeof tel
+  assert.deepEqual([c.telefono, c.consenso, c.consensoIl, c.origine, c.whatsapp, c.waFonte], ['+393331234567', 'SI', '2026-11-11', 'CARTACEO', 'SI', 'FILE'])
+  assert.match(a.avviso ?? '', /Stesso numero di BIANCHI Anna \(1002\), VERDI Luca \(EXT-0001\)/)
+  assert.deepEqual(a.campi.find(x => x.campo === 'alimentari')!.dopo, { consenso: true, consensoIl: '2026-11-11', esigenze: ['VEGANO'], allergie: 'arachidi' })
+  const b = v.find(x => x.chiave === '1002')!
+  assert.match(b.bloccata ?? '', /consenso revocato/); assert.match(b.bloccata ?? '', /manca il consenso ai dati alimentari/)
+})
+test('archivio 26.10.29 senza contatti: si legge; contatti nuovi diventano variazione', () => {
+  const vecchia = { ...P('EXT-0001', 'SE', 'VERDI', 'Luca') } as Record<string, unknown>
+  delete vecchia['contatti']; delete vecchia['alimentari']
+  const base = { formato: 'pgs-cral-archivio', versione: 1, ambiente: 'pre', app: '26.10.29', esportato: '2026-10-29T10:00:00.000Z' }
+  const letto = archivioSchema.parse({ ...base, sezioni: ['soci'], soci: [vecchia] })
+  assert.equal(letto.soci![0]!.contatti.consenso, 'NO')
+  const src: Archivio = { ...letto, soci: [P('EXT-0001', 'SE', 'VERDI', 'Luca', { contatti: { ...CONTATTI_VUOTI, telefono: '+393331234567', waId: '393331234567', consenso: 'SI', consensoIl: '2026-05-01', origine: 'ONLINE' } })] }
+  const dst: Archivio = { ...letto, sezioni: ['sedi', 'tabelle', 'soci', 'quote', 'eventi'], sedi: [{ id: 'CD', nome: 'Centro', attiva: true, ordine: 0 }],
+    soci: [P('EXT-0001', 'SE', 'VERDI', 'Luca', { contatti: { ...CONTATTI_VUOTI, telefono: '+393331234567', waId: '393331234567', consenso: 'REVOCATO', consensoIl: '2026-05-01', revocatoIl: '2026-09-01' } })] }
+  const { variazioni } = confrontaArchivio(src, dst, ['soci'], new Set())
+  assert.equal(variazioni.length, 1); assert.match(variazioni[0]!.bloccata ?? '', /revocato dopo/)
 })

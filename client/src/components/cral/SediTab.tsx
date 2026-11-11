@@ -6,7 +6,7 @@
 import { useState } from 'react'
 import { cralApi } from '../../api/endpoints'
 import { nominativo, norm, sedeBreve, sedeNome } from './logica'
-import { D, Ico, Origine, Pill, StatoSocio, btnPrimario, cardCls, inputCls, thCls, useCral } from './ui'
+import { D, Ico, Origine, Pill, StatoSocio, btnPrimario, cardCls, inputCls, thCls, useCral, Scorrevole } from './ui'
 
 export function SediTab() {
   const { db, esegui, vaiA } = useCral()
@@ -47,7 +47,7 @@ export function SediTab() {
         <div className="px-5 py-3 border-b border-slate-800 flex flex-col gap-2">
           <div className="relative"><span className="absolute left-3 top-2.5 text-slate-500"><Ico d={D.search} /></span>
             <input className={inputCls + ' pl-9'} placeholder={sel === '__NOSEDE' ? 'Cerca chi togliere dalla sua sede…' : `Aggiungi a «${sedeBreve(nomeSel)}»: cognome, ID o tessera`} value={cerca} onChange={e => setCerca(e.target.value)} /></div>
-          {n.length >= 2 && <div className="border border-slate-800 rounded-lg divide-y divide-slate-800 max-h-60 overflow-y-auto">
+          {n.length >= 2 && <div className="border border-slate-800 rounded-lg divide-y divide-slate-800 max-h-60 overflow-y-auto pgs-discreto">
             {aggiungibili.map(s => (
               <button key={s.id} onClick={() => { void sposta([s.id], sel === '__NOSEDE' ? null : sel); setCerca('') }} className="w-full text-left px-3 py-2 hover:bg-slate-800 flex items-center gap-3 text-sm">
                 <span className="font-mono text-xs text-slate-400 w-20">{s.id}</span><span className="text-slate-100 flex-1">{nominativo(s)}</span>
@@ -56,7 +56,7 @@ export function SediTab() {
             {!aggiungibili.length && <p className="px-3 py-3 text-sm text-slate-500">Nessuno trovato fuori da questa sede. I nuovi iscritti si aggiungono da «Soci › Nuova persona».</p>}
           </div>}
         </div>
-        <div className="overflow-x-auto max-h-[520px] overflow-y-auto"><table className="w-full text-sm">
+        <Scorrevole className="max-h-[520px]"><table className="w-full text-sm">
           <thead className="sticky top-0 bg-slate-900"><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500">
             <th className="pl-5 pr-2 py-2.5"><input type="checkbox" className="accent-indigo-500" checked={tutti} onChange={() => setSpunte(tutti ? new Set() : new Set(membri.map(s => s.id)))} aria-label="Seleziona tutti" /></th>
             <th className={thCls}>ID</th><th className={thCls}>Nominativo</th><th className={thCls}>Tipologia</th><th className={thCls}>Tessera</th><th className="px-5 py-2.5 font-semibold">Stato</th></tr></thead>
@@ -72,7 +72,7 @@ export function SediTab() {
               </tr>))}
             {!membri.length && <tr><td colSpan={6} className="px-5 py-10 text-center text-slate-500">Nessuno in questa sede. Cerca sopra per aggiungere.</td></tr>}
           </tbody>
-        </table></div>
+        </table></Scorrevole>
         <div className="px-5 py-3 border-t border-slate-800 flex flex-wrap items-center gap-2">
           <span className="text-sm text-slate-400 mr-auto">{spunte.size ? `${spunte.size} selezionati` : 'Seleziona chi spostare'}</span>
           <select className={inputCls + ' sm:w-64'} value={dest} onChange={e => setDest(e.target.value)}>

@@ -9,6 +9,7 @@
 // conferma il server scrive tutto in una transazione.
 // ============================================================
 
+import { leggiTelefono } from './contatti'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { cralApi, type CralAbbinamentoApi, type CralOperazioneApi } from '../../api/endpoints'
 import type { AnagraficaPgs, Db, Persona } from './tipi'
@@ -19,7 +20,7 @@ import { ImportArchivio, ImportT6 } from './ImportDati'
 import { ImportT7 } from './ImportQuote'
 import {
   Campo, D, Ico, Interruttore, Origine, Pill, PersonaPgs, avviso, chipCls, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario, cardCls,
-  etichettaCls, fileBase64, inputCls, inputW, messaggioErrore, thCls, useCral, type Tono,
+  etichettaCls, fileBase64, inputCls, inputW, messaggioErrore, thCls, useCral, type Tono, Scorrevole
 } from './ui'
 
 const RUOLI_COL: Array<[string, string, RegExp]> = [
@@ -29,6 +30,7 @@ const RUOLI_COL: Array<[string, string, RegExp]> = [
   ['matricola', 'Matricola PGS', /matricola/i],
   ['sede', 'Sede di consegna', /sede/i],
   ['email', 'Email', /mail/i],
+  ['telefono', 'Telefono', /^((n|num|numero|recapito)\.?( di)? )?(tel|telefono|telefonico|cell|cellulare|mobile)\.?$/i],
   ['nascita', 'Data di nascita', /nasc/i],
   ['tessera', 'Tessera CRAL (N.ISCR.SOCIO)', /tessera|n\.?\s*socio|iscr/i],
   ['tipologia', 'Esterni / tipologia', /^esterni?$|tipolog|categoria/i],
@@ -45,7 +47,7 @@ const EMAIL_OK = /^[^\s@<>"',;]+@[^\s@<>"',;]+\.[A-Za-z]{2,}$/
 const TESSERA_OK = /^[A-Za-z0-9 ._/-]{0,30}$/
 
 interface Base {
-  i: number; nomin: string; mat: string; sedeTesto: string; sede: string | null | undefined; email: string; tessera: string
+  i: number; nomin: string; mat: string; sedeTesto: string; sede: string | null | undefined; email: string; telefono: string; tessera: string
   tipoRich: '' | 'SE' | 'EST' | 'FAM'; atipico: boolean; nascita: string | null
 }
 interface Analisi extends Base {
@@ -65,10 +67,13 @@ function mappaSede(db: Db, testo: string): string | null | undefined {
   return s ? s.id : undefined // undefined = testo presente ma sede sconosciuta
 }
 
+/** Numero del file in E.164, o '' se manca o non è valido (il libro soci non si ferma per un numero scritto male). */
+const numeroDi = (t: string, prefisso: string): string => { const n = leggiTelefono(t, prefisso); return n && 'e164' in n ? n.e164 : '' }
+
 type Strada = 'T1' | 'T6' | 'T7' | 'ARCHIVIO'
 const STRADE: Array<[Strada, string, string]> = [
   ['T1', 'Libro soci (T1)', 'Nuovi soci e abbinamento all\'anagrafica PGS'],
-  ['T6', 'Aggiornamento dati (T6)', 'Sedi, date di nascita, email, tessere, note, tipologia, stato di chi c\'è già'],
+  ['T6', 'Aggiornamento dati (T6)', 'Sedi, email, telefono e consensi, esigenze alimentari, tessere, note, tipologia, stato di chi c\'è già'],
   ['T7', 'Quote versate (T7)', 'Importi delle quote associative, mese per mese o in unica soluzione'],
   ['ARCHIVIO', 'Archivio fra ambienti', 'Esporta e carica tutto il CRAL (produzione ↔ pre-produzione)'],
 ]
@@ -150,7 +155,7 @@ function LibroSoci() {
     const tt = val('tessera')
     const tessera = tipoRich === 'EST' || tipoRich === 'FAM' ? '' : tesseraDaTesto(db.tessera, tt)
     const nascita = map['nascita'] ? leggiData(r[+map['nascita']]) : null
-    return { i, nomin, mat, sedeTesto, sede: mappaSede(db, sedeTesto), email: val('email'), tessera, tipoRich, atipico: /ATIPIC/.test(t), nascita }
+    return { i, nomin, mat, sedeTesto, sede: mappaSede(db, sedeTesto), email: val('email'), telefono: numeroDi(val('telefono'), db.prefissoTel), tessera, tipoRich, atipico: /ATIPIC/.test(t), nascita }
   }), [file, pronto, numRiga, rows, map, db])
 
   // Abbinamento sul server (non scrive nulla)
@@ -269,6 +274,7 @@ function LibroSoci() {
         const note: string[] = []
         if (sede && sede !== r.socio.sede) op.sede = sede
         if (e.atipico && !r.socio.atipico) op.atipico = true
+        if (e.telefono && !r.socio.contatti.telefono) op.telefono = e.telefono
         if (r.assoc) note.push(`Nel libro soci come «${e.nomin}»`)
         if (tessNuova(e, r)) op.tessera = e.tessera
         else if (aggTess && tessDiv(e, r)) { op.tessera = e.tessera; note.push(`Tessera ${r.socio.tessera || '—'} → ${e.tessera} (import ${fmtData(oggi())})`) }
@@ -279,7 +285,7 @@ function LibroSoci() {
         nuoveMat.add(r.anag.matricola)
         ops.push({
           op: 'nuovoPgs', matricola: r.anag.matricola, tipo: e.tipoRich === 'EST' ? 'EST' : 'SD', cognome: r.anag.cognome || e.nomin, nome: r.anag.nome,
-          nascita: r.anag.nascita ?? e.nascita, email: pulisciEmail(e.email), sede, tessera: e.tipoRich === 'EST' ? '' : e.tessera, atipico: e.atipico,
+          nascita: r.anag.nascita ?? e.nascita, email: pulisciEmail(e.email), sede, tessera: e.tipoRich === 'EST' ? '' : e.tessera, atipico: e.atipico, ...(e.telefono ? { telefono: e.telefono } : {}),
           nota: [r.come === 'nominativo parziale' || r.come === 'scelta a mano' ? `Abbinato a mano dall'import (nel file: «${e.nomin}»)` : '', e.atipico ? 'ATIPICO nel libro soci' : ''].filter(Boolean).join(' · '),
         })
       } else if (r.tipo === 'esterno') {
@@ -287,7 +293,7 @@ function LibroSoci() {
         const tipo = e.tipoRich === 'EST' ? 'EST' : 'SE'
         ops.push({
           op: 'nuovoEsterno', tipo, cognome: cognome || e.nomin.toUpperCase(), nome, nascita: e.nascita, email: pulisciEmail(e.email), sede,
-          tessera: tipo === 'SE' ? e.tessera : '', atipico: e.atipico,
+          tessera: tipo === 'SE' ? e.tessera : '', atipico: e.atipico, ...(e.telefono ? { telefono: e.telefono } : {}),
           nota: [e.atipico ? 'ATIPICO nel libro soci' : '', e.nomin === e.nomin.toUpperCase() && e.nomin.trim().split(/\s+/).length > 2 ? 'Nominativo tutto maiuscolo: controlla dove finisce il cognome' : ''].filter(Boolean).join(' · '),
         })
       }
@@ -366,7 +372,7 @@ function LibroSoci() {
             {conflitti.size > 0 && chip('conflitto', 'Tessera doppia', conflitti.size)}
             {inAttesa && <span className="text-xs text-slate-400 ml-2">Abbinamento sul server…</span>}
           </div>
-          <div className="overflow-x-auto"><table className="w-full text-sm">
+          <Scorrevole><table className="w-full text-sm">
             <thead className="bg-slate-900"><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500">
               <th className="px-5 py-2.5 font-semibold">Riga</th><th className={thCls}>Nel file</th><th className={thCls}>Esito</th><th className={thCls}>Abbinato a</th><th className={thCls}>Sede di consegna</th><th className="px-5 py-2.5 font-semibold">Risultato</th>
             </tr></thead>
@@ -415,14 +421,14 @@ function LibroSoci() {
                   </Fragment>)
               })}
             </tbody>
-          </table></div>
+          </table></Scorrevole>
           {(assenti.length > 0 || nTessDiv > 0) && <div className="px-5 py-3 border-t border-slate-800 bg-slate-950/40 flex flex-col gap-3">
             {nTessDiv > 0 && <div className="flex flex-wrap items-center gap-3"><p className="text-sm text-slate-300 flex-1 min-w-[220px]"><b className="text-white tabular-nums">{nTessDiv}</b> {nTessDiv === 1 ? 'socio ha' : 'soci hanno'} nel file un numero di tessera diverso da PGS.</p><Interruttore on={aggTess} onChange={setAggTess} label="Prendi il numero del file (resta nelle note)" /></div>}
             {assenti.length > 0 && <div className="flex flex-col gap-2">
               <div className="flex flex-wrap items-center gap-2"><p className="text-sm text-slate-300 flex-1 min-w-[260px]"><b className="text-white tabular-nums">{assenti.length}</b> soci attivi in PGS <b>non si trovano nel file</b>{assNonDecisi > 0 ? <span className="text-amber-400"> · {assNonDecisi} da decidere</span> : <span className="text-emerald-300"> · tutti decisi</span>}. Forse sono usciti, forse nel file il nome è scritto male: decidi tu, uno per uno.</p>
                 <button className={btnPiccoloSec} onClick={() => setDecAss(x => ({ ...x, ...Object.fromEntries(assenti.filter(s => x[s.id] === undefined).map(s => [s.id, 'RESTA' as const])) }))}>Restanti: restano attivi</button>
                 <button className={btnPiccoloSec} onClick={() => setDecAss(x => ({ ...x, ...Object.fromEntries(assenti.filter(s => x[s.id] === undefined).map(s => [s.id, 'CESSA' as const])) }))}>Restanti: cessati</button></div>
-              <div className="overflow-x-auto rounded-lg border border-slate-800"><table className="w-full text-sm">
+              <Scorrevole className="rounded-lg border border-slate-800"><table className="w-full text-sm">
                 <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 bg-slate-900/60"><th className="px-3 py-2 font-semibold">Tessera</th><th className="px-3 py-2 font-semibold">Socio in PGS</th><th className="px-3 py-2 font-semibold">Possibile riga del file</th><th className="px-3 py-2 font-semibold">Decisione</th></tr></thead>
                 <tbody className="divide-y divide-slate-800/70">{assenti.map(s => {
                   const v = decAss[s.id], sg = sugg[s.id]
@@ -440,7 +446,7 @@ function LibroSoci() {
                       </div></td>
                     </tr>)
                 })}</tbody>
-              </table></div>
+              </table></Scorrevole>
               <p className="text-xs text-slate-500">«Cessato»: alla conferma diventa Cessato con la data di oggi (se rientra prende un nuovo numero). «Resta attivo»: non cambia nulla (va bene se il file è solo una parte dei soci). «È nel file come…»: la riga scelta non crea un nuovo socio, aggiorna questo (tessera compresa) e il nome del file resta nelle note.</p>
             </div>}
           </div>}
@@ -498,7 +504,7 @@ function PannelloAbbinamento({ e, r, d, patch, onAnag, onFatto }: {
         <input value={mano} onChange={ev => setMano(ev.target.value.replace(/\D/g, ''))} placeholder="000000" className={inputW + ' py-1.5 w-28 font-mono'} />
         <button className={btnPiccoloSec} disabled={!mano} onClick={() => void usaMano()}>Usa</button>
       </div>
-      {suggeriti.length > 0 && <div className="rounded-lg border border-slate-800 divide-y divide-slate-800 max-h-56 overflow-auto bg-slate-950/60">
+      {suggeriti.length > 0 && <div className="rounded-lg border border-slate-800 divide-y divide-slate-800 max-h-56 overflow-auto bg-slate-950/60 pgs-discreto">
         {suggeriti.map(a => <button key={a.matricola} onClick={() => scegli(a, 'scelta a mano')} className="w-full text-left px-3 py-2 hover:bg-slate-800 text-sm"><PersonaPgs a={a} />{a.nascita && <span className="ml-2 text-xs text-slate-500">{fmtData(a.nascita)}</span>}</button>)}</div>}
       <div className="flex flex-wrap gap-2 pt-1">
         <button className={btnPiccolo + ' bg-violet-900/40 text-violet-200 border border-violet-800 hover:bg-violet-900/60'} onClick={() => { patch({ matricola: null, esterno: true, ignora: false }); onFatto() }}>Crea come esterno da validare</button>

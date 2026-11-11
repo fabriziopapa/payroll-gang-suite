@@ -11,14 +11,16 @@
 // dati di qui e prepara il lotto. Niente si cancella in arrivo.
 // ============================================================
 
+import { agganciaRiga } from './aggancio'
+import { leggiConsenso, leggiEsigenze, leggiOrigine, leggiSiNo, leggiTelefono, leggiWhatsapp } from './contatti'
 import { useMemo, useRef, useState } from 'react'
 import { cralApi, type CralRigaT6 } from '../../api/endpoints'
 import type { ArchivioTestata, Db, Persona, SezioneLotto } from './tipi'
-import { STATI, fmtData, leggiData, nominativo, norm, oggi, risolvi, tesseraDaTesto, trovaIntestazione } from './logica'
+import { STATI, fmtData, leggiData, nominativo, norm, oggi, tesseraDaTesto, trovaIntestazione } from './logica'
 import { LottoView, NOMI_SEZIONI } from './Lotto'
 import {
   Campo, D, Ico, Origine, Pill, avviso, btnPiccolo, btnPiccoloSec, btnPrimario, cardCls, etichettaCls, fileBase64, inputCls, inputW,
-  messaggioErrore, scarica, thCls, useCral,
+  messaggioErrore, scarica, thCls, useCral, Scorrevole
 } from './ui'
 
 const EMAIL_OK = /^[^\s@<>"',;]+@[^\s@<>"',;]+\.[A-Za-z]{2,}$/
@@ -31,7 +33,7 @@ export function nomeFile(base: string, ambiente: string, est: string): string {
 }
 
 /** Base64 → file scaricato. */
-function scaricaBase64(nome: string, b64: string, tipo: string) {
+export function scaricaBase64(nome: string, b64: string, tipo: string) {
   const bin = atob(b64); const buf = new Uint8Array(bin.length)
   for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i)
   scarica(nome, new Blob([buf], { type: tipo }))
@@ -57,7 +59,7 @@ export async function esportaSociExcel(ids: string[]): Promise<void> {
 }
 
 // ── T6 ───────────────────────────────────────────────────────
-type CampoT6 = 'sede' | 'nascita' | 'email' | 'tessera' | 'note' | 'tipo' | 'stato'
+type CampoT6 = 'sede' | 'nascita' | 'email' | 'tessera' | 'note' | 'tipo' | 'stato' | 'telefono' | 'consensoTel' | 'whatsapp' | 'consensoAlim' | 'esigenze' | 'allergie'
 const RUOLI: Array<[string, string, RegExp, boolean]> = [
   // chiave, etichetta, intestazione, è un campo da aggiornare
   ['id', 'ID (matricola, EXT-, FAM-)', /^(id|id socio|matricola)$/i, false],
@@ -73,6 +75,17 @@ const RUOLI: Array<[string, string, RegExp, boolean]> = [
   ['tipo', 'Tipologia', /^tipolog/i, true],
   ['stato', 'Stato', /^stato$/i, true],
   ['dataStato', 'Data stato', /^data\s*stato$/i, false],
+  // 0025: telefono, consensi, WhatsApp, dati alimentari
+  ['telefono', 'Telefono', /^((n|num|numero|recapito)\.?( di)? )?(tel|telefono|telefonico|cell|cellulare|mobile)\.?$/i, true],
+  ['consensoTel', 'Consenso telefono', /^consenso( all.uso del)? (tel|numero|cell)|^gdpr|^privacy/i, true],
+  ['consensoIl', 'Data consenso', /^data( del)? consenso$/i, false],
+  ['origine', 'Origine consenso', /^origine|^raccolto/i, false],
+  ['revocatoIl', 'Data revoca', /^data( della)? revoca/i, false],
+  ['whatsapp', 'WhatsApp', /^(su )?(whatsapp|wa)$/i, true],
+  ['waId', 'WA ID', /^wa[ _]?id$/i, false],
+  ['consensoAlim', 'Consenso dati alimentari', /^consenso( ai)?( dati)? aliment/i, true],
+  ['esigenze', 'Esigenze alimentari', /esigenz|^dieta|regime alimentare/i, true],
+  ['allergie', 'Allergie', /allerg|intolleranz/i, true],
 ]
 
 function sedeDaTesto(db: Db, t: string): string | undefined {
@@ -98,26 +111,11 @@ function statoDaTesto(t: string): Persona['stato'] | undefined {
 }
 
 /** Aggancio di una riga a una persona già presente: ID (anche l'ex matricola), tessera, nominativo (la data di nascita decide fra gli omonimi). */
-export function aggancia(db: Db, perTessera: Map<string, Persona>, id: string, tk: string, nomin: string, nascita: string | null):
+export function aggancia(db: Db, _perTessera: Map<string, Persona>, id: string, tk: string, nomin: string, nascita: string | null, telefono = '', email = ''):
   { socio: Persona | null; come: string; candidati: Persona[]; errore?: string } {
-  let errore: string | undefined
-  if (id) {
-    const p = db.perId.get(id.toUpperCase()) ?? (/^\d+$/.test(id) ? db.perId.get(id.padStart(6, '0')) : undefined)
-    // una matricola di chi è passato a socio esterno: è la stessa persona, col nuovo ID
-    const ex = !p && /^\d+$/.test(id) ? db.soci.find(x => x.exMatricola === id || x.exMatricola === id.padStart(6, '0')) : undefined
-    if (p) return { socio: p, come: 'ID', candidati: [] }
-    if (ex) return { socio: ex, come: `ex matricola (ora ${ex.id})`, candidati: [] }
-    errore = `ID ${id} non presente`
-  }
-  if (tk) { const p = perTessera.get(norm(tesseraDaTesto(db.tessera, tk))); if (p) return { socio: p, come: 'tessera', candidati: [] } }
-  if (nomin) {
-    const ris = risolvi(nomin, db.soci)
-    const perData = nascita ? ris.cand.filter(c => c.nascita === nascita) : []
-    if ((ris.esito === 'trovato' || ris.esito === 'parziale') && ris.cand[0]) return { socio: ris.cand[0], come: ris.esito === 'trovato' ? 'nominativo' : 'nominativo parziale', candidati: ris.cand }
-    if (perData.length === 1) return { socio: perData[0]!, come: 'nominativo e data di nascita', candidati: ris.cand }
-    return { socio: null, come: '', candidati: ris.cand, ...(errore ? { errore } : {}) }
-  }
-  return { socio: null, come: '', candidati: [], ...(errore ? { errore } : {}) }
+  // un solo motore per tutte le importazioni (aggancio.ts): ID → tessera → telefono → email → nominativo (+ data di nascita)
+  const e = agganciaRiga(db.soci, { id, tessera: tk, telefono, email, nominativo: nomin, nascita }, { prefisso: db.prefissoTel, parziale: true, tessera: db.tessera })
+  return { socio: e.socio, come: e.via, candidati: e.candidati, ...(e.socio ? {} : e.motivo ? { errore: e.motivo } : {}) }
 }
 
 interface RigaLetta { i: number; riga: number; chiave: string; socio: Persona | null; come: string; candidati: Persona[]; valori: CralRigaT6['valori']; errori: string[] }
@@ -143,7 +141,7 @@ export function ImportT6() {
     if (m['nominativo'] !== '') { m['cognome'] = ''; m['nome'] = '' }
     setFoglio(nome); setMap(m); setScelte({}); setLotto(null)
     // di default si aggiornano solo sede, email, note: gli altri si accendono a mano
-    setUsa(new Set((['sede', 'email', 'note'] as CampoT6[]).filter(k => m[k] !== '')))
+    setUsa(new Set((['sede', 'email', 'note', 'telefono', 'consensoTel', 'whatsapp', 'consensoAlim', 'esigenze', 'allergie'] as CampoT6[]).filter(k => m[k] !== '')))
   }
   async function apri(f: File) {
     setLettura(true); setLotto(null)
@@ -159,14 +157,16 @@ export function ImportT6() {
   const hdr = trovaIntestazione(rows)
   const intest = rows[hdr] ?? []
   const perTessera = useMemo(() => new Map(db.soci.filter(s => s.tessera).map(s => [norm(s.tessera), s])), [db])
-  const pronto = map['id'] !== '' || map['tesseraKey'] !== '' || map['nominativo'] !== '' || (map['cognome'] !== '' && map['nome'] !== '')
+  const pronto = map['id'] !== '' || map['tesseraKey'] !== '' || map['nominativo'] !== '' || (map['cognome'] !== '' && map['nome'] !== '') || map['telefono'] !== '' || map['email'] !== ''
 
   const lette = useMemo<RigaLetta[]>(() => !file || !pronto ? [] : rows.slice(hdr + 1).map((r, i) => {
     const val = (k: string) => { const c = map[k]; return c !== '' && c != null ? pulisci(String(r[+c] ?? '')) : '' }
     const errori: string[] = []
     const id = val('id'), tk = val('tesseraKey'), nomin = val('nominativo') || [val('cognome'), val('nome')].filter(Boolean).join(' ')
     const nascitaTxt = val('nascita'), nascita = nascitaTxt && nascitaTxt !== '-' ? leggiData(nascitaTxt) : null
-    const { socio, come, candidati, errore } = aggancia(db, perTessera, id, tk, nomin, nascita)
+    // qui telefono ed email sono dati da aggiornare: fanno da chiave solo se la riga non ha altro (né ID, né tessera, né nominativo)
+    const soloContatti = !id && !tk && !nomin
+    const { socio, come, candidati, errore } = aggancia(db, perTessera, id, tk, nomin, nascita, soloContatti ? val('telefono') : '', soloContatti ? val('email') : '')
     if (errore) errori.push(errore)
     const valori: CralRigaT6['valori'] = {}
     const svuota = (t: string) => t === '-'
@@ -187,7 +187,35 @@ export function ImportT6() {
         } else if (socio && socio.stato !== x) errori.push(`«${STATI[x]}» non si imposta da file`)
       }
     }
-    return { i, riga: hdr + i + 2, chiave: id || tk || nomin, socio, come, candidati, valori, errori }
+    const dataDi = (k: string, cosa: string): string | undefined => { const t = val(k); if (!t) return undefined; const d = leggiData(t); if (!d) errori.push(`${cosa} «${t}» non valida`); return d ?? undefined }
+    const c: NonNullable<CralRigaT6['valori']['contatti']> = {}
+    if (usa.has('telefono') && !soloContatti) {
+      const t = val('telefono')
+      if (t) { if (svuota(t)) c.telefono = ''; else { const n = leggiTelefono(t, db.prefissoTel); if (n && 'e164' in n) c.telefono = n.e164; else errori.push(`telefono «${t}»: ${n && 'errore' in n ? n.errore : 'non valido'}`) } }
+    }
+    if (usa.has('consensoTel')) {
+      const t = val('consensoTel')
+      if (t) {
+        const x = leggiConsenso(t)
+        if (!x) errori.push(`consenso «${t}» non riconosciuto (Sì, No, Revocato)`)
+        else {
+          c.consenso = x
+          if (x === 'SI') { const d = dataDi('consensoIl', 'data del consenso'); if (d) c.consensoIl = d; const o = val('origine'); if (o) { const oo = leggiOrigine(o); if (oo) c.origine = oo; else errori.push(`origine «${o}» non riconosciuta (cartaceo, online, email, a voce)`) } }
+          if (x === 'REVOCATO') { const d = dataDi('revocatoIl', 'data della revoca'); if (d) c.revocatoIl = d }
+        }
+      }
+    }
+    if (usa.has('whatsapp')) {
+      const t = val('whatsapp'); if (t) { const x = leggiWhatsapp(t); if (x) c.whatsapp = x; else errori.push(`WhatsApp «${t}» non riconosciuto (Sì, No, Non verificato)`) }
+      const w = val('waId').replace(/\D/g, ''); if (w && /^[1-9]\d{6,14}$/.test(w)) c.waId = w
+    }
+    if (Object.keys(c).length) valori.contatti = c
+    const al: NonNullable<CralRigaT6['valori']['alimentari']> = {}
+    if (usa.has('consensoAlim')) { const t = val('consensoAlim'); if (t) { const x = leggiSiNo(t); if (x === null) errori.push(`consenso ai dati alimentari «${t}» non riconosciuto (Sì, No)`); else al.consenso = x } }
+    if (usa.has('esigenze')) { const t = val('esigenze'); if (t) { const x = leggiEsigenze(svuota(t) ? '' : t); al.esigenze = x.esigenze; if (x.ignote.length) errori.push(`esigenza «${x.ignote.join(', ')}» non in elenco: scrivila fra le allergie`) } }
+    if (usa.has('allergie')) { const t = val('allergie'); if (t) al.allergie = svuota(t) ? '' : t.slice(0, 300) }
+    if (Object.keys(al).length) valori.alimentari = al
+    return { i, riga: hdr + i + 2, chiave: id || tk || nomin || val('telefono') || val('email'), socio, come, candidati, valori, errori }
   }).filter(r => r.chiave), [file, pronto, rows, hdr, map, usa, db, perTessera])
 
   const finale = (r: RigaLetta): Persona | null => {
@@ -226,7 +254,7 @@ export function ImportT6() {
           <div className="w-10 h-10 rounded-lg bg-cyan-600/20 text-cyan-300 flex items-center justify-center shrink-0"><Ico d={D.upload} cls="w-5 h-5" /></div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-white">{lettura ? 'Lettura del file sul server…' : 'Trascina qui il file di aggiornamento (.xlsx, .xls, .csv) o fai clic per sceglierlo'}</p>
-            <p className="text-xs text-slate-500 mt-0.5">Persone già presenti: si agganciano per ID, tessera o nominativo (con la data di nascita fra gli omonimi). Il modo più semplice: «Soci › Esporta Excel», correggi, ricarica qui. Niente si scrive finché non validi il lotto.</p>
+            <p className="text-xs text-slate-500 mt-0.5">Persone già presenti: si agganciano per ID, tessera o nominativo (con la data di nascita fra gli omonimi); una riga col solo telefono o la sola email si aggancia con quelli. Il modo più semplice: «Soci › Esporta Excel», correggi, ricarica qui. Niente si scrive finché non validi il lotto.</p>
           </div>
           <input ref={inp} type="file" accept=".xlsx,.xls,.csv" className="sr-only" onChange={e => { const f = e.target.files?.[0]; if (f) void apri(f); e.target.value = '' }} />
         </div>
@@ -242,8 +270,8 @@ export function ImportT6() {
                 <select className={inputCls} value={map[k] ?? ''} onChange={e => setMap({ ...map, [k]: e.target.value })}><option value="">— Nessuna</option>{intest.map((h, i) => <option key={i} value={String(i)}>{h || `Colonna ${i + 1}`}</option>)}</select>
               </Campo>))}
           </div>
-          <p className="text-xs text-slate-500 mt-2">Cella vuota = non cambia · «-» = svuota il campo. Data di nascita di chi ha la matricola: si scrive solo se in PGS manca. Stato: Attivo, Cessato o Eliminato (con «Data stato», altrimenti oggi); i cambi di stato si confermano uno per uno.</p>
-          {!pronto && <p className="text-sm text-amber-400 mt-2">Indica la colonna dell'ID, della tessera o del nominativo.</p>}
+          <p className="text-xs text-slate-500 mt-2">Cella vuota = non cambia · «-» = svuota il campo. Telefono: scritto come si vuole, si salva come +39…; consenso Sì / No / Revocato (dopo una revoca il «Sì» vuole una nuova «Data consenso»); esigenze e allergie entrano solo col consenso ai dati alimentari. Data di nascita di chi ha la matricola: si scrive solo se in PGS manca. Stato: Attivo, Cessato o Eliminato (con «Data stato», altrimenti oggi); i cambi di stato si confermano uno per uno.</p>
+          {!pronto && <p className="text-sm text-amber-400 mt-2">Indica almeno una colonna per agganciare: ID, tessera, nominativo, telefono o email.</p>}
         </div>
       </div>}
       {file && pronto && <div className={`${cardCls} overflow-hidden`}>
@@ -256,7 +284,7 @@ export function ImportT6() {
           <span className="flex-1" />
           <button className={btnPrimario} disabled={invio || !conValori.length || !usa.size} onClick={() => void prepara()}><Ico d={D.check} />Prepara le variazioni</button>
         </div>
-        {(nonAgg.length > 0 || conErrori.length > 0) && <div className="overflow-x-auto max-h-[420px] overflow-y-auto"><table className="w-full text-sm">
+        {(nonAgg.length > 0 || conErrori.length > 0) && <Scorrevole className="max-h-[420px]"><table className="w-full text-sm">
           <thead className="sticky top-0 bg-slate-900 text-left text-[11px] uppercase tracking-wider text-slate-500"><tr><th className="px-5 py-2 font-semibold">Riga</th><th className={thCls}>Nel file</th><th className={thCls}>Persona</th><th className="px-5 py-2 font-semibold">Note</th></tr></thead>
           <tbody className="divide-y divide-slate-800/70">
             {lette.filter(r => !finale(r) || r.errori.length).slice(0, 300).map(r => {
@@ -275,7 +303,7 @@ export function ImportT6() {
                   <td className="px-5 py-2 text-xs text-red-300">{r.errori.join(' · ')}{scelte[r.i] !== undefined && <button className="ml-2 text-slate-400 hover:text-white" onClick={() => setScelte(s => { const n = { ...s }; delete n[r.i]; return n })}>annulla scelta</button>}</td>
                 </tr>)
             })}
-          </tbody></table></div>}
+          </tbody></table></Scorrevole>}
         <p className="px-5 py-3 border-t border-slate-800 text-xs text-slate-500">«Prepara le variazioni» confronta i valori con quelli di qui e crea un lotto: per ogni persona vedi prima → dopo, accetti o scarti (anche un campo alla volta) e applichi. Le righe non agganciate si ignorano.</p>
       </div>}
     </div>

@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.10.29.1-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.11.11-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -145,7 +145,7 @@ payroll-gang-suite/
 - **Verifica liquidato** *(admin)* — confronto del liquidato CINECA (`/liquidazioni/liquidato/dettaglio`) con gli invii PGS ricostruiti (join per `matricola|voce|capitolo|dataCompVoce|riferimento`), classificazione NUOVO / CONGUAGLIO / STORNO / RETTIFICA; ogni lettura è auditata
 - **Dottorandi e borse (area Emolumenti)** *(admin)* — elenco lavorazioni con bozze/archiviate, caricamento nominativi per incollato o ricerca in anagrafica, lettura di cio' che e' **gia' in CSA** (i mesi presenti non sono selezionabili: la competenza doppia non nasce), abbinamenti d'ufficio tipo→voce→capitolo (DR `09834`/`000601`, BS `09947`/`000706`, BE `09766`/`000602`), export CSV per HR Suite e **TXT matricole divise per area del conto**
 - **Versamenti enti** (dalla 26.10.26) — porting strutturato del Java *GestioneSaldiEnti*: si carica la stampa versamenti di CSA (`STAMPA_VERSAMENTI_*.CSV`, anche con **piu' mesi**), e per ogni ente si scarica l'**EML da aprire in Outlook** (bozza `X-Unsent`) con CSV e PDF di dettaglio, ora con la **data di nascita**. Il file si elabora **solo nel browser**: PGS salva soltanto la rubrica degli enti (email anche multiple, abilitato, modello) e i **modelli mail** con i loro allegati personalizzabili. Vedi *Sezione Versamenti enti*
-- **Modulo CRAL** (dalla 26.10.28) *(admin)* — soci dipendenti, soci esterni, esterni e familiari; import annuale del **libro soci** abbinato all'anagrafica PGS per nominativo (mai il codice fiscale); eventi con scelta, consegna, **ordini a pagamento**, **campi estivi a settimane** e **biglietti a magazzino**; sconti per tipologia e personali; **quote associative** per anno solare; report CSV/PDF. Dalla 26.10.29: stato **Eliminato** (esente dalla quota, reversibile), passaggio da **socio dipendente a socio esterno**, **aggiornamento massivo** da Excel (T6) e modifiche in blocco, **archivio fra ambienti** (produzione ↔ pre-produzione) con lotto di variazioni da validare; dalla 26.10.29.1 **quote versate in massa** (T7) con l'importo di ogni rata. Vedi *Sezione Modulo CRAL*
+- **Modulo CRAL** (dalla 26.10.28) *(admin)* — soci dipendenti, soci esterni, esterni e familiari; import annuale del **libro soci** abbinato all'anagrafica PGS per nominativo (mai il codice fiscale); eventi con scelta, consegna, **ordini a pagamento**, **campi estivi a settimane** e **biglietti a magazzino**; sconti per tipologia e personali; **quote associative** per anno solare; report CSV/PDF. Dalla 26.10.29: stato **Eliminato** (esente dalla quota, reversibile), passaggio da **socio dipendente a socio esterno**, **aggiornamento massivo** da Excel (T6) e modifiche in blocco, **archivio fra ambienti** (produzione ↔ pre-produzione) con lotto di variazioni da validare; dalla 26.10.29.1 **quote versate in massa** (T7) con l'importo di ogni rata; dalla 26.11.11 **telefono** (formato API WhatsApp) con **consenso GDPR** e stato WhatsApp, **esigenze alimentari**, importazioni che agganciano anche col **solo numero di telefono**, **esportazione a scelta** (lista WhatsApp, modelli salvati). Vedi *Sezione Modulo CRAL*
 - **PDF Region Editor** *(in rollout, kill-switch off)* — strumento admin: disegno regioni di riconoscimento layout direttamente sul cedolino renderizzato (canvas), template versionati e immutabili riusabili per l'estrazione automatica delle voci
 
 ---
@@ -356,6 +356,35 @@ Stati della persona: *Attivo*, *Da validare*, *Rifiutato*, *Cessato* e **Elimina
 - **Trova in anagrafica PGS** e' disponibile anche per soci esterni ed esterni gia' attivi (riassunto, o dipendente mai collegato), con la scorciatoia «Usa l'ex matricola».
 - **Selezione multipla** nella scheda *Soci*: sede di consegna, tipologia (con le regole della scheda: chi non puo' si salta), cessa, elimina, ripristina, riattiva; **Esporta Excel** dell'elenco filtrato o dei selezionati.
 
+### Telefono, consensi, WhatsApp, esigenze alimentari (dalla 26.11.11)
+
+Per ogni persona (soci, esterni, familiari), nella scheda e in tutti i tracciati:
+
+- **Telefono**: scritto come si vuole, conservato nel formato delle **API di WhatsApp** — `telefono` in E.164 (`+393331234567`) e `wa_id` con le sole cifre (`393331234567`). Senza prefisso prende quello di *Parametri › Numeri di telefono* (39): i cellulari italiani iniziano per 3, i fissi tengono lo 0 (con l'avviso «WhatsApp improbabile»); un numero estero va scritto col suo prefisso. Lo stesso numero puo' stare su piu' persone (familiari): viene segnalato, non bloccato.
+- **Consenso all'uso del numero** (GDPR): `NO`, `SI` (con data e origine: modulo cartaceo, modulo online, email, a voce), `REVOCATO` (con data). Senza un `SI` valido il numero resta in scheda ma **non esce in nessun elenco di contatto**. Un numero nuovo fa ripartire il consenso; dopo una revoca il `SI` torna solo con una nuova data di consenso, successiva alla revoca (un file o un archivio piu' vecchi non la scavalcano).
+- **WhatsApp**: `SI`, `NO`, `NV` (non verificato), con data e fonte della verifica (a mano, da file). Dalla scheda, con consenso e WhatsApp, si apre `wa.me/<wa_id>`. PGS **non chiama le API di WhatsApp**: prepara le liste nel loro formato.
+- **Esigenze alimentari**: elenco fisso (Vegetariano, Vegano, Celiaco, Senza lattosio) + **allergie** a testo libero. Sono dati relativi alla salute: si conservano **solo con il loro consenso** (un vincolo del database lo garantisce) e togliendolo si cancellano.
+- **Audit**: mai il numero ne' le esigenze, solo che cosa e' cambiato e quante persone.
+- **In elenco**: colonna *Contatti* (WhatsApp, telefono con o senza consenso, revocato, esigenze), filtro *Contatti ed esigenze*, ricerca per numero, *Consensi e WhatsApp…* sui selezionati.
+- **Eventi**: in testa all'evento i conteggi delle esigenze dei partecipanti (chi ha ordinato, chi e' iscritto), report *Esigenze alimentari*.
+
+Regole pure in `server/src/lib/cralContatti.ts` e, identiche, in `client/src/components/cral/contatti.ts` (stessi test).
+
+### Aggancio nelle importazioni (dalla 26.11.11)
+
+Un solo motore (`client/src/components/cral/aggancio.ts`) per T2–T7: **ID → tessera → telefono → email → nominativo (+ data di nascita)**. Basta una chiave: un file con il **solo numero di telefono** si importa.
+
+- Numero di una persona sola, nome compatibile o assente → agganciata; numero **condiviso** → decide il nome, altrimenti si sceglie fra chi ha quel numero; numero del socio con il nome di un suo **familiare** (il figlio iscritto col telefono del genitore) → il familiare; numero di una persona e nome di un'altra → **conflitto**, la riga resta ferma finche' non si sceglie; numero sconosciuto → si assegna a mano o si ignora.
+- Ogni riga non agganciata dice **perche'**; il menu propone prima i candidati.
+- Un numero nuovo di chi non ne ha uno si puo' **proporre in anagrafica**: diventa un lotto in *Da validare*, sempre senza consenso.
+- **Intestazioni**: sinonimi («cell», «cellulare», «mobile», «tel», «n. telefono», «whatsapp», «e-mail», «cognome e nome»…); una colonna non riconosciuta si indica a mano e la scelta si ricorda per tracciato (nel browser).
+- Nel T6 telefono ed email sono dati da aggiornare: fanno da chiave solo per le righe senza ID, tessera e nominativo.
+
+### Esportazioni (dalla 26.11.11)
+
+- **Esporta Excel** (*Soci*): le colonne del T6, comprese quelle di contatto, per correggere e ricaricare.
+- **Esporta elenco…** (*Soci* sull'elenco filtrato o sui selezionati, *Eventi* sui partecipanti): colonne e ordine a scelta, chi entra (tutti, con consenso al numero, lista WhatsApp, con esigenze alimentari), Excel o CSV (virgola o punto e virgola). Modelli pronti — *Lista WhatsApp* (`wa_id`, telefono, nome, cognome, sede), *Rubrica telefonica*, *Esigenze alimentari*, *Elenco con email* — e **modelli salvati**, condivisi fra gli amministratori. Qui il numero esce **solo per chi ha dato il consenso**; le celle sono testo e protette dalle formule.
+
 ### Aggiornamento massivo (tracciato T6)
 
 *Importazione › Aggiornamento dati (T6)*: un Excel con persone **gia' presenti** (il piu' comodo e' l'export della scheda *Soci*, che ha le stesse colonne e un secondo foglio *Familiari*). Aggancio per ID (anche l'ex matricola), tessera o nominativo (la data di nascita decide fra gli omonimi); chi non si aggancia si sceglie a mano o si ignora. Colonne aggiornabili, da spuntare una per una: **sede, data di nascita, email, tessera, note, tipologia, stato** (Attivo/Cessato/Eliminato con *Data stato*). Cella vuota = non cambia; `-` = svuota. La data di nascita di chi ha la matricola si scrive **solo se in PGS manca** (se c'e' ed e' diversa si segnala). Il server prepara un **lotto** di variazioni prima → dopo da validare (vedi sotto).
@@ -392,7 +421,7 @@ Elenco soci, quote associative e, per ogni evento, riepilogo per sede, scelte/or
 
 ### Cosa salva PGS
 
-`cral_sedi`, `cral_parametri` (tessera e progressivi), `cral_tipi`, `cral_tipologie_prodotto`, `cral_soci` (nessun codice fiscale), `cral_familiari_legami`, `cral_soci_tessere`, `cral_iniziative` (config in JSON validato dal server), `cral_iniziative_partecipanti`, `cral_scelte` (dati in JSON validato contro la config), `cral_carichi`, `cral_richieste`, `cral_quote_anno`, `cral_quote`, `cral_lotti` e `cral_lotti_variazioni` (0023; le variazioni si svuotano alla chiusura del lotto). Importi in centesimi interi.
+`cral_sedi`, `cral_parametri` (tessera e progressivi; dalla 0025 prefisso dei numeri e modelli di esportazione), `cral_tipi`, `cral_tipologie_prodotto`, `cral_soci` (nessun codice fiscale; dalla 0025 telefono, consensi, WhatsApp, esigenze alimentari), `cral_familiari_legami`, `cral_soci_tessere`, `cral_iniziative` (config in JSON validato dal server), `cral_iniziative_partecipanti`, `cral_scelte` (dati in JSON validato contro la config), `cral_carichi`, `cral_richieste`, `cral_quote_anno`, `cral_quote`, `cral_lotti` e `cral_lotti_variazioni` (0023; le variazioni si svuotano alla chiusura del lotto). Importi in centesimi interi.
 
 Audit (entita' `cral`): `CRAL_FILE_LETTO`, `CRAL_IMPORT_ABBINAMENTO`, `CRAL_IMPORT_CONFERMATO`, `CRAL_PERSONA_CREATA` / `_MODIFICATA`, `CRAL_LEGAMI_FAMILIARE`, `CRAL_PERSONE_VALIDA` / `_RIFIUTA` / `_RIMETTI` / `_CESSA` / `_RIATTIVA`, `CRAL_SOCIO_RIAMMESSO`, `CRAL_TROVATO_IN_PGS`, `CRAL_SEDE_ASSEGNATA`, `CRAL_SEDE_*`, `CRAL_TIPO_*`, `CRAL_TIPOLOGIA_*`, `CRAL_PARAMETRI_TESSERA`, `CRAL_EVENTO_CREATO` / `_MODIFICATO` / `_ARCHIVIATO` / `_RIPRISTINATO`, `CRAL_PARTECIPANTI`, `CRAL_SCELTA`, `CRAL_SCELTE_IN_BLOCCO`, `CRAL_CARICO`, `CRAL_RICHIESTA` / `_MODIFICATA`, `CRAL_QUOTA_ANNO`, `CRAL_QUOTA_SOCIO`, `CRAL_TRATTENUTA_MESE`; dalla 26.10.29 `CRAL_PERSONE_ELIMINA` / `_RIPRISTINA`, `CRAL_TIPOLOGIA_IN_BLOCCO`, `CRAL_PASSAGGIO_SOCIO_ESTERNO`, `CRAL_EXPORT_SOCI`, `CRAL_EXPORT_ARCHIVIO` (ambiente, sezioni, conteggi), `CRAL_LOTTO_T6`, `CRAL_LOTTO_T7`, `CRAL_EXPORT_QUOTE`, `CRAL_LOTTO_ARCHIVIO`, `CRAL_LOTTO_APPLICATO`, `CRAL_LOTTO_SCARTATO`.
 
@@ -545,6 +574,19 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.11.11
+**Modulo CRAL: telefono (formato API WhatsApp) con consenso GDPR, esigenze alimentari, importazioni col solo numero di telefono, esportazione a scelta, scorrimento senza barre**
+
+- **Telefono e WhatsApp** per ogni persona: numero in E.164 (`+393331234567`) e `wa_id` (`393331234567`), consenso all'uso del numero con data, origine e **revoca**, stato WhatsApp con data e fonte della verifica. Senza consenso il numero resta ma non esce negli elenchi di contatto. Lo stesso numero su piu' persone e' ammesso e segnalato.
+- **Esigenze alimentari**: Vegetariano, Vegano, Celiaco, Senza lattosio + allergie, solo con il consenso ai dati alimentari. Conteggi in testa a ogni evento e nuovo report *Esigenze alimentari*.
+- **Scheda, elenco, blocco**: sezioni *Telefono e WhatsApp* ed *Esigenze alimentari* nella scheda e in *Nuova persona*; colonna *Contatti*, filtro *Contatti ed esigenze*, ricerca per numero; *Consensi e WhatsApp…* sui selezionati; prefisso dei numeri in *Parametri*.
+- **Importazioni**: un solo motore di aggancio per T2–T7 (**ID → tessera → telefono → email → nominativo**), anche col **solo numero di telefono**, con controlli di congruita' (numero condiviso, telefono del genitore per il figlio, numero e nome in disaccordo = conflitto da decidere), motivo su ogni riga non agganciata, sinonimi delle intestazioni e colonne correggibili che si ricordano, proposta in *Da validare* dei numeri nuovi. **T6** e *Esporta Excel* con le colonne `Telefono`, `Consenso telefono`, `Data consenso`, `Origine consenso`, `Data revoca`, `WhatsApp`, `WA ID`, `Consenso dati alimentari`, `Esigenze alimentari`, `Allergie`; **T1** con `Telefono` facoltativo; **T7** aggancia anche per telefono ed email; **archivio fra ambienti** con contatti e dati alimentari (un archivio precedente resta leggibile).
+- **Esporta elenco…**: colonne, ordine, filtro e formato a scelta, modelli pronti (*Lista WhatsApp*, *Rubrica telefonica*, *Esigenze alimentari*, *Elenco con email*) e modelli salvati condivisi; da *Soci* e da ogni evento.
+- **Scorrimento**: nell'area CRAL le barre non restano in vista. Le tabelle sfumano dal lato in cui c'e' altro contenuto, con «‹ ›» e «altre righe ↓»; barra sottile solo al passaggio del mouse o col focus; l'elenco *Soci* nasconde prima le colonne meno importanti («Dal», poi la tipologia, che resta come pallino colorato). Menu laterale senza barra, con «altre voci ↓».
+- **Server**: `lib/cralContatti.ts` (regole pure, con test), rotte `/soci/:id/contatti`, `/soci/contatti`, `/parametri/contatti`, `/parametri/modelli-export`, `/export/elenco`; lotti T6 e archivio con i campi `contatti` e `alimentari`. Audit: `CRAL_CONTATTI_MODIFICATI`, `CRAL_CONTATTI_IN_BLOCCO`, `CRAL_PARAMETRI_CONTATTI`, `CRAL_MODELLI_EXPORT`, `CRAL_EXPORT_ELENCO` (mai numeri ne' esigenze). **Migrazione `0025_cral_contatti_alimentari.sql`** (additiva, idempotente).
+- **Guide**: tracciati aggiornati con esempi e modelli, *Come una riga trova la sua persona*, *Telefono, consensi, esigenze alimentari ed esportazioni*.
+- Test: server 146, client 118. Provato su database (migrazione applicata due volte, stesso schema di un'installazione nuova) e nel browser (scheda, filtri, export WhatsApp, T6 con contatti, partecipanti col solo telefono, lotto dei numeri proposti, nessun errore in console).
 
 ### 26.10.29.1
 **Modulo CRAL: quote versate in massa (T7) con l'importo di ogni rata**

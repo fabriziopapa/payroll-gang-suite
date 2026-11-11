@@ -300,6 +300,9 @@ CREATE TABLE IF NOT EXISTS cral_parametri (
   suffisso_cifre    SMALLINT     NOT NULL DEFAULT 2 CHECK (suffisso_cifre BETWEEN 1 AND 3),
   ext_prossimo      INTEGER      NOT NULL DEFAULT 1 CHECK (ext_prossimo >= 1),
   fam_prossimo      INTEGER      NOT NULL DEFAULT 1 CHECK (fam_prossimo >= 1),
+  -- 0025: prefisso dei numeri scritti senza, modelli di esportazione salvati
+  prefisso_tel      VARCHAR(4)   NOT NULL DEFAULT '39' CONSTRAINT cral_parametri_prefisso_tel CHECK (prefisso_tel ~ '^[1-9][0-9]{0,3}$'),
+  export_modelli    JSONB        NOT NULL DEFAULT '[]',
   updated_by        UUID         REFERENCES users(id) ON DELETE SET NULL,
   updated_at        TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
@@ -351,6 +354,33 @@ CREATE TABLE IF NOT EXISTS cral_soci (
   stato_prima    VARCHAR(12),
   anni_esenti    SMALLINT[]    NOT NULL DEFAULT '{}',
   ex_matricola   VARCHAR(10),
+  -- 0025: telefono (E.164, formato API WhatsApp), consensi, WhatsApp, esigenze alimentari
+  telefono             VARCHAR(16),
+  wa_id                VARCHAR(15),
+  tel_consenso         VARCHAR(8)    NOT NULL DEFAULT 'NO',
+  tel_consenso_il      DATE,
+  tel_consenso_origine VARCHAR(8),
+  tel_revocato_il      DATE,
+  whatsapp             VARCHAR(2)    NOT NULL DEFAULT 'NV',
+  wa_verificato_il     DATE,
+  wa_fonte             VARCHAR(4),
+  alim_consenso        BOOLEAN       NOT NULL DEFAULT false,
+  alim_consenso_il     DATE,
+  esigenze             VARCHAR(12)[] NOT NULL DEFAULT '{}',
+  allergie             VARCHAR(300)  NOT NULL DEFAULT '',
+  CONSTRAINT cral_soci_telefono CHECK (
+    (telefono IS NULL OR telefono ~ '^\+[1-9][0-9]{6,14}$')
+    AND (wa_id IS NULL OR wa_id ~ '^[1-9][0-9]{6,14}$')
+    AND tel_consenso IN ('NO', 'SI', 'REVOCATO')
+    AND whatsapp IN ('SI', 'NO', 'NV')
+    AND (tel_consenso_origine IS NULL OR tel_consenso_origine IN ('CARTACEO', 'ONLINE', 'EMAIL', 'VOCE'))
+    AND (wa_fonte IS NULL OR wa_fonte IN ('MANO', 'FILE'))
+    AND (telefono IS NOT NULL OR (wa_id IS NULL AND tel_consenso = 'NO' AND whatsapp = 'NV'))
+    AND (tel_consenso <> 'SI' OR tel_consenso_il IS NOT NULL)
+    AND (tel_consenso <> 'REVOCATO' OR tel_revocato_il IS NOT NULL)),
+  CONSTRAINT cral_soci_alimentari CHECK (
+    esigenze <@ ARRAY['VEGETARIANO', 'VEGANO', 'CELIACO', 'LATTOSIO']::varchar[]
+    AND (alim_consenso OR (cardinality(esigenze) = 0 AND allergie = '' AND alim_consenso_il IS NULL))),
   CONSTRAINT cral_soci_eliminato CHECK (
     stato <> 'ELIMINATO' OR (eliminato_il IS NOT NULL AND stato_prima IN ('ATTIVO', 'DA_VALIDARE', 'RIFIUTATO', 'CESSATO'))),
   CONSTRAINT cral_soci_ex_matricola CHECK (ex_matricola IS NULL OR ex_matricola ~ '^[0-9]{1,10}$'),
@@ -364,6 +394,7 @@ CREATE TABLE IF NOT EXISTS cral_soci (
 CREATE UNIQUE INDEX IF NOT EXISTS cral_soci_tessera ON cral_soci (lower(tessera)) WHERE tessera IS NOT NULL;
 CREATE INDEX IF NOT EXISTS cral_soci_stato ON cral_soci (stato, tipo);
 CREATE UNIQUE INDEX IF NOT EXISTS cral_soci_ex_matricola_u ON cral_soci (ex_matricola) WHERE ex_matricola IS NOT NULL;
+CREATE INDEX IF NOT EXISTS cral_soci_telefono_i ON cral_soci (telefono) WHERE telefono IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS cral_familiari_legami (
   familiare_id  VARCHAR(12)  NOT NULL REFERENCES cral_soci(id) ON UPDATE CASCADE ON DELETE CASCADE,

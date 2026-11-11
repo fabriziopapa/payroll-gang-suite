@@ -19,7 +19,7 @@ import { LottoView } from './Lotto'
 import { aggancia } from './ImportDati'
 import {
   Campo, D, Ico, Origine, Pill, avviso, btnPiccolo, btnPiccoloSec, btnPrimario, cardCls, etichettaCls, fileBase64, inputCls, inputW,
-  messaggioErrore, thCls, useCral,
+  messaggioErrore, thCls, useCral, Scorrevole
 } from './ui'
 
 const pulisci = (s: string) => s.replace(/[\u0000-\u001f\u007f]/g, ' ').trim()
@@ -31,6 +31,8 @@ const RUOLI: Array<[string, string, RegExp]> = [
   ['cognome', 'Cognome', /^cognome$/i],
   ['nome', 'Nome', /^nome$/i],
   ['nascita', 'Data di nascita', /nasc/i],
+  ['telefono', 'Telefono (per agganciare)', /^((n|num|numero|recapito)\.?( di)? )?(tel|telefono|telefonico|cell|cellulare|mobile|whatsapp)\.?$/i],
+  ['email', 'Email (per agganciare)', /mail/i],
   ['anno', 'Anno', /^anno$/i],
   ['modo', 'Modalità', /^modalit/i],
   ['mese', 'Mese (una riga per versamento)', /^mese$/i],
@@ -96,14 +98,14 @@ export function ImportT7() {
   const perVersamento = map['mese'] !== '' && map['mese'] !== undefined
   const conMesi = ruoliMesi.some(([k]) => map[k])
   const perTessera = useMemo(() => new Map(db.soci.filter(s => s.tessera).map(s => [norm(s.tessera), s])), [db])
-  const pronto = (map['id'] !== '' || map['tesseraKey'] !== '' || map['nominativo'] !== '' || (map['cognome'] !== '' && map['nome'] !== '')) && (perVersamento || conMesi || map['unica'] !== '')
+  const pronto = (map['id'] !== '' || map['tesseraKey'] !== '' || map['nominativo'] !== '' || (map['cognome'] !== '' && map['nome'] !== '') || (map['telefono'] ?? '') !== '' || (map['email'] ?? '') !== '') && (perVersamento || conMesi || map['unica'] !== '')
 
   const lette = useMemo<Letta[]>(() => !file || !pronto ? [] : rows.slice(hdr + 1).map((r, i) => {
     const val = (k: string) => { const c = map[k]; return c !== '' && c != null ? pulisci(String(r[+c] ?? '')) : '' }
     const errori: string[] = [], note: string[] = []
     const id = val('id'), tk = val('tesseraKey'), nomin = val('nominativo') || [val('cognome'), val('nome')].filter(Boolean).join(' ')
     const nascita = val('nascita') ? leggiData(val('nascita')) : null
-    const { socio, come, candidati, errore } = aggancia(db, perTessera, id, tk, nomin, nascita)
+    const { socio, come, candidati, errore } = aggancia(db, perTessera, id, tk, nomin, nascita, val('telefono'), val('email'))
     if (errore) errori.push(errore)
     const at = val('anno'), an = at ? parseInt(at, 10) : anno
     if (at && !(an >= 2000 && an <= 2100)) errori.push(`anno «${at}» non valido`)
@@ -203,7 +205,7 @@ export function ImportT7() {
           <span className="flex-1" />
           <button className={btnPrimario} disabled={invio || !agganciate.length} onClick={() => void prepara()}><Ico d={D.check} />Prepara le variazioni</button>
         </div>
-        {daGuardare.length > 0 && <div className="overflow-x-auto max-h-[420px] overflow-y-auto"><table className="w-full text-sm">
+        {daGuardare.length > 0 && <Scorrevole className="max-h-[420px]"><table className="w-full text-sm">
           <thead className="sticky top-0 bg-slate-900 text-left text-[11px] uppercase tracking-wider text-slate-500"><tr><th className="px-5 py-2 font-semibold">Riga</th><th className={thCls}>Nel file</th><th className={thCls}>Socio</th><th className="px-5 py-2 font-semibold">Note</th></tr></thead>
           <tbody className="divide-y divide-slate-800/70">
             {daGuardare.slice(0, 300).map(r => {
@@ -223,7 +225,7 @@ export function ImportT7() {
                     {scelte[r.i] !== undefined && <button className="ml-2 text-slate-400 hover:text-white" onClick={() => setScelte(s => { const n = { ...s }; delete n[r.i]; return n })}>annulla scelta</button>}</td>
                 </tr>)
             })}
-          </tbody></table></div>}
+          </tbody></table></Scorrevole>}
         <p className="px-5 py-3 border-t border-slate-800 text-xs text-slate-500">«Prepara le variazioni» confronta con le quote registrate e crea un lotto: per ogni socio vedi i versamenti prima → dopo. Gli importi diversi dalla rata si confermano uno per uno; chi non deve la quota di quell'anno (esterni, familiari, eliminati, iscritti dopo) è bloccato.</p>
       </div>}
     </div>

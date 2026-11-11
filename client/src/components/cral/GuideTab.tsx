@@ -1,11 +1,12 @@
 // ============================================================
 // PAYROLL GANG SUITE — Modulo CRAL · scheda Guide
 // Tracciato record di ogni importazione (T1–T7), con un esempio CSV, il
-// modello da scaricare e l'equivalente manuale; l'archivio fra ambienti.
+// modello da scaricare e l'equivalente manuale; come si agganciano le
+// persone; telefono, consensi ed esportazioni; l'archivio fra ambienti.
 // In fondo, i lavori da fare.
 // ============================================================
 
-import { D, Ico, Pill, avviso, btnPiccoloSec, cardCls, etichettaCls, scarica, useCral, type Scheda } from './ui'
+import { D, Ico, Pill, avviso, btnPiccoloSec, cardCls, etichettaCls, scarica, useCral, type Scheda, Scorrevole } from './ui'
 
 interface Tracciato {
   id: string; titolo: string; dove: string; scheda: Scheda; provvisorio?: boolean; cosa: string
@@ -29,6 +30,7 @@ const TRACCIATI: Tracciato[] = [
       ['N.ISCR.SOCIO', 'No', 'Numero intero', '42', 'Diventa la tessera nel formato di Parametri (42 → 0042): la tessera viene SEMPRE dal libro soci, la validazione non ne assegna. Numero diverso da PGS: si segnala e, con l\'interruttore, si prende quello del file (il vecchio resta nelle note). Chi rientra ha un numero nuovo.'],
       ['ESTERNI', 'No', 'vuoto · ESTERNO · ATIPICO', 'ESTERNO', 'Vuoto = socio da cercare in anagrafica PGS (trovato: socio dipendente; non trovato: socio esterno da validare). ESTERNO = socio esterno, non si cerca in PGS. ATIPICO = per ora come vuoto, con l\'etichetta «ATIPICO» (significato da confermare).'],
       ['MATRICOLA', 'No', 'Numero, fino a 6 cifre', '090123', 'Non c\'è nel libro soci; se un file la porta (es. la stampa dei versamenti) prevale sul nominativo.'],
+      ['TELEFONO', 'No', 'Numero scritto come si vuole', '333 123 4567', 'Se c\'è, entra per i soci nuovi e per chi non ha ancora un numero, senza consenso (il consenso si registra in scheda o con il T6). Non cambia un numero già presente.'],
       ['SEDE DI CONSEGNA · EMAIL', 'No', 'Testo', 'Sede di Via Acton', 'Non ci sono nel libro soci: la sede dei soci nuovi resta «da indicare» e si assegna nella scheda Sedi; quella dei soci già presenti non cambia.'],
     ],
     note: ['* Serve il NOMINATIVO (o COGNOME + NOME, o la MATRICOLA).', 'Se il file ha più fogli (LIBRO SOCI, TUTTI LIBRO SOCI, STAMPA_VERSAMENTI…) si sceglie quale usare.', 'Soci attivi in PGS che non sono nel file: per ciascuno si decide a mano «Cessato», «Resta attivo» o «È nel file come…» (nome scritto male: si associa la riga giusta, proposta per stesso numero d\'iscrizione o nome simile). Finché non si decide, la conferma è bloccata.', 'Formati .xlsx, .xls, .csv. Le intestazioni si riconoscono anche con nomi simili; altrimenti si scelgono a mano.', 'Un ex dipendente passato a socio esterno si riconosce dalla sua ex matricola: l\'import aggiorna il socio esterno che c\'è già, non crea un nuovo socio dipendente.', 'Il T1 aggiunge e abbina. Per aggiornare in massa dati di chi c\'è già (sedi, date di nascita, email, tessere, stato) c\'è il T6.'],
@@ -40,13 +42,14 @@ const TRACCIATI: Tracciato[] = [
     cosa: 'Registra la scelta di ogni socio per un singolo evento (es. il gusto del panettone). Va bene l\'export del modulo online così com\'è.',
     campi: [
       ['MATRICOLA / ID SOCIO / TESSERA', 'No*', 'Matricola PGS, EXT-nnnn o numero di tessera', '090123', 'Primo criterio di aggancio.'],
-      ['EMAIL', 'No*', 'Indirizzo email', 'Maria.Rossi@…', 'Secondo criterio, maiuscole ignorate. È la colonna «Indirizzo email» del modulo.'],
-      ['NOMINATIVO', 'No*', 'Cognome e nome in qualunque ordine', 'ROSSI MARIA', 'Terzo criterio, con la stessa regola dell\'elenco iscritti.'],
-      ['SCELTA (qualsiasi intestazione)', 'Sì', 'Testo uguale a una delle opzioni dell\'evento', 'AL CIOCCOLATO FONDENTE', 'È la prima colonna che non è data/ora, email, nominativo o matricola: per esempio «Panettone».'],
+      ['TELEFONO (cell, cellulare, mobile, n. telefono, whatsapp)', 'No*', 'Numero scritto come si vuole', '333 123 4567', 'Criterio di aggancio dopo l\'ID e prima dell\'email. Basta anche da solo. Senza prefisso prende +39 (Parametri). Se il numero è di più persone decide il nome, altrimenti scegli tu; se numero e nome indicano persone diverse la riga resta ferma finché non scegli.'],
+      ['EMAIL', 'No*', 'Indirizzo email', 'Maria.Rossi@…', 'Dopo il telefono, maiuscole ignorate. È la colonna «Indirizzo email» del modulo.'],
+      ['NOMINATIVO (o COGNOME + NOME)', 'No*', 'Cognome e nome in qualunque ordine', 'ROSSI MARIA', 'Ultimo criterio, con la stessa regola dell\'elenco iscritti; con la DATA DI NASCITA si distinguono gli omonimi.'],
+      ['SCELTA (qualsiasi intestazione)', 'Sì', 'Testo uguale a una delle opzioni dell\'evento', 'AL CIOCCOLATO FONDENTE', 'È la prima colonna che non è data/ora né una chiave (matricola, telefono, email, nominativo): per esempio «Panettone».'],
       ['Informazioni cronologiche', 'No', 'Data e ora della risposta', '07/10/2025 12.07.41', 'Si ignora.'],
     ],
-    note: ['* Serve almeno uno fra MATRICOLA/ID/TESSERA, EMAIL o NOMINATIVO.', 'Le righe che non si agganciano restano in elenco «non agganciate» e si assegnano a mano a un socio prima di registrare.', 'Una scelta già presente si sovrascrive e diventa di fonte «modulo».'],
-    esempio: 'Informazioni cronologiche;Panettone;Indirizzo email;NOMINATIVO\n07/10/2026 12.07.41;AL CIOCCOLATO FONDENTE;maria.rossi@ateneo.example;\n08/10/2026 09.14.02;TRADIZIONALE - CON UVETTA E CANDITI;;BIANCHI GIULIA',
+    note: ['* Serve almeno una chiave fra MATRICOLA/ID/TESSERA, TELEFONO, EMAIL o NOMINATIVO: basta anche il solo numero di telefono.', 'Le righe non agganciate, ambigue o in conflitto restano in elenco con il motivo accanto e si assegnano a mano (prima i candidati possibili).', 'Le colonne chiave si riconoscono dai nomi più usati; se una non viene riconosciuta la indichi con «cambia» e la scelta resta per le volte dopo.', 'Un numero nuovo di una persona senza telefono si può proporre in anagrafica: finisce in «Da validare», senza consenso.', 'Una scelta già presente si sovrascrive e diventa di fonte «modulo».'],
+    esempio: 'Informazioni cronologiche;Panettone;Indirizzo email;NOMINATIVO;Cellulare\n07/10/2026 12.07.41;AL CIOCCOLATO FONDENTE;maria.rossi@ateneo.example;;\n08/10/2026 09.14.02;TRADIZIONALE - CON UVETTA E CANDITI;;BIANCHI GIULIA;\n08/10/2026 10.30.00;AL CIOCCOLATO FONDENTE;;;333 123 4567',
     mano: [['La scelta di un socio', 'Eventi › apri › colonna «Scelta» sulla riga del socio', 'iniziative'], ['Chi non ha scelto', 'Eventi › apri › «Assegna la predefinita…» oppure riga per riga', 'iniziative'], ['La consegna', 'Eventi › apri › colonna «Consegnato»', 'iniziative']],
   },
   {
@@ -54,15 +57,16 @@ const TRACCIATI: Tracciato[] = [
     cosa: 'Registra gli ordini di un evento a pagamento (es. olio, prodotti della terra, quote di una gita): una riga per persona, una colonna per prodotto con la quantità. È la forma del foglio «ULTIMO ORDINE».',
     campi: [
       ['MATRICOLA / ID SOCIO / TESSERA', 'No*', 'Matricola PGS, EXT-nnnn o numero di tessera', '090123', 'Primo criterio di aggancio.'],
-      ['EMAIL', 'No*', 'Indirizzo email', 'maria.rossi@…', 'Secondo criterio.'],
-      ['NOMINATIVO', 'No*', 'Cognome e nome in qualunque ordine', 'ROSSI Carla', 'Terzo criterio, stessa regola dell\'elenco iscritti.'],
+      ['TELEFONO (cell, cellulare, mobile, n. telefono, whatsapp)', 'No*', 'Numero scritto come si vuole', '333 123 4567', 'Criterio di aggancio dopo l\'ID e prima dell\'email. Basta anche da solo. Senza prefisso prende +39 (Parametri). Se il numero è di più persone decide il nome, altrimenti scegli tu; se numero e nome indicano persone diverse la riga resta ferma finché non scegli.'],
+      ['EMAIL', 'No*', 'Indirizzo email', 'maria.rossi@…', 'Dopo il telefono.'],
+      ['NOMINATIVO', 'No*', 'Cognome e nome in qualunque ordine', 'ROSSI Carla', 'Ultimo criterio, stessa regola dell\'elenco iscritti.'],
       ['TIPOLOGIA - PRODOTTO (una colonna per prodotto)', 'Sì', 'Quantità: intero per i prodotti al pezzo, anche decimale per quelli al kg', 'FRANTOIANO - PET DA 1 LT = 2', 'L\'intestazione è «tipologia - prodotto» come nell\'evento; basta il solo prodotto se il nome è unico. Vuoto o 0 = non ordinato. Oltre il massimo a testa la riga va in errore.'],
       ['COGNOME + NOME', 'No*', 'Due colonne di testo', 'ROSSI · MARIA', 'In alternativa a NOMINATIVO (è la forma del foglio delle mele).'],
       ['IMPORTO', 'No', 'Euro', '10', 'Controllo: il totale si calcola da quantità × prezzo. Se nel file è più basso, la differenza si registra come sconto personale (interruttore); se è più alto si segnala nelle note.'],
       ['PAGATO', 'No', 'SI / NO', 'SI', 'Se SI, l\'ordine risulta pagato.'],
       ['NOTE', 'No', 'Testo libero', 'dare 2,50 di resto', 'Nota dell\'ordine, come la colonna NOTE del foglio.'],
     ],
-    note: ['* Serve almeno uno fra MATRICOLA/ID/TESSERA, EMAIL o NOMINATIVO.', 'Prezzi e totali NON si importano: si calcolano dai prezzi dei prodotti nell\'evento.', 'File SENZA intestazione (es. mele: cognome | nome | quantità | importo): si indica cosa c\'è in ogni colonna; la riga di totale in fondo, senza nome, si ignora.', 'Un ordine importato sostituisce quello già presente per la stessa persona. Le righe non agganciate si assegnano a mano.', 'Le persone devono essere tra i partecipanti dell\'evento: dei gruppi scelti o aggiunte come singoli.'],
+    note: ['* Serve almeno una chiave fra MATRICOLA/ID/TESSERA, TELEFONO, EMAIL o NOMINATIVO: basta anche il solo telefono. Ambiguità e conflitti si decidono a mano, con il motivo accanto.', 'Prezzi e totali NON si importano: si calcolano dai prezzi dei prodotti nell\'evento.', 'File SENZA intestazione (es. mele: cognome | nome | quantità | importo): si indica cosa c\'è in ogni colonna; la riga di totale in fondo, senza nome, si ignora.', 'Un ordine importato sostituisce quello già presente per la stessa persona. Le righe non agganciate si assegnano a mano.', 'Le persone devono essere tra i partecipanti dell\'evento: dei gruppi scelti o aggiunte come singoli.'],
     esempio: 'NOMINATIVO;LECCINO - ALU DA 5 LT;FRANTOIANO - PET DA 1 LT;CASTAGNE;PAGATO;NOTE\nROSSI Carla;;1;;SI;\nROSSI Maria;1;2;1,5;;dare 2,50 di resto\n\n(senza intestazione, come le mele)\nROSSI;MARIA;4;10\nBIANCHI;GIULIA;6;15\n;;10;',
     mano: [['L\'ordine di una persona', 'Eventi › apri › quantità sulla riga della persona', 'iniziative'], ['Pagato, consegnato, note', 'Eventi › apri › colonne a destra', 'iniziative'], ['Un partecipante non socio', 'Eventi › apri › Nuovo partecipante', 'iniziative']],
   },
@@ -71,11 +75,12 @@ const TRACCIATI: Tracciato[] = [
     cosa: 'Carica la lista dei partecipanti di un evento impostato «Singoli»: una riga per persona. Le persone si cercano in tutta l\'anagrafica CRAL (soci dipendenti, soci esterni, esterni, familiari).',
     campi: [
       ['MATRICOLA / ID', 'No*', 'Matricola PGS, EXT-nnnn, FAM-nnnn o numero di tessera', 'FAM-0001', 'Primo criterio di aggancio.'],
-      ['EMAIL', 'No*', 'Indirizzo email', 'maria.rossi@…', 'Secondo criterio.'],
-      ['NOMINATIVO', 'No*', 'Cognome e nome in qualunque ordine', 'ROSSI Maria', 'Terzo criterio, stessa regola dell\'anagrafica.'],
+      ['TELEFONO (cell, cellulare, mobile, n. telefono, whatsapp)', 'No*', 'Numero scritto come si vuole', '333 123 4567', 'Criterio di aggancio dopo l\'ID e prima dell\'email. Basta anche da solo. Senza prefisso prende +39 (Parametri). Se il numero è di più persone decide il nome, altrimenti scegli tu; se numero e nome indicano persone diverse la riga resta ferma finché non scegli.'],
+      ['EMAIL', 'No*', 'Indirizzo email', 'maria.rossi@…', 'Dopo il telefono.'],
+      ['NOMINATIVO', 'No*', 'Cognome e nome in qualunque ordine', 'ROSSI Maria', 'Ultimo criterio, stessa regola dell\'anagrafica.'],
     ],
-    note: ['* Serve almeno uno dei tre.', 'Chi non si aggancia si assegna a mano a una persona esistente, oppure diventa un nuovo esterno da validare.', 'Chi è già partecipante non viene duplicato.'],
-    esempio: 'MATRICOLA / ID;EMAIL;NOMINATIVO\n090123;;\nFAM-0001;;\n;;VERDI Carla',
+    note: ['* Serve almeno una chiave: basta anche il solo numero di telefono.', 'Chi non c\'è e ha un nome diventa un nuovo esterno da validare (con il suo numero, senza consenso), oppure lo assegni a mano. Un numero sconosciuto senza nome si assegna a mano o si ignora.', 'Numero condiviso (es. familiari) senza nome, o numero e nome che indicano persone diverse: la riga resta ferma finché non scegli. Il figlio iscritto col telefono del genitore si riconosce dal nome.', 'Chi è già partecipante non viene duplicato.'],
+    esempio: 'MATRICOLA / ID;TELEFONO;EMAIL;NOMINATIVO\n090123;;;\nFAM-0001;;;\n;333 123 4567;;\n;+39 347 765 4321;;VERDI Carla',
     mano: [['Un partecipante', 'Eventi › apri › Nuovo partecipante (anche persona nuova)', 'iniziative'], ['Togliere un partecipante', 'Eventi › apri › × accanto al nome', 'iniziative']],
   },
   {
@@ -83,19 +88,21 @@ const TRACCIATI: Tracciato[] = [
     cosa: 'Registra le settimane prenotate da ciascun iscritto (di solito i figli dei soci). Le settimane del file si aggiungono a quelle già prenotate: vale anche per gli allungamenti.',
     campi: [
       ['MATRICOLA / ID', 'No*', 'Matricola PGS, EXT-nnnn, FAM-nnnn o tessera', 'FAM-0002', 'Primo criterio di aggancio.'],
-      ['NOMINATIVO', 'No*', 'Cognome e nome in qualunque ordine', 'FERRARI Matteo', 'Secondo criterio, stessa regola dell\'anagrafica.'],
+      ['TELEFONO (cell, cellulare, mobile, n. telefono, whatsapp)', 'No*', 'Numero scritto come si vuole', '333 123 4567', 'Criterio di aggancio dopo l\'ID e prima dell\'email. Basta anche da solo. Senza prefisso prende +39 (Parametri). È normale il numero del genitore: se il nome è quello del figlio si aggancia il figlio. Se il numero è di più persone decide il nome, altrimenti scegli tu; se numero e nome indicano persone diverse la riga resta ferma finché non scegli.'],
+      ['EMAIL', 'No*', 'Indirizzo email', 'maria.rossi@…', 'Dopo il telefono.'],
+      ['NOMINATIVO', 'No*', 'Cognome e nome in qualunque ordine', 'FERRARI Matteo', 'Ultimo criterio, stessa regola dell\'anagrafica.'],
       ['RIFERIMENTO', 'No', 'Matricola, ID o nominativo del socio o del dipendente da cui dipende', '090123', 'Decide lo sconto e il gruppo. Vuoto = automatico: per un familiare il suo socio, per un esterno nessuno (quota piena). Serve per i figli di dipendenti non soci.'],
       ['SETTIMANA 1 … SETTIMANA n', 'Sì', 'X (oppure SI, 1, P) nelle settimane prenotate', 'X', 'Intestazione uguale al nome della settimana nell\'evento. Settimane anche non consecutive (es. prima e ultima).'],
       ['VERSATO', 'No', 'Importo in euro', '120,00', 'Si somma a quanto già versato.'],
       ['NOTE', 'No', 'Testo libero', 'allungamento richiesto', ''],
     ],
-    note: ['* Serve almeno uno fra MATRICOLA/ID e NOMINATIVO.', 'La quota NON si importa: quota piena dell\'evento, scontata della percentuale se la persona di riferimento è socio (dipendente o esterno) o dipendente non socio, × settimane prenotate o frequentate.', 'Frequentata e Tolta si segnano a mano, settimana per settimana.', 'In un evento «Singoli» chi viene importato entra anche tra i partecipanti.'],
+    note: ['* Serve almeno una chiave fra MATRICOLA/ID, TELEFONO, EMAIL e NOMINATIVO.', 'La quota NON si importa: quota piena dell\'evento, scontata della percentuale se la persona di riferimento è socio (dipendente o esterno) o dipendente non socio, × settimane prenotate o frequentate.', 'Frequentata e Tolta si segnano a mano, settimana per settimana.', 'In un evento «Singoli» chi viene importato entra anche tra i partecipanti.'],
     esempio: 'MATRICOLA / ID;NOMINATIVO;RIFERIMENTO;SETTIMANA 1;SETTIMANA 2;SETTIMANA 3;SETTIMANA 4;SETTIMANA 5;VERSATO;NOTE\nFAM-0002;;;X;X;;;;180,00;\n;COLOMBO Nicolò;;X;;;;X;;prima e ultima\n;ROSSI Chiara;090123;X;X;;;;;figlia di dipendente non socio',
     mano: [['Una settimana', 'Eventi › apri il campo › cella della settimana: Prenotata / Frequentata / Tolta', 'iniziative'], ['Un nuovo iscritto', 'Eventi › apri il campo › Nuovo partecipante', 'iniziative'], ['Il versato', 'Eventi › apri il campo › colonna Versato', 'iniziative']],
   },
   {
     id: 'T6', titolo: 'Aggiornamento dati delle persone già presenti', dove: 'Importazione › Aggiornamento dati (T6)', scheda: 'import',
-    cosa: 'Aggiorna in massa i dati di soci, esterni e familiari che ci sono già: sede di consegna, data di nascita, email, tessera, note, tipologia, stato. Non crea persone nuove (per quelle c\'è il T1). Il modo più semplice: «Soci › Esporta Excel» (stesse colonne, anche il foglio Familiari), correggi in Excel e ricarica il file. Dalle differenze nasce un lotto: per ogni persona prima → dopo, si accetta o si scarta anche un campo alla volta, e solo allora si applica.',
+    cosa: 'Aggiorna in massa i dati di soci, esterni e familiari che ci sono già: sede di consegna, data di nascita, email, telefono con consenso e WhatsApp, esigenze alimentari, tessera, note, tipologia, stato. Non crea persone nuove (per quelle c\'è il T1). Il modo più semplice: «Soci › Esporta Excel» (stesse colonne, anche il foglio Familiari), correggi in Excel e ricarica il file. Dalle differenze nasce un lotto: per ogni persona prima → dopo, si accetta o si scarta anche un campo alla volta, e solo allora si applica.',
     campi: [
       ['ID', 'Sì*', 'Matricola, EXT-nnnn o FAM-nnnn', '090123', 'Primo criterio di aggancio.'],
       ['Tessera', 'No*', 'Numero o testo', '42', 'Per agganciare, se manca l\'ID (si sceglie a mano la colonna). Come campo da aggiornare: nuova tessera, controllata contro i doppioni.'],
@@ -104,17 +111,23 @@ const TRACCIATI: Tracciato[] = [
       ['Sede', 'No', 'Codice (CD) o nome della sede', 'ACT', 'Deve esistere. È la colonna «Sede» dell\'export; «Sede (nome)» si ignora.'],
       ['Email · Note', 'No', 'Testo', 'maria.rossi@…', 'Email controllata nel formato.'],
       ['Tipologia', 'No', 'Socio dipendente · Socio esterno · Esterno', 'Esterno', 'Con la matricola: socio dipendente o esterno; senza: socio esterno o esterno. Un socio con familiari non diventa esterno. Il passaggio a socio esterno di un dipendente si fa dalla scheda (nuovo ID).'],
+      ['Telefono', 'No', 'Numero scritto come si vuole', '333 123 4567', 'Si salva nel formato delle API di WhatsApp: +393331234567 (wa_id 393331234567). Senza prefisso prende +39; i fissi tengono lo 0. Un numero nuovo fa ripartire consenso e WhatsApp. Lo stesso numero può stare su più persone: viene segnalato. Riga senza ID né nome: il telefono (o l\'email) fa da chiave.'],
+      ['Consenso telefono · Data consenso · Origine consenso', 'No', 'Sì · No · Revocato · gg/mm/aaaa · cartaceo, online, email, a voce', 'Sì · 03/11/2026 · modulo cartaceo', 'Consenso (GDPR) all\'uso del numero. Senza data vale oggi. «No» su un consenso dato = revoca. Dopo una revoca il «Sì» entra solo con una nuova Data consenso, successiva alla revoca.'],
+      ['Data revoca', 'No', 'gg/mm/aaaa', '10/11/2026', 'Con «Revocato»; senza data vale oggi.'],
+      ['WhatsApp · WA ID', 'No', 'Sì · No · Non verificato · cifre', 'Sì', 'Se il numero è su WhatsApp; si annotano data e fonte della verifica. WA ID solo se diverso dalle cifre del numero.'],
+      ['Consenso dati alimentari', 'No', 'Sì · No', 'Sì', 'Consenso al trattamento dei dati alimentari (dati relativi alla salute). «No» cancella esigenze e allergie.'],
+      ['Esigenze alimentari · Allergie', 'No', 'Vegetariano, Vegano, Celiaco, Senza lattosio · testo libero', 'Vegano, Celiaco · arachidi', 'Più voci separate da virgola («vegetaliano» = vegano, «senza glutine» = celiaco). Entrano solo se c\'è il consenso ai dati alimentari, nel file o già in scheda; altrimenti la variazione è bloccata. Quello che non è in elenco va fra le allergie.'],
       ['Stato · Data stato', 'No', 'Attivo · Cessato · Eliminato · data gg/mm/aaaa', 'Cessato · 31/12/2026', 'Cessato solo chi è attivo; Eliminato da qualunque stato; Attivo su un eliminato = ripristino. Senza data, oggi. I cambi di stato si confermano uno per uno.'],
     ],
-    note: ['* Serve almeno un criterio di aggancio: ID, tessera o nominativo.', 'Cella vuota = il campo non cambia. «-» = svuota il campo.', 'Si applicano solo le colonne spuntate (di default sede, email e note): le altre si accendono a mano.', 'Persone non agganciate: si scelgono a mano o si ignorano. Una persona in più righe: vale la prima.', 'Il lotto resta in «Da validare» finché non è tutto deciso: si può applicare una parte e riprendere più tardi.'],
-    esempio: 'ID;Tipologia;Stato;Data stato;Cognome;Nome;Data di nascita;Email;Sede;Tessera;Note\n090123;Socio dipendente;Attivo;;ROSSI;MARIA;;maria.rossi@ateneo.example;ACT;;\nEXT-0004;Socio esterno;Cessato;31/12/2026;BIANCHI;GIULIA;12/05/1961;;CD;0108;\nFAM-0002;;;;FERRARI;MATTEO;;;-;;sede svuotata con il trattino',
-    mano: [['Sede di molte persone', 'Soci › seleziona › Sede di consegna › Applica', 'soci'], ['Stato o tipologia di molte persone', 'Soci › seleziona › Cessa / Elimina / Ripristina, Tipologia', 'soci'], ['Una persona', 'Soci › clic sulla riga', 'soci']],
+    note: ['* Serve almeno un criterio di aggancio: ID, tessera o nominativo; una riga con il solo telefono o la sola email si aggancia con quelli.', 'Cella vuota = il campo non cambia. «-» = svuota il campo.', 'Si applicano solo le colonne spuntate (di default sede, email, note, telefono, consensi, WhatsApp, esigenze e allergie): le altre si accendono a mano.', 'Persone non agganciate: si scelgono a mano o si ignorano. Una persona in più righe: vale la prima.', 'Il lotto resta in «Da validare» finché non è tutto deciso: si può applicare una parte e riprendere più tardi.'],
+    esempio: 'ID;Tipologia;Stato;Data stato;Cognome;Nome;Data di nascita;Email;Sede;Tessera;Note;Telefono;Consenso telefono;Data consenso;Origine consenso;Data revoca;WhatsApp;Consenso dati alimentari;Esigenze alimentari;Allergie\n090123;Socio dipendente;Attivo;;ROSSI;MARIA;;maria.rossi@ateneo.example;ACT;;;333 123 4567;Sì;03/11/2026;modulo cartaceo;;Sì;Sì;Vegano;arachidi\nEXT-0004;Socio esterno;Cessato;31/12/2026;BIANCHI;GIULIA;12/05/1961;;CD;0108;;;Revocato;;;10/11/2026;;;;\nFAM-0002;;;;FERRARI;MATTEO;;;-;;sede svuotata con il trattino;;;;;;;Sì;Celiaco, Senza lattosio;',
+    mano: [['Telefono, consenso, esigenze di una persona', 'Soci › clic sulla riga › Telefono e WhatsApp, Esigenze alimentari', 'soci'], ['Consenso o WhatsApp di molte persone', 'Soci › seleziona › Consensi e WhatsApp…', 'soci'], ['Sede di molte persone', 'Soci › seleziona › Sede di consegna › Applica', 'soci'], ['Stato o tipologia di molte persone', 'Soci › seleziona › Cessa / Elimina / Ripristina, Tipologia', 'soci'], ['Una persona', 'Soci › clic sulla riga', 'soci']],
   },  {
     id: 'T7', titolo: 'Quote versate · una riga per socio', dove: 'Importazione › Quote versate (T7)', scheda: 'import',
     cosa: 'Carica, aggiorna e corregge in massa le quote associative versate, in attesa della lettura delle trattenute da CINECA. È la forma di «Quote associative › Esporta Excel»: si esporta l\'anno, si scrivono gli importi e si ricarica. Si registra l\'importo davvero versato: se copre la rata il mese è pagato, se un versamento copre la quota dell\'anno è pagato tutto l\'anno, un importo minore resta registrato e il mese «da completare». Nasce un lotto prima → dopo da validare.',
     campi: [
       ['ID', 'Sì*', 'Matricola o EXT-nnnn', '090123', 'Primo criterio di aggancio (anche l\'ex matricola di chi è passato a socio esterno).'],
-      ['Tessera · Cognome · Nome · Data di nascita', 'No*', 'Testo, gg/mm/aaaa', 'ROSSI · MARIA', 'Se manca l\'ID: tessera, poi nominativo (la data di nascita decide fra gli omonimi).'],
+      ['Tessera · Telefono · Email · Cognome · Nome · Data di nascita', 'No*', 'Testo, gg/mm/aaaa', 'ROSSI · MARIA', 'Se manca l\'ID: tessera, poi telefono, email, nominativo (la data di nascita decide fra gli omonimi). Telefono ed email qui servono solo ad agganciare.'],
       ['Anno', 'No', 'aaaa', '2026', 'Se manca vale l\'anno scelto a video. L\'anno deve essere impostato in Parametri.'],
       ['Modalità', 'No', 'Unica soluzione · Mensile · Trattenuta in busta paga', 'Mensile', 'La trattenuta solo per chi ha la matricola.'],
       ['Gen … Dic', 'No', 'Euro (5 · 5,00 · 4,50) oppure X / SI', '5,00', 'Importo versato nel mese. X = la rata intera. Vuoto = non cambia. Un importo pari alla quota annua paga tutto l\'anno.'],
@@ -164,17 +177,17 @@ export function GuideTab() {
           </div>
           <div className="px-5 py-4 flex flex-col gap-4">
             <p className="text-sm text-slate-300 max-w-[80ch]">{t.cosa}</p>
-            <div className="overflow-x-auto rounded-lg border border-slate-800"><table className="w-full text-sm">
+            <Scorrevole className="rounded-lg border border-slate-800"><table className="w-full text-sm">
               <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 bg-slate-900/60"><th className="px-3 py-2 font-semibold">Colonna</th><th className="px-3 py-2 font-semibold">Obbl.</th><th className="px-3 py-2 font-semibold">Formato</th><th className="px-3 py-2 font-semibold">Esempio</th><th className="px-3 py-2 font-semibold">Note</th></tr></thead>
               <tbody className="divide-y divide-slate-800/70 align-top">
                 {t.campi.map(([c, o, f, e, n]) => <tr key={c}><td className="px-3 py-2 font-mono text-xs text-slate-100 whitespace-nowrap">{c}</td><td className={`px-3 py-2 text-xs ${o.startsWith('Sì') ? 'text-amber-300' : 'text-slate-500'}`}>{o}</td><td className="px-3 py-2 text-xs text-slate-300">{f}</td><td className="px-3 py-2 font-mono text-xs text-slate-400 whitespace-nowrap">{e}</td><td className="px-3 py-2 text-xs text-slate-400 min-w-[220px]">{n}</td></tr>)}
-              </tbody></table></div>
+              </tbody></table></Scorrevole>
             <ul className="text-xs text-slate-400 list-disc ml-5 space-y-1 max-w-[80ch]">{t.note.map(n => <li key={n}>{n}</li>)}</ul>
             <div className="grid lg:grid-cols-2 gap-4">
               <div className="flex flex-col gap-2 min-w-0"><div className="flex items-center"><span className={etichettaCls + ' flex-1'}>Esempio (CSV)</span>
                 <button className={btnPiccoloSec} onClick={() => copia(t.esempio)}><Ico d={D.copy} cls="w-3.5 h-3.5" />Copia</button>
                 <button className={btnPiccoloSec + ' ml-1.5'} onClick={() => scarica(`CRAL_${t.id}_modello.csv`, new Blob(['\uFEFF' + t.esempio.replace(/\n/g, '\r\n')], { type: 'text/csv;charset=utf-8' }))}><Ico d={D.download} cls="w-3.5 h-3.5" />Modello</button></div>
-                <pre className="text-xs font-mono text-slate-300 bg-slate-950 border border-slate-800 rounded-lg p-3 overflow-x-auto whitespace-pre">{t.esempio}</pre></div>
+                <pre className="text-xs font-mono text-slate-300 bg-slate-950 border border-slate-800 rounded-lg p-3 overflow-x-auto whitespace-pre pgs-discreto">{t.esempio}</pre></div>
               <div className="flex flex-col gap-2"><span className={etichettaCls}>Stessa cosa a mano, una alla volta</span>
                 <div className="rounded-lg border border-slate-800 divide-y divide-slate-800">
                   {t.mano.map(([cosa, dove, k]) => <button key={cosa} onClick={() => vaiA(k)} className="w-full text-left px-3 py-2.5 hover:bg-slate-800/50 flex items-center gap-3"><span className="text-sm text-slate-100 w-48 shrink-0">{cosa}</span><span className="text-xs text-slate-400 flex-1">{dove}</span><span className="text-indigo-400 text-xs">apri</span></button>)}
@@ -183,10 +196,34 @@ export function GuideTab() {
           </div>
         </section>))}
       <section className={`${cardCls} p-5 flex flex-col gap-2 text-sm text-slate-300`}>
+        <h3 className="text-white font-semibold">Come una riga trova la sua persona (tutte le importazioni)</h3>
+        <ul className="list-disc ml-5 space-y-1 max-w-[80ch] text-slate-400">
+          <li>Un solo motore per T2–T7, in quest'ordine: <b className="text-slate-200">ID</b> (matricola, EXT-, FAM-, ex matricola) → <b className="text-slate-200">tessera</b> → <b className="text-slate-200">telefono</b> → <b className="text-slate-200">email</b> → <b className="text-slate-200">nominativo</b> (+ data di nascita fra gli omonimi). Basta una chiave: un file con il solo numero di telefono si importa.</li>
+          <li><b className="text-slate-200">Numero di telefono</b>: comunque sia scritto (spazi, trattini, +39, 0039, numero diventato «3,33E+09» in Excel) si legge nel formato delle API di WhatsApp, <span className="font-mono">+393331234567</span>.</li>
+          <li><b className="text-slate-200">Congruità</b>: numero di una persona sola con nome compatibile o assente → agganciata. Numero condiviso → decide il nome, altrimenti scegli fra chi ha quel numero. Numero del socio e nome di un suo familiare → il familiare. Numero di una persona e nome di un'altra → <b className="text-slate-200">conflitto</b>: la riga resta ferma finché non scegli.</li>
+          <li><b className="text-slate-200">Intestazioni</b>: si riconoscono i nomi più usati («cell», «cellulare», «mobile», «tel», «n. telefono», «whatsapp», «e-mail», «cognome e nome»…). Se una colonna non viene riconosciuta la indichi una volta con «cambia»: la scelta si ricorda per quel tipo di file, in questo browser.</li>
+          <li>Ogni riga non agganciata dice <b className="text-slate-200">perché</b>, e il menu propone prima i candidati possibili.</li>
+          <li>Un numero nuovo di una persona che non ne ha uno si può <b className="text-slate-200">proporre in anagrafica</b>: diventa una variazione in «Da validare», sempre senza consenso.</li>
+        </ul>
+      </section>
+      <section className={`${cardCls} p-5 flex flex-col gap-2 text-sm text-slate-300`}>
+        <h3 className="text-white font-semibold">Telefono, consensi, esigenze alimentari ed esportazioni</h3>
+        <ul className="list-disc ml-5 space-y-1 max-w-[80ch] text-slate-400">
+          <li><b className="text-slate-200">Consenso all'uso del numero</b> (GDPR): No, Sì (con data e origine: modulo cartaceo, modulo online, email, a voce) o Revocato. Senza un «Sì» valido il numero resta in scheda ma non esce in nessun elenco di contatto. Dopo una revoca serve un nuovo consenso.</li>
+          <li><b className="text-slate-200">WhatsApp</b>: Sì, No o Non verificato, con data e fonte della verifica. Dalla scheda, con consenso e WhatsApp, si apre la chat. PGS non invia messaggi: prepara le liste.</li>
+          <li><b className="text-slate-200">Esigenze alimentari</b>: Vegetariano, Vegano, Celiaco, Senza lattosio e allergie a testo libero. Sono dati relativi alla salute: si conservano solo con il loro consenso, e togliendolo si cancellano. Nel registro delle operazioni non finiscono mai né i numeri né le esigenze.</li>
+          <li><b className="text-slate-200">Esporta Excel</b> (Soci): tutte le colonne del T6, comprese quelle di contatto, per correggere e ricaricare.</li>
+          <li><b className="text-slate-200">Esporta elenco…</b> (Soci, sull'elenco filtrato o sui selezionati; Eventi, sui partecipanti): scegli colonne e ordine, chi entra, Excel o CSV. Modelli pronti: <i>Lista WhatsApp</i> (wa_id, telefono, nome, cognome, sede; solo consenso valido e WhatsApp non escluso), <i>Rubrica telefonica</i>, <i>Esigenze alimentari</i>, <i>Elenco con email</i>. Le tue scelte si salvano come modello, condiviso fra gli amministratori.</li>
+          <li><b className="text-slate-200">Eventi</b>: in testa all'evento il conteggio delle esigenze dei partecipanti; in Report › «Esigenze alimentari» l'elenco per chi prepara.</li>
+        </ul>
+        <div className="flex flex-wrap gap-2 pt-1">{([['Soci', 'soci'], ['Prefisso dei numeri', 'parametri'], ['Report', 'report']] as Array<[string, Scheda]>).map(([l, k]) => <button key={l} className={btnPiccoloSec} onClick={() => vaiA(k)}>{l}</button>)}</div>
+      </section>
+      <section className={`${cardCls} p-5 flex flex-col gap-2 text-sm text-slate-300`}>
         <h3 className="text-white font-semibold">Archivio fra ambienti (produzione ↔ pre-produzione)</h3>
         <ul className="list-disc ml-5 space-y-1 max-w-[80ch] text-slate-400">
           <li><b className="text-slate-200">Esporta</b> (Importazione › Archivio fra ambienti): un file .json con le sezioni scelte, cioè sedi, parametri e tabelle (tipi di evento, tipologie di prodotto, tessera, importi della quota), soci e familiari con lo storico delle tessere, quote, eventi con partecipanti, scelte, carichi e richieste. Nome con ambiente e data. I dati personali viaggiano così come sono: l'export resta nell'audit.</li>
           <li><b className="text-slate-200">Carica</b> nell'altro ambiente: si scelgono le sezioni e il server prepara un lotto da validare in «Da validare». Nulla si cancella: chi c'è qui e non nel file resta, un valore vuoto non svuota, un mese di quota pagato qui resta pagato.</li>
+          <li>Con i soci viaggiano anche <b className="text-slate-200">telefono, consensi, WhatsApp ed esigenze alimentari</b>; un consenso revocato qui non viene scavalcato da uno più vecchio dell'archivio.</li>
           <li>Gli <b className="text-slate-200">ID restano gli stessi</b>. Se qui un EXT-/FAM- è già di un'altra persona, la riga è un conflitto: accettandola entra con un nuovo ID e quote, scelte e legami la seguono. I contatori EXT-/FAM- e il prossimo numero di tessera si alzano da soli.</li>
           <li>Le <b className="text-slate-200">sedi</b> si ritrovano per codice o per nome. Gli utenti che hanno creato o validato i record si ricollegano per username; chi non c'è resta scritto nelle note.</li>
           <li>Da confermare una per una: cambi di stato, nuovi ID, matricole che qui non sono in anagrafica PGS, possibili doppioni. Bloccate: tessere già usate da altri, ex dipendenti passati a socio esterno in un solo ambiente.</li>

@@ -8,6 +8,7 @@ import { authApi } from '../api/endpoints'
 import { APP_NAME, APP_VERSION } from '../types'
 import PrivacyCookieModal from './PrivacyCookieModal'
 import ToastManager from './ToastManager'
+import { useScorrimento } from './Scorrevole'
 import EasterEggCredits from './easter-egg/EasterEggCredits'
 
 // ── Easter Egg: sequenza tastiera "ALESSIO" ───────────────────
@@ -191,6 +192,7 @@ export default function Layout({ children }: LayoutProps) {
   )
   const [loggingOut, setLoggingOut]   = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const navScorre = useScorrimento<HTMLElement>()
   const [showPrivacy, setShowPrivacy] = useState(false)
   const [showEasterEgg, setShowEasterEgg] = useState(false)
 
@@ -276,7 +278,10 @@ export default function Layout({ children }: LayoutProps) {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
+        {/* senza barra: sfuma dove ci sono altre voci, con il segnale in basso */}
+        <div className="relative flex-1 min-h-0 flex flex-col">
+        {navScorre.stato.giu && <span aria-hidden="true" className="absolute bottom-1.5 left-1/2 -translate-x-1/2 z-10 pointer-events-none text-[11px] px-2 py-0.5 rounded-full bg-slate-800/95 border border-slate-600 text-slate-300 shadow-lg whitespace-nowrap">altre voci ↓</span>}
+        <nav ref={navScorre.ref} className="flex-1 min-h-0 px-3 py-4 space-y-0.5 overflow-y-auto pgs-senza-barra pgs-sfuma">
           {visibleNavItems.map(item => (
             <React.Fragment key={item.id}>
             {item.section && (
@@ -300,6 +305,7 @@ export default function Layout({ children }: LayoutProps) {
             </React.Fragment>
           ))}
         </nav>
+        </div>
 
         {/* User + logout */}
         <div className="px-3 py-4 border-t border-slate-800">

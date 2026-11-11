@@ -43,3 +43,27 @@
            focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500;
   }
 }
+
+/* ── Scorrimento senza barre in vista (26.11.11) ──────────────
+   Usati da components/Scorrevole.tsx: barra sottile solo al passaggio,
+   bordo che sfuma dove c'è altro contenuto, colonne a priorità. */
+.pgs-discreto { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.pgs-discreto:hover, .pgs-discreto:focus-visible { scrollbar-color: rgba(100, 116, 139, 0.7) transparent; }
+.pgs-senza-barra { scrollbar-width: none; }
+.pgs-senza-barra::-webkit-scrollbar { display: none; }
+.pgs-sfuma {
+  --ft: 0px; --fb: 0px; --fl: 0px; --fr: 0px;
+  -webkit-mask-image:
+    linear-gradient(to bottom, transparent 0, #000 var(--ft), #000 calc(100% - var(--fb)), transparent 100%),
+    linear-gradient(to right, transparent 0, #000 var(--fl), #000 calc(100% - var(--fr)), transparent 100%);
+  mask-image:
+    linear-gradient(to bottom, transparent 0, #000 var(--ft), #000 calc(100% - var(--fb)), transparent 100%),
+    linear-gradient(to right, transparent 0, #000 var(--fl), #000 calc(100% - var(--fr)), transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+}
+/* Colonne a priorità: prima spariscono le pgs-p3, poi le pgs-p2; pgs-solo-stretta le sostituisce in piccolo */
+[data-stretta] .pgs-p3, [data-stretta='2'] .pgs-p2 { display: none; }
+.pgs-solo-stretta { display: none; }
+[data-stretta='2'] .pgs-solo-stretta { display: inline-block; }
+@media (prefers-reduced-motion: reduce) { .pgs-discreto { scroll-behavior: auto; } }

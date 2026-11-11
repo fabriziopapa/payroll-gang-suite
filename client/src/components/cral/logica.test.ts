@@ -5,8 +5,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Db, Iniziativa, Persona } from './tipi.ts'
+import { ALIMENTARI_VUOTI, CONTATTI_VUOTI } from './contatti.ts'
 import {
-  agganciaPersona, applicaSconto, codaRichieste, contiMagazzino, contiOrdine, destinatari, dovutoTurni, eta, importoRichiesta, leggiData,
+  applicaSconto, codaRichieste, contiMagazzino, contiOrdine, destinatari, dovutoTurni, eta, importoRichiesta, leggiData,
   nettoSocio, parseEuro, quotaDi, quotaDopoModifica, rataMese, rifDi, risolvi, riepilogo, simNome, spezzaNominativo, tenutoQuota, tesseraRiammissione, versatoQuota,
 } from './logica.ts'
 import { costruisciReport, testoPdf, type CfgReport } from './report.ts'
@@ -15,7 +16,8 @@ const P = (id: string, tipo: Persona['tipo'], cognome: string, nome: string, ove
   id, tipo, origine: /^\d/.test(id) ? 'PGS' : 'EST', matricola: /^\d/.test(id) ? id : null, cognome, nome, nascita: null, email: '', sede: 'S1',
   tessera: '', riammissioni: 0, stato: 'ATTIVO', iscrittoIl: '2020-01-10', cessatoIl: null, provenienza: null, atipico: false, note: '',
   creatoDa: null, creatoIl: '2020-01-10', validatoDa: null, validatoIl: null, modificatoDa: null, modificatoIl: null,
-  eliminatoIl: null, eliminatoDa: null, statoPrima: null, anniEsenti: [], exMatricola: null, legami: [], storicoTessere: [], ...over,
+  eliminatoIl: null, eliminatoDa: null, statoPrima: null, anniEsenti: [], exMatricola: null, legami: [], storicoTessere: [],
+  contatti: { ...CONTATTI_VUOTI }, alimentari: { ...ALIMENTARI_VUOTI }, ...over,
 })
 const SOCI: Persona[] = [
   P('090001', 'SD', 'ROSSI', 'Luca', { tessera: '0001', nascita: '1980-06-15' }),
@@ -145,9 +147,6 @@ test('tessera al rientro: nuovo numero o suffisso', () => {
 test('nominativi: aggancio, somiglianza, cognome composto', () => {
   assert.equal(risolvi("D'ANGELO MARCO", [{ cognome: 'DANGELO', nome: 'Marco' }]).esito, 'trovato')
   assert.equal(risolvi('BIANCHI GIULIA', [{ cognome: 'BIANCHI', nome: 'Giulia Maria' }]).esito, 'parziale')
-  assert.equal(agganciaPersona(SOCI, '90002', '', '')[0]?.id, '090002')
-  assert.equal(agganciaPersona(SOCI, '0003', '', '')[0]?.id, 'EXT-0001') // tessera
-  assert.equal(agganciaPersona(SOCI, '', '', 'carla verdi')[0]?.id, 'EXT-0001')
   assert.ok(simNome('ROSSSI LUCA', 'ROSSI LUCA') > 0.85)
   assert.ok(simNome('ROSSI LUCA', 'BIANCHI GIULIA') < 0.5)
   assert.deepEqual(spezzaNominativo('DE ROSSI MICHELE'), ['DE ROSSI', 'MICHELE'])

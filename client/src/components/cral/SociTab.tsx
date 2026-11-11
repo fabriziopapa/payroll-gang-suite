@@ -14,10 +14,16 @@ import {
   rifAttivo, sedeNome, sociDi, tesseraDoppia, tesseraRiammissione, totaleSoci,
 } from './logica'
 import { esportaSociExcel } from './ImportDati'
+import { CampiContatti, ContattiInBlocco, FORM_ALIMENTARI_VUOTO, FORM_CONTATTI_VUOTO, SegniContatti, formAlimentari, formContatti, patchContatti, type FormAlimentari, type FormContatti } from './Contatti'
+import { contattabile, perWhatsapp } from './contatti'
+import { EsportaElenco } from './Esporta'
 import {
   Campo, Conferma, D, DiChi, Ico, Modale, Origine, Pill, StatoSocio, avviso, btnPericolo, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario,
-  cardCls, etichettaCls, inputCls, inputW, messaggioErrore, sceltaCls, thCls, useCral,
+  cardCls, etichettaCls, inputCls, inputW, messaggioErrore, sceltaCls, thCls, useCral, Scorrevole
 } from './ui'
+
+/** Il colore della tipologia quando la colonna non entra (tabella stretta). */
+const PUNTO: Record<TipoPersona, string> = { SD: 'bg-indigo-400', SE: 'bg-violet-400', EST: 'bg-cyan-400', FAM: 'bg-pink-400' }
 
 export function SociTab() {
   const { db } = useCral()
@@ -25,6 +31,8 @@ export function SociTab() {
   const [sede, setSede] = useState('')
   const [tip, setTip] = useState('')
   const [stato, setStato] = useState('ATTIVO')
+  const [cont, setCont] = useState('')
+  const [esporta, setEsporta] = useState(false)
   const [modifica, setModifica] = useState<string | null>(null)
   const [nuovo, setNuovo] = useState(false)
   const [aperti, setAperti] = useState<Set<string>>(new Set())
@@ -32,15 +40,21 @@ export function SociTab() {
   const q = norm(cerca)
   // L'elenco mostra soci dipendenti, soci esterni ed esterni. I familiari stanno sotto i loro soci.
   const famDi = (s: Persona) => eSocio(s) ? familiariDi(db, s.id).filter(x => x.stato !== 'RIFIUTATO' && x.stato !== 'ELIMINATO') : []
-  const famTrovati = (s: Persona) => q ? famDi(s).filter(x => norm(`${x.cognome} ${x.nome} ${x.id}`).includes(q)) : []
+  // si cerca anche per numero di telefono (bastano le ultime cifre, comunque sia scritto)
+  const cifre = cerca.replace(/\D/g, '').replace(/^(00)?39(?=\d{6})/, '')
+  const perTel = (x: Persona) => cifre.length >= 4 && x.contatti.telefono.includes(cifre)
+  const famTrovati = (s: Persona) => q ? famDi(s).filter(x => norm(`${x.cognome} ${x.nome} ${x.id}`).includes(q) || perTel(x)) : []
+  const diContatto = (x: Persona) => cont === 'WA' ? perWhatsapp(x.contatti) : cont === 'TEL' ? contattabile(x.contatti) : cont === 'NOCONS' ? !!x.contatti.telefono && !contattabile(x.contatti)
+    : cont === 'NOTEL' ? !x.contatti.telefono : cont === 'ALIM' ? x.alimentari.esigenze.length > 0 || !!x.alimentari.allergie : true
   const lista = db.soci.filter(s => s.tipo !== 'FAM' &&
-    (!q || norm(`${s.cognome} ${s.nome} ${s.id} ${s.tessera} ${s.email}`).includes(q) || famTrovati(s).length > 0) &&
+    (!q || norm(`${s.cognome} ${s.nome} ${s.id} ${s.tessera} ${s.email}`).includes(q) || perTel(s) || famTrovati(s).length > 0) &&
+    (!cont || diContatto(s) || (cont !== 'NOTEL' && famDi(s).some(diContatto))) &&
     (!sede || (sede === '__NOSEDE' ? !s.sede : s.sede === sede)) &&
     (!tip || (tip === 'CONFAM' ? famDi(s).some(x => x.stato === 'ATTIVO') : tip === 'SOCI' ? eSocio(s) : s.tipo === tip)) &&
     // «Tutti» non comprende gli eliminati: si vedono solo col loro filtro
     (stato ? s.stato === stato : s.stato !== 'ELIMINATO'),
   ).sort((a, b) => nominativo(a).localeCompare(nominativo(b)))
-  const espanso = (s: Persona) => aperti.has(s.id) || famTrovati(s).length > 0 || tip === 'CONFAM'
+  const espanso = (s: Persona) => aperti.has(s.id) || famTrovati(s).length > 0 || tip === 'CONFAM' || (!!cont && cont !== 'NOTEL' && famDi(s).some(diContatto))
   const conFam = lista.filter(s => famDi(s).length)
   const tuttiAperti = conFam.length > 0 && conFam.every(espanso)
   const apri = (id: string) => setAperti(a => { const n = new Set(a); if (n.has(id)) n.delete(id); else n.add(id); return n })
@@ -66,23 +80,25 @@ export function SociTab() {
       </div>
       {senzaSede > 0 && <p className="text-xs text-amber-400 -mt-1">{senzaSede === 1 ? '1 socio attivo' : `${senzaSede} soci attivi`} senza sede di consegna.</p>}
       <div className={`${cardCls} p-4 flex flex-wrap gap-3 items-end`}>
-        <div className="flex-1 min-w-[200px]"><Campo label="Cerca"><input className={inputCls} placeholder="Nominativo, ID, tessera, email… anche di un familiare" value={cerca} onChange={e => setCerca(e.target.value)} /></Campo></div>
+        <div className="flex-1 min-w-[200px]"><Campo label="Cerca"><input className={inputCls} placeholder="Nominativo, ID, tessera, email, telefono… anche di un familiare" value={cerca} onChange={e => setCerca(e.target.value)} /></Campo></div>
         <div className="w-full sm:w-56"><Campo label="Sede di consegna"><select className={inputCls} value={sede} onChange={e => setSede(e.target.value)}><option value="">Tutte</option>{db.sedi.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}<option value="__NOSEDE">— Non indicata</option></select></Campo></div>
         <div className="w-[calc(50%-6px)] sm:w-48"><Campo label="Tipologia"><select className={inputCls} value={tip} onChange={e => setTip(e.target.value)}><option value="">Tutte</option><option value="SOCI">Soci (dipendenti ed esterni)</option><option value="SD">Soci dipendenti</option><option value="SE">Soci esterni</option><option value="EST">Esterni</option><option value="CONFAM">Soci con familiari</option></select></Campo></div>
         <div className="w-[calc(50%-6px)] sm:w-40"><Campo label="Stato"><select className={inputCls} value={stato} onChange={e => setStato(e.target.value)}><option value="">Tutti</option><option value="ATTIVO">Attivi</option><option value="DA_VALIDARE">Da validare</option><option value="CESSATO">Cessati</option><option value="RIFIUTATO">Rifiutati</option><option value="ELIMINATO">Eliminati</option></select></Campo></div>
+        <div className="w-full sm:w-56"><Campo label="Contatti ed esigenze"><select className={inputCls} value={cont} onChange={e => setCont(e.target.value)}><option value="">Tutti</option><option value="WA">Con WhatsApp e consenso</option><option value="TEL">Con telefono e consenso</option><option value="NOCONS">Telefono senza consenso</option><option value="NOTEL">Senza telefono</option><option value="ALIM">Con esigenze alimentari</option></select></Campo></div>
         <button className={btnPrimario} onClick={() => setNuovo(true)}><Ico d={D.plus} />Nuova persona</button>
       </div>
       <div className={`${cardCls} overflow-hidden`}>
         <div className="px-5 py-3 border-b border-slate-800 flex flex-wrap items-center gap-3 text-xs text-slate-500">
           <span className="flex-1">{lista.length} persone{conFam.length ? ` · ${conFam.length} con familiari` : ''}</span>
           <button className="text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-1" title="Excel con le stesse colonne del T6 (anche i familiari): si corregge e si reimporta da Importazione › Aggiornamento dati" onClick={() => void esportaSociExcel(sel.size ? [...sel] : lista.map(s => s.id))}><Ico d={D.download} cls="w-3.5 h-3.5" />Esporta Excel{sel.size ? ` (${sel.size} selezionati)` : ''}</button>
+          <button className="text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-1" title="Scegli colonne, filtro e formato: lista WhatsApp, rubrica, esigenze alimentari, modelli salvati" onClick={() => setEsporta(true)}><Ico d={D.download} cls="w-3.5 h-3.5" />Esporta elenco…</button>
           {conFam.length > 0 && <button className="text-indigo-400 hover:text-indigo-300" onClick={() => setAperti(tuttiAperti ? new Set() : new Set(conFam.map(s => s.id)))}>{tuttiAperti ? 'Comprimi i familiari' : 'Mostra tutti i familiari'}</button>}
         </div>
         {sel.size > 0 && <AzioniInBlocco ids={[...sel]} onFatto={() => setSel(new Set())} />}
-        <div className="overflow-x-auto"><table className="w-full text-sm">
+        <Scorrevole adatta><table className="w-full text-sm">
           <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 bg-slate-900/60">
             <th className="pl-5 pr-1 py-2.5"><input type="checkbox" className="accent-indigo-500" aria-label="Seleziona tutti" checked={lista.length > 0 && lista.every(s => sel.has(s.id))} onChange={() => setSel(lista.every(s => sel.has(s.id)) ? new Set() : new Set(lista.map(s => s.id)))} /></th>
-            <th className="px-2 py-2.5 font-semibold">ID</th><th className={thCls}>Nominativo</th><th className={thCls}>Tipologia</th><th className={thCls}>Tessera CRAL</th><th className={thCls}>Sede di consegna</th><th className={thCls}>Stato</th><th className="px-5 py-2.5 font-semibold">Dal</th>
+            <th className="px-2 py-2.5 font-semibold">ID</th><th className={thCls}>Nominativo</th><th className={thCls + ' pgs-p2'}>Tipologia</th><th className={thCls}>Tessera CRAL</th><th className={thCls}>Sede di consegna</th><th className={thCls}>Contatti</th><th className={thCls}>Stato</th><th className="px-5 py-2.5 font-semibold pgs-p3">Dal</th>
           </tr></thead>
           <tbody className="divide-y divide-slate-800/70">
             {lista.map(s => {
@@ -92,14 +108,15 @@ export function SociTab() {
                   <tr className={`hover:bg-slate-800/40 cursor-pointer ${sel.has(s.id) ? 'bg-indigo-950/20' : ''}`} onClick={() => setModifica(s.id)}>
                     <td className="pl-5 pr-1 py-2.5" onClick={e => e.stopPropagation()}><input type="checkbox" className="accent-indigo-500" checked={sel.has(s.id)} onChange={() => setSel(x => { const n = new Set(x); if (n.has(s.id)) n.delete(s.id); else n.add(s.id); return n })} aria-label={`Seleziona ${nominativo(s)}`} /></td>
                     <td className="px-2 py-2.5 font-mono text-xs text-slate-300 whitespace-nowrap">{s.id}{s.exMatricola && <div className="text-[10px] text-slate-500" title="Ex matricola: è passato a socio esterno">ex {s.exMatricola}</div>}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap"><span className="text-slate-100">{nominativo(s)}</span>{s.atipico && <span className="ml-1.5"><Pill tono="warn" title="ATIPICO nel libro soci: etichetta provvisoria">ATIPICO</Pill></span>}
+                    <td className="px-3 py-2.5 whitespace-nowrap"><span className={`pgs-solo-stretta w-2 h-2 rounded-full mr-1.5 align-middle ${PUNTO[s.tipo]}`} title={TIPOLOGIE[s.tipo][0]} /><span className="text-slate-100">{nominativo(s)}</span>{s.atipico && <span className="ml-1.5"><Pill tono="warn" title="ATIPICO nel libro soci: etichetta provvisoria">ATIPICO</Pill></span>}
                       {fam.length > 0 && <button onClick={e => { e.stopPropagation(); apri(s.id) }} className="ml-2 inline-flex items-center gap-1 text-xs text-pink-300 hover:text-pink-200 rounded px-1.5 py-0.5 border border-pink-900/60 hover:border-pink-700" aria-expanded={exp} title={exp ? 'Nascondi i familiari' : 'Mostra i familiari'}>
                         <span className={`inline-block transition-transform ${exp ? 'rotate-90' : ''}`}>›</span>{fam.length} {fam.length === 1 ? 'familiare' : 'familiari'}</button>}</td>
-                    <td className="px-3 py-2.5"><Origine s={s} /></td>
+                    <td className="px-3 py-2.5 pgs-p2"><Origine s={s} /></td>
                     <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap">{s.tessera ? <span className="text-slate-200">{s.tessera}</span> : <span className="text-slate-600">—</span>}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap">{s.sede ? <span className="text-slate-300">{sedeNome(db, s.sede)}</span> : eSocio(s) ? <Pill tono="warn">Da indicare</Pill> : <span className="text-slate-600">—</span>}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">{s.sede ? <span className="text-slate-300 inline-block max-w-[240px] truncate align-bottom" title={sedeNome(db, s.sede)}>{sedeNome(db, s.sede)}</span> : eSocio(s) ? <Pill tono="warn">Da indicare</Pill> : <span className="text-slate-600">—</span>}</td>
+                    <td className="px-3 py-2.5"><SegniContatti s={s} /></td>
                     <td className="px-3 py-2.5"><StatoSocio s={s} /></td>
-                    <td className="px-5 py-2.5 text-slate-400 tabular-nums whitespace-nowrap">{fmtData(s.iscrittoIl)}</td>
+                    <td className="px-5 py-2.5 text-slate-400 tabular-nums whitespace-nowrap pgs-p3">{fmtData(s.iscrittoIl)}</td>
                   </tr>
                   {exp && fam.map(x => {
                     const altri = sociDi(db, x).filter(l => l.socio !== s.id); const rel = relDi(x, s.id)
@@ -110,21 +127,25 @@ export function SociTab() {
                         <td className="px-3 py-2 whitespace-nowrap"><span className="text-slate-500 mr-1.5">↳</span><span className={x.stato === 'ATTIVO' ? 'text-slate-200' : 'text-slate-500 line-through'}>{nominativo(x)}</span>
                           {rel && <span className="ml-2 text-xs text-pink-300">{RELAZIONI[rel]}</span>}
                           {altri.length > 0 && <span className="ml-2 text-[11px] text-slate-500">anche di {altri.map(l => nominativo(l.s)).join(', ')}</span>}</td>
-                        <td className="px-3 py-2"><Origine s={x} /></td>
+                        <td className="px-3 py-2 pgs-p2"><Origine s={x} /></td>
                         <td className="px-3 py-2 text-slate-600 text-xs">—</td>
                         <td className="px-3 py-2 text-xs text-slate-400 whitespace-nowrap">{x.sede && x.sede !== s.sede ? sedeNome(db, x.sede) : <span className="text-slate-600">come il socio</span>}</td>
+                        <td className="px-3 py-2"><SegniContatti s={x} /></td>
                         <td className="px-3 py-2">{x.stato === 'ATTIVO' ? (rifAttivo(db, x) ? <Pill tono="ok">Attivo</Pill> : <Pill title="Nessun socio collegato è attivo">Sospeso</Pill>) : <StatoSocio s={x} />}</td>
-                        <td className="px-5 py-2 text-slate-500 tabular-nums whitespace-nowrap text-xs">{fmtData(x.iscrittoIl)}</td>
+                        <td className="px-5 py-2 text-slate-500 tabular-nums whitespace-nowrap text-xs pgs-p3">{fmtData(x.iscrittoIl)}</td>
                       </tr>)
                   })}
                 </Fragment>)
             })}
-            {!lista.length && <tr><td colSpan={8} className="px-5 py-10 text-center text-slate-500">Nessuna persona con questi filtri.</td></tr>}
+            {!lista.length && <tr><td colSpan={9} className="px-5 py-10 text-center text-slate-500">Nessuna persona con questi filtri.</td></tr>}
           </tbody>
-        </table></div>
+        </table></Scorrevole>
       </div>
       {modifica && <SocioModal key={modifica} id={modifica} onClose={() => setModifica(null)} onApri={setModifica} />}
       {nuovo && <NuovoSocioModal onClose={() => setNuovo(false)} />}
+      {esporta && (() => { const base = sel.size ? [...sel] : lista.map(s => s.id); const b = new Set(base)
+        return <EsportaElenco ids={base} titolo={sel.size ? `${sel.size} selezionati` : 'Elenco filtrato'} onClose={() => setEsporta(false)}
+          familiari={db.soci.filter(x => x.tipo === 'FAM' && x.stato === 'ATTIVO' && x.legami.some(l => b.has(l.socio))).map(x => x.id)} /> })()}
     </div>
   )
 }
@@ -135,6 +156,7 @@ function AzioniInBlocco({ ids, onFatto }: { ids: string[]; onFatto: () => void }
   const [sede, setSede] = useState('')
   const [tipo, setTipo] = useState('')
   const [conf, setConf] = useState<null | 'cessa' | 'elimina' | 'ripristina' | 'riattiva'>(null)
+  const [contatti, setContatti] = useState(false)
   const pers = ids.flatMap(id => { const p = db.perId.get(id); return p ? [p] : [] })
   const conta = {
     cessa: pers.filter(p => p.stato === 'ATTIVO').length, elimina: pers.filter(p => p.stato !== 'ELIMINATO').length,
@@ -150,7 +172,9 @@ function AzioniInBlocco({ ids, onFatto }: { ids: string[]; onFatto: () => void }
       <div className="flex items-center gap-1.5"><select className={inputW + ' py-1 text-xs w-40'} value={tipo} onChange={e => setTipo(e.target.value)}><option value="">Tipologia…</option><option value="SD">Socio dipendente</option><option value="SE">Socio esterno</option><option value="EST">Esterno</option></select>
         <button className={btnPiccoloSec} disabled={!tipo} title="Con la matricola: socio dipendente o esterno; senza: socio esterno o esterno. Gli altri si saltano." onClick={() => void esegui(() => cralApi.tipologia(ids, tipo as 'SD' | 'SE' | 'EST'), r => `Tipologia cambiata per ${r.fatte} di ${ids.length}${r.fatte < ids.length ? ' (gli altri non possono)' : ''}`).then(fine)}>Applica</button></div>
       <div className="flex items-center gap-1.5">{(Object.keys(ETICH) as Array<keyof typeof ETICH>).map(k => <button key={k} className={btnPiccoloSec} disabled={!conta[k]} onClick={() => setConf(k)}>{ETICH[k]} {conta[k] ? <span className="text-slate-500">{conta[k]}</span> : null}</button>)}</div>
+      <button className={btnPiccoloSec} onClick={() => setContatti(true)} title="Consenso all'uso del numero, WhatsApp, consenso ai dati alimentari">Consensi e WhatsApp…</button>
       <button className="ml-auto text-xs text-slate-400 hover:text-white" onClick={onFatto}>Deseleziona</button>
+      {contatti && <ContattiInBlocco ids={ids} onClose={() => setContatti(false)} onFatto={onFatto} />}
       {conf && <Conferma testo={`${ETICH[conf]} ${conta[conf]} ${conta[conf] === 1 ? 'persona' : 'persone'}?`} etichetta={ETICH[conf]} pericolo={conf === 'elimina' || conf === 'cessa'} onClose={() => setConf(null)}
         dettaglio={conf === 'elimina' ? `Escono da elenchi, eventi e report e non devono la quota dal ${oggi().slice(0, 4)}. Non si cancella nulla: con «Ripristina» tornano allo stato di prima, con la stessa tessera.`
           : conf === 'ripristina' ? 'Tornano allo stato che avevano prima dell\'eliminazione, con la stessa tessera. Gli anni passati da eliminati restano esenti dalla quota.'
@@ -215,7 +239,7 @@ function FamiliariSocio({ socio, onApri }: { socio: Persona; onApri: (id: string
           <Campo label="Familiare già in anagrafica"><input autoFocus className={inputCls} placeholder="Cognome, nome o FAM-nnnn" value={col.q} onChange={e => setCol({ ...col, q: e.target.value })} /></Campo>
           <Campo label={`Relazione con ${socio.nome}`}><select className={inputCls} value={col.relazione} onChange={e => setCol({ ...col, relazione: e.target.value as Relazione })}>{Object.entries(RELAZIONI).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Campo>
         </div>
-        {n.length >= 2 && <div className="border border-slate-800 rounded-lg divide-y divide-slate-800 max-h-48 overflow-y-auto">
+        {n.length >= 2 && <div className="border border-slate-800 rounded-lg divide-y divide-slate-800 max-h-48 overflow-y-auto pgs-discreto">
           {candidati.map(x => <button key={x.id} onClick={() => void collega(x)} className="w-full text-left px-3 py-2 hover:bg-slate-800 text-sm flex items-center gap-3"><span className="font-mono text-xs text-slate-400 w-20">{x.id}</span><span className="text-slate-100">{nominativo(x)}</span><DiChi db={db} s={x} /></button>)}
           {!candidati.length && <p className="px-3 py-2 text-sm text-slate-500">Nessun familiare trovato. Se è nuovo usa «Aggiungi familiare».</p>}
         </div>}
@@ -268,6 +292,8 @@ function SocioModal({ id, onClose, onApri }: { id: string; onClose: () => void; 
   const [riammetti, setRiammetti] = useState(false)
   const [azione, setAzione] = useState<null | 'elimina' | 'ripristina' | 'passa' | 'collega'>(null)
   const [salvo, setSalvo] = useState(false)
+  const [fc, setFc] = useState<FormContatti>(() => (s ? formContatti(s) : FORM_CONTATTI_VUOTO))
+  const [fa, setFa] = useState<FormAlimentari>(() => (s ? formAlimentari(s) : FORM_ALIMENTARI_VUOTO))
   const a = useAnagraficaDi(s?.matricola ?? null)
   if (!s) return null
   const conTessera = f.tipo === 'SD' || f.tipo === 'SE'
@@ -276,6 +302,8 @@ function SocioModal({ id, onClose, onApri }: { id: string; onClose: () => void; 
   const ammesse: TipoPersona[] = s.tipo === 'FAM' ? ['FAM'] : s.matricola ? ['SD', 'EST'] : ['SE', 'EST']
   async function salva() {
     if (!s || doppia) return
+    const pc = patchContatti(fc, fa, s, db.prefissoTel)
+    if ('errore' in pc) { avviso(pc.errore, 'error'); return }
     setSalvo(true)
     const r = await esegui(async () => {
       await cralApi.modificaPersona(id, {
@@ -283,6 +311,7 @@ function SocioModal({ id, onClose, onApri }: { id: string; onClose: () => void; 
         tessera: conTessera ? f.tessera.trim() : '', sede: f.sede || null, email: f.email.trim(), nascita: f.nascita || null, note: f.note,
       })
       if (s.tipo === 'FAM' && JSON.stringify(f.legami) !== JSON.stringify(s.legami)) await cralApi.legami(id, f.legami)
+      if ('contatti' in pc || 'alimentari' in pc) await cralApi.contatti(id, pc)
       return true
     }, `${nominativo(s)}: dati salvati`)
     setSalvo(false)
@@ -325,6 +354,7 @@ function SocioModal({ id, onClose, onApri }: { id: string; onClose: () => void; 
             <input type="date" className={inputCls} value={f.nascita} disabled={!!a?.nascita && a.nascita === s.nascita} onChange={e => setF({ ...f, nascita: e.target.value })} /></Campo>
           <Campo label="Dal"><input className={inputCls} value={fmtData(s.iscrittoIl)} disabled /></Campo>
         </div>
+        <CampiContatti s={s} fc={fc} fa={fa} onC={setFc} onA={setFa} />
         {(s.storicoTessere.length > 0 || s.stato === 'CESSATO') && eSocio(s) && <div className="text-xs text-slate-400 rounded-lg border border-slate-800 px-3 py-2 flex flex-col gap-0.5">
           <span className={etichettaCls}>Storico iscrizione</span>
           {s.storicoTessere.map(h => <span key={h.tessera + h.al}>Tessera <span className="font-mono text-slate-200">{h.tessera}</span> dal {fmtData(h.dal)} al {fmtData(h.al)}</span>)}
@@ -399,7 +429,7 @@ export function CercaAnagrafica({ onScegli, escludiSoci = true }: { onScegli: (a
     <div className="flex flex-col gap-2">
       <div className="relative"><span className="absolute left-3 top-2.5 text-slate-500"><Ico d={D.search} /></span>
         <input autoFocus className={inputCls + ' pl-9'} placeholder="Cognome, nome o matricola" value={q} onChange={e => setQ(e.target.value)} /></div>
-      {ris && <div className="border border-slate-800 rounded-lg divide-y divide-slate-800 max-h-64 overflow-y-auto">
+      {ris && <div className="border border-slate-800 rounded-lg divide-y divide-slate-800 max-h-64 overflow-y-auto pgs-discreto">
         {visibili.map(a => (
           <button key={a.matricola} className="w-full text-left px-3 py-2 hover:bg-slate-800 flex items-center gap-3" onClick={() => onScegli(a)}>
             <span className="font-mono text-xs text-slate-400 w-16">{a.matricola}</span><span className="text-slate-100 text-sm flex-1">{a.cognome} {a.nome}</span>{a.nascita && <span className="text-xs text-slate-500 tabular-nums">{fmtData(a.nascita)}</span>}<span className="text-xs text-slate-500">{a.ruolo}</span>{a.finRap && <Pill>cessato {a.finRap.slice(0, 4)}</Pill>}
@@ -420,7 +450,7 @@ export function CercaSocio({ onScegli, escludi = [] }: { onScegli: (s: Persona) 
     <div className="flex flex-col gap-2">
       <div className="relative"><span className="absolute left-3 top-2.5 text-slate-500"><Ico d={D.search} /></span>
         <input autoFocus className={inputCls + ' pl-9'} placeholder="Socio di riferimento: cognome, ID o tessera" value={q} onChange={e => setQ(e.target.value)} /></div>
-      {n.length >= 2 && <div className="border border-slate-800 rounded-lg divide-y divide-slate-800 max-h-56 overflow-y-auto">
+      {n.length >= 2 && <div className="border border-slate-800 rounded-lg divide-y divide-slate-800 max-h-56 overflow-y-auto pgs-discreto">
         {ris.map(s => <button key={s.id} className="w-full text-left px-3 py-2 hover:bg-slate-800 flex items-center gap-3 text-sm" onClick={() => onScegli(s)}><span className="font-mono text-xs text-slate-400 w-20">{s.id}</span><span className="text-slate-100 flex-1">{nominativo(s)}</span><Origine s={s} /></button>)}
         {!ris.length && <p className="px-3 py-3 text-sm text-slate-500">Nessun socio attivo con questo nome. Il familiare deve essere legato a un socio dipendente o a un socio esterno.</p>}
       </div>}
@@ -437,13 +467,17 @@ export function NuovoSocioModal({ onClose, perIniziativa, tipoIniziale }: { onCl
   const [rifs, setRifs] = useState<Array<{ s: Persona; relazione: Relazione }>>([])
   const [f, setF] = useState({ cognome: '', nome: '', nascita: '', email: '', sede: '', tessera: '', note: '' })
   const [salvo, setSalvo] = useState(false)
+  const [fc, setFc] = useState<FormContatti>(FORM_CONTATTI_VUOTO)
+  const [fa, setFa] = useState<FormAlimentari>(FORM_ALIMENTARI_VUOTO)
   const daAnagrafica = tipo === 'SD' || (tipo === 'EST' && estDaPgs)
   const conTessera = tipo === 'SD' || tipo === 'SE'
   const doppia = conTessera && tesseraDoppia(db, null, f.tessera.trim())
   const ok = (daAnagrafica ? !!scelto : !!f.cognome.trim() && !!f.nome.trim()) && (tipo !== 'FAM' || rifs.length > 0) && !doppia && !salvo
   async function crea() {
+    const pc = patchContatti(fc, fa, null, db.prefissoTel)
+    if ('errore' in pc) { avviso(pc.errore, 'error'); return }
     setSalvo(true)
-    const base: CralNuovaPersonaApi = { tipo, sede: f.sede || null, email: f.email.trim(), note: f.note, ...(perIniziativa ? { perIniziativa } : {}) }
+    const base: CralNuovaPersonaApi = { tipo, sede: f.sede || null, email: f.email.trim(), note: f.note, ...(perIniziativa ? { perIniziativa } : {}), ...pc }
     const body: CralNuovaPersonaApi = tipo === 'FAM'
       ? { ...base, cognome: f.cognome.trim(), nome: f.nome.trim(), nascita: f.nascita || null, sede: f.sede || rifs[0]?.s.sede || null, legami: rifs.map(r => ({ socio: r.s.id, relazione: r.relazione })) }
       : daAnagrafica && scelto ? { ...base, matricola: scelto.matricola, tessera: conTessera ? f.tessera.trim() : '' }
@@ -494,6 +528,7 @@ export function NuovoSocioModal({ onClose, perIniziativa, tipoIniziale }: { onCl
           <Campo label="Email"><input className={inputCls} value={f.email} onChange={e => setF({ ...f, email: e.target.value })} /></Campo>
           <Campo label="Note"><input className={inputCls} value={f.note} onChange={e => setF({ ...f, note: e.target.value })} /></Campo>
         </div>
+        <CampiContatti s={null} fc={fc} fa={fa} onC={setFc} onA={setFa} />
         {(tipo === 'SE' || (tipo === 'EST' && !estDaPgs)) && <p className="text-xs text-amber-400/90">{tipo === 'SE' ? 'Il socio esterno' : "L'esterno"} resta fuori da eventi e report finché non viene validato nella scheda «Da validare»{perIniziativa ? ", anche se è già aggiunto all'evento" : ''}.</p>}
         {tipo === 'FAM' && <p className="text-xs text-slate-500">Il familiare non si valida a parte: vale finché almeno uno dei suoi soci è attivo.</p>}
       </div>

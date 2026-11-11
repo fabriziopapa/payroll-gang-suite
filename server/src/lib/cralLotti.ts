@@ -14,6 +14,7 @@
 // tutte». Nessuna dipendenza da db o rete (cralLotti.test.ts).
 // ============================================================
 
+import { ALIMENTARI_VUOTI, CONTATTI_VUOTI, ID_ESIGENZE, ID_ORIGINI, MESSAGGI_CONTATTI, alimentariDopo, contattiDopo } from './cralContatti.js'
 import { z } from 'zod'
 import {
   MODALITA, rataMese, erroreDati, erroreIniziativa, iniziativaSchema, parametriTesseraSchema, riga, sceltaSchema, scontoPersonale,
@@ -52,7 +53,18 @@ export const tabelleArch = z.object({
   tessera: parametriTesseraSchema, extProssimo: z.number().int().min(1), famProssimo: z.number().int().min(1),
   quoteAnno: z.array(z.object({ anno: ANNO, importo: z.number().int().min(1).max(10_000_000) })).max(200),
 })
+// 0025: contatti e dati alimentari (un archivio della 26.10.29 non li ha)
+const ORIGINE_C = z.enum(ID_ORIGINI)
+export const contattiArch = z.object({
+  telefono: z.string().regex(/^(\+[1-9]\d{6,14})?$/), waId: z.string().regex(/^([1-9]\d{6,14})?$/),
+  consenso: z.enum(['NO', 'SI', 'REVOCATO']), consensoIl: DATA.nullable(), origine: ORIGINE_C.nullable(), revocatoIl: DATA.nullable(),
+  whatsapp: z.enum(['SI', 'NO', 'NV']), waIl: DATA.nullable(), waFonte: z.enum(['MANO', 'FILE']).nullable(),
+}).refine(c => c.telefono ? (c.consenso !== 'SI' || !!c.consensoIl) && (c.consenso !== 'REVOCATO' || !!c.revocatoIl) : c.consenso === 'NO' && c.whatsapp === 'NV' && !c.waId, 'contatti incoerenti')
+export const alimentariArch = z.object({
+  consenso: z.boolean(), consensoIl: DATA.nullable(), esigenze: z.array(z.enum(ID_ESIGENZE)).max(10), allergie: riga(300),
+}).refine(a => a.consenso || (!a.esigenze.length && !a.allergie && !a.consensoIl), 'dati alimentari senza consenso')
 export const personaArch = z.object({
+  contatti: contattiArch.default({ ...CONTATTI_VUOTI }), alimentari: alimentariArch.default({ ...ALIMENTARI_VUOTI }),
   id: ID_PERSONA, tipo: z.enum(['SD', 'SE', 'EST', 'FAM']), matricola: MATR.nullable(), exMatricola: MATR.nullable().default(null),
   cognome: riga(100, 1), nome: riga(100), nascita: DATA.nullable(), email: z.string().max(254), sede: ID_SEDE.nullable(),
   tessera: TESSERA, riammissioni: z.number().int().min(0).max(999), stato: STATO,
@@ -159,7 +171,7 @@ const ETICHETTE_PERSONA: Record<string, string> = {
   tipo: 'Tipologia', cognome: 'Cognome', nome: 'Nome', nascita: 'Data di nascita', email: 'Email', sede: 'Sede di consegna',
   tessera: 'Tessera', note: 'Note', atipico: 'Atipico', iscrittoIl: 'Iscritto il', exMatricola: 'Ex matricola',
   anniEsenti: 'Anni esenti dalla quota', legami: 'Familiare di', storicoTessere: 'Storico tessere', stato: 'Stato',
-  azioneStato: 'Stato',
+  azioneStato: 'Stato', contatti: 'Telefono e consenso', alimentari: 'Esigenze alimentari',
 }
 
 export interface EsitoConfronto {
@@ -383,6 +395,12 @@ function confrontaPersona(s: PersonaArch, d: PersonaArch, c: CtxPersona & { conF
     const tipoFinale = s.tipo
     add('tessera', d.tessera, s.tessera, altro && altro.id !== d.id ? `tessera già di ${nominativoDi(altro)} (${altro.id})` : tipoFinale !== 'SD' && tipoFinale !== 'SE' ? 'solo i soci hanno la tessera' : undefined)
   }
+  if (s.contatti.telefono && !uguale(s.contatti, d.contatti)) {
+    // una revoca di qui non si scavalca con un consenso piu' vecchio dell'archivio
+    const vecchio = s.contatti.consenso === 'SI' && d.contatti.consenso === 'REVOCATO' && s.contatti.telefono === d.contatti.telefono && (s.contatti.consensoIl ?? '') < (d.contatti.revocatoIl ?? '')
+    add('contatti', d.contatti, s.contatti, vecchio ? 'qui il consenso è stato revocato dopo' : undefined)
+  }
+  if (s.alimentari.consenso && !uguale(s.alimentari, d.alimentari)) add('alimentari', d.alimentari, s.alimentari)
   if (s.note && s.note !== d.note) add('note', d.note, s.note)
   if (s.atipico !== d.atipico) add('atipico', d.atipico, s.atipico)
   if (s.iscrittoIl !== d.iscrittoIl) add('iscrittoIl', d.iscrittoIl, s.iscrittoIl)
@@ -413,6 +431,8 @@ function nuovaPersona(
     { campo: 'stato', etichetta: 'Stato', prima: null, dopo: statoDi(s) },
   ]
   if (s.nascita) campi.push({ campo: 'nascita', etichetta: 'Data di nascita', prima: null, dopo: s.nascita })
+  if (s.contatti.telefono) campi.push({ campo: 'contatti', etichetta: ETICHETTE_PERSONA['contatti']!, prima: null, dopo: s.contatti })
+  if (s.alimentari.consenso) campi.push({ campo: 'alimentari', etichetta: ETICHETTE_PERSONA['alimentari']!, prima: null, dopo: s.alimentari })
   if (s.sede) campi.push({ campo: 'sede', etichetta: 'Sede di consegna', prima: null, dopo: s.sede, ...(c.sedeNota(s.sede) ? {} : { blocco: `la sede ${s.sede} non c'è qui: entra senza sede` }) })
   if (s.tessera) {
     const altro = c.tessereDst.get(normTessera(s.tessera))
@@ -536,6 +556,15 @@ export const rigaT6Schema = z.object({
     tipo: z.enum(['SD', 'SE', 'EST']).optional(),
     stato: z.enum(['ATTIVO', 'CESSATO', 'ELIMINATO']).optional(),
     dataStato: DATA.optional(),
+    // 0025: quello che il file dice di telefono, consenso, WhatsApp e dati alimentari
+    contatti: z.object({
+      telefono: z.string().regex(/^(\+[1-9]\d{6,14})?$/).optional(), waId: z.string().regex(/^([1-9]\d{6,14})?$/).optional(),
+      consenso: z.enum(['NO', 'SI', 'REVOCATO']).optional(), consensoIl: DATA.optional(), origine: ORIGINE_C.optional(), revocatoIl: DATA.optional(),
+      whatsapp: z.enum(['SI', 'NO', 'NV']).optional(), waIl: DATA.optional(),
+    }).strict().optional(),
+    alimentari: z.object({
+      consenso: z.boolean().optional(), consensoIl: DATA.optional(), esigenze: z.array(z.enum(ID_ESIGENZE)).max(10).optional(), allergie: riga(300).optional(),
+    }).strict().optional(),
   }).strict(),
 })
 export type RigaT6 = z.infer<typeof rigaT6Schema>
@@ -581,6 +610,22 @@ export function confrontaT6(righe: RigaT6[], soci: PersonaArch[], sedi: Set<stri
           : v.tessera && (tessereNelFile.get(normTessera(v.tessera)) ?? 0) > 1 ? 'tessera ripetuta nel file' : undefined)
     }
     if (v.note !== undefined) add('note', d.note || null, v.note)
+    const avvisi: string[] = []
+    if (v.contatti) {
+      const dopo = contattiDopo(d.contatti, v.contatti, oggi, 'FILE')
+      if ('errore' in dopo) campi.push({ campo: 'contatti', etichetta: ETICHETTE_PERSONA['contatti']!, prima: d.contatti, dopo: v.contatti, blocco: MESSAGGI_CONTATTI[dopo.errore] })
+      else {
+        add('contatti', d.contatti, dopo)
+        const altri = dopo.telefono && dopo.telefono !== d.contatti.telefono ? soci.filter(x => x.id !== d.id && x.contatti.telefono === dopo.telefono) : []
+        if (altri.length) avvisi.push(`Stesso numero di ${altri.slice(0, 3).map(x => `${nominativoDi(x)} (${x.id})`).join(', ')}${altri.length > 3 ? '…' : ''}.`)
+      }
+    }
+    if (v.alimentari) {
+      const dopo = alimentariDopo(d.alimentari, v.alimentari, oggi)
+      const persi = !dopo.consenso && !d.alimentari.consenso && ((v.alimentari.esigenze?.length ?? 0) > 0 || !!v.alimentari.allergie)
+      if (persi) campi.push({ campo: 'alimentari', etichetta: ETICHETTE_PERSONA['alimentari']!, prima: d.alimentari, dopo: { ...ALIMENTARI_VUOTI, esigenze: v.alimentari.esigenze ?? [], allergie: v.alimentari.allergie ?? '' }, blocco: 'manca il consenso ai dati alimentari: non si conservano' })
+      else add('alimentari', d.alimentari, dopo)
+    }
     if (v.stato) {
       const az = azioneStato(d, v.stato)
       if (az) {
@@ -588,7 +633,7 @@ export function confrontaT6(righe: RigaT6[], soci: PersonaArch[], sedi: Set<stri
         campi.push({ campo: 'azioneStato', etichetta: 'Stato', prima: statoDi(d), dopo, ...('blocco' in az ? { blocco: az.blocco } : {}) })
       }
     }
-    if (campi.length) out.push({ sezione: 'soci', entita: 'persona', chiave: d.id, tipo: 'MODIFICA', delicata: campi.some(c => c.campo === 'azioneStato' || c.campo === 'tipo'), etichetta: `${nominativoDi(d)} · riga ${r.riga}`, campi, record: { id: d.id, riga: r.riga } })
+    if (campi.length) out.push({ sezione: 'soci', entita: 'persona', chiave: d.id, tipo: 'MODIFICA', delicata: campi.some(c => c.campo === 'azioneStato' || c.campo === 'tipo'), etichetta: `${nominativoDi(d)} · riga ${r.riga}`, campi, record: { id: d.id, riga: r.riga }, ...(avvisi.length ? { avviso: avvisi.join(' ') } : {}) })
   }
   return out.map(conBlocchi)
 }
@@ -775,6 +820,7 @@ export function personaDaRiga(s: CralSocioRow): PersonaArch {
     cessatoIl: s.cessatoIl, eliminatoIl: s.eliminatoIl, statoPrima: s.statoPrima, anniEsenti: s.anniEsenti, provenienza: s.provenienza,
     atipico: s.atipico, note: s.note, creatoDa: s.creatoDa, creatoIl: s.creatoIl, validatoDa: s.validatoDa, validatoIl: s.validatoIl,
     modificatoDa: s.modificatoDa, modificatoIl: s.modificatoIl, eliminatoDa: s.eliminatoDa, legami: s.legami, storicoTessere: s.storicoTessere,
+    contatti: s.contatti, alimentari: s.alimentari,
   }
 }
 

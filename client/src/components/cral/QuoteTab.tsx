@@ -9,7 +9,7 @@ import { cralApi } from '../../api/endpoints'
 import type { Persona, QuotaSocio } from './tipi'
 import { MESI, MODI_QUOTA, fmtData, fmtEuro, nominativo, norm, oggi, quotaAnno, quotaSocio, rataMese, sociQuota, versatoQuota } from './logica'
 import { esportaQuoteExcel } from './ImportDati'
-import { Campo, D, Ico, Origine, btnSecondario, cardCls, etichettaCls, inputCls, inputW, thCls, useCral } from './ui'
+import { Campo, D, Ico, Origine, btnSecondario, cardCls, etichettaCls, inputCls, inputW, thCls, useCral, Scorrevole } from './ui'
 
 export function QuoteTab() {
   const { db, esegui, quota, vaiA } = useCral()
@@ -51,7 +51,7 @@ export function QuoteTab() {
           <select className={inputCls + ' sm:w-56'} value={modo} onChange={e => setModo(e.target.value)}><option value="">Tutte le modalità</option>{(Object.keys(MODI_QUOTA) as Array<QuotaSocio['modo']>).map(k => <option key={k} value={k}>{MODI_QUOTA[k]}</option>)}</select>
           <select className={inputCls + ' sm:w-48'} value={solo} onChange={e => setSolo(e.target.value)}><option value="">Tutti</option><option value="saldo">Con saldo da versare</option><option value="ok">In regola</option></select>
         </div>
-        <div className="overflow-x-auto max-h-[620px] overflow-y-auto"><table className="w-full text-sm">
+        <Scorrevole className="max-h-[620px]"><table className="w-full text-sm">
           <thead className="sticky top-0 bg-slate-900 z-10 text-left text-[11px] uppercase tracking-wider text-slate-500"><tr>
             <th className="px-5 py-2.5 font-semibold">Tessera</th><th className={thCls}>Socio</th><th className={thCls}>Modalità</th><th className={thCls}>Pagamenti</th><th className={thCls + ' text-right'}>Versato</th><th className={thCls + ' text-right'}>Saldo</th><th className={thCls}>Note</th></tr></thead>
           <tbody className="divide-y divide-slate-800/70">
@@ -78,7 +78,7 @@ export function QuoteTab() {
                 </tr>)
             })}
             {!lista.length && <tr><td colSpan={7} className="px-5 py-10 text-center text-slate-500">Nessun socio con questi filtri.</td></tr>}
-          </tbody></table></div>
+          </tbody></table></Scorrevole>
         <p className="px-5 py-3 border-t border-slate-800 text-xs text-slate-500">Tenuti alla quota: soci dipendenti e soci esterni iscritti entro il 31/12 e non cessati prima del 1/1. Gli eliminati non la devono dall'anno dell'eliminazione (gli anni prima restano dovuti, e quelli passati da eliminati restano esenti anche dopo il ripristino). Esterni e familiari non sono soci e non la pagano. «Trattenuta in busta paga» solo per chi ha la matricola. Il versato è la somma degli importi registrati: un mese è pagato quando l'importo copre la rata (in ambra se parziale), un solo versamento della quota annua paga tutto l'anno. A mano: un clic sul mese registra la rata o la toglie. In massa: Importazione › Quote versate (T7). Il confronto con le trattenute dei cedolini è tra i lavori da fare (voci da individuare).</p>
       </div>
     </div>

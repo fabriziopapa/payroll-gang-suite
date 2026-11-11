@@ -10,6 +10,7 @@ import { showToast } from '../ToastManager'
 import type { AnagraficaPgs, Db, Lotto, PatchScelta, Persona, QuotaSocio, Richiesta } from './tipi'
 import { RELAZIONI, TIPOLOGIE, fmtData, nominativo, sociDi } from './logica'
 
+export { Scorrevole, useScorrimento } from '../Scorrevole'
 export { btnPrimario, btnSecondario, btnPiccolo, inputCls, cardCls, etichettaCls } from '../versamenti/ui'
 import { btnPiccolo, btnPrimario, btnSecondario, cardCls, etichettaCls, inputCls } from '../versamenti/ui'
 
@@ -71,7 +72,7 @@ export function Modale({ titolo, sotto, onClose, children, piedi, largo }: {
           <div className="flex-1 min-w-0"><h3 className="text-white font-semibold">{titolo}</h3>{sotto && <p className="text-xs text-slate-500 mt-0.5">{sotto}</p>}</div>
           <button onClick={onClose} className="p-1 rounded-md text-slate-500 hover:text-white hover:bg-slate-800" aria-label="Chiudi"><Ico d={D.x} /></button>
         </div>
-        <div className="px-5 py-4 overflow-y-auto flex-1 min-h-0">{children}</div>
+        <div className="px-5 py-4 overflow-y-auto flex-1 min-h-0 pgs-discreto">{children}</div>
         {piedi && <div className="px-5 py-3 border-t border-slate-800 flex flex-wrap justify-end gap-2">{piedi}</div>}
       </div>
     </div>
@@ -194,6 +195,11 @@ const ERRORI: Record<string, string> = {
   LOTTO_CHIUSO: 'Il lotto è già chiuso.',
   ARCHIVIO_NON_VALIDO: 'Il file non è un archivio CRAL valido (esportato da PGS 26.10.29 o successivo).',
   NESSUNA_SEZIONE: 'Scegli almeno una sezione.',
+  TELEFONO_NON_VALIDO: 'Numero di telefono non valido.',
+  TELEFONO_MANCANTE: 'Consenso e WhatsApp richiedono un numero di telefono.',
+  CONSENSO_REVOCATO: 'Il consenso è stato revocato: serve una nuova data di consenso, non precedente alla revoca.',
+  DATA_NON_VALIDA: 'Una data è nel futuro.',
+  COLONNA_SCONOSCIUTA: 'Una colonna del modello non esiste più: ricrea il modello.',
 }
 export function messaggioErrore(err: unknown): string {
   if (!(err instanceof ApiError)) return 'Errore imprevisto.'

@@ -5,6 +5,8 @@
 // fiscale: le persone sono nominativo, tessera, ID e (a richiesta) età.
 // ============================================================
 
+import { nomiEsigenze } from './contatti'
+import { partecipantiEffettivi, riepilogoAlimentare } from './logica'
 import type { Db, Iniziativa, Persona, QuotaSocio, Richiesta, StatoPeriodo } from './tipi'
 import {
   CAT_SCONTO_1, GRUPPI, MESI, MODI_QUOTA, TIPOLOGIE, aCaricoDi, catSconto, conScontiIni, contenutoTot, contiMagazzino, descrScontoPers,
@@ -14,7 +16,7 @@ import {
   statoPer, tipNome, totaleSocio, versatoQuota,
 } from './logica'
 
-export type TipoReport = 'riepilogo' | 'scelte' | 'fornitore' | 'soci' | 'quote' | 'settimane' | 'movimenti'
+export type TipoReport = 'riepilogo' | 'scelte' | 'fornitore' | 'soci' | 'quote' | 'settimane' | 'movimenti' | 'alimentari'
 export interface CfgReport {
   tipo: TipoReport; ini: string; sedi: string[]; origine: string; pred: boolean
   tessera: boolean; consegnato: boolean; pagato: boolean; note: boolean; firma: boolean
@@ -79,6 +81,15 @@ export function costruisciReport(db: Db, cfg: CfgReport, oggiIso: string): Repor
     return { titolo: `Quote associative ${anno} · quota ${fmtImp(imp)} €`, intest, righe, numCols: new Set([k0, k0 + 1, k0 + 2]), bold: new Set(righe.length ? [righe.length - 1] : []) }
   }
   if (!ini) return { titolo: '', intest: [], righe: [], vuoto: 'Scegli un evento.' }
+  if (cfg.tipo === 'alimentari') {
+    const r = riepilogoAlimentare(partecipantiEffettivi(db, ini).filter(s => sediOk(s) && tipOk(s)))
+    const totali = [...r.conteggi.map(([n, k]) => `${n} ${k}`), ...(r.allergie ? [`con allergie ${r.allergie}`] : [])].join(' · ')
+    return {
+      titolo: `${ini.titolo} · esigenze alimentari${totali ? ` (${totali})` : ''}`, intest: ['Nominativo', 'Sede', 'Esigenze', 'Allergie'],
+      righe: perNome(r.conDati).map(s => [nominativo(s), sedeNome(db, s.sede), nomiEsigenze(s.alimentari.esigenze), s.alimentari.allergie]),
+      vuoto: 'Nessun partecipante ha indicato esigenze alimentari o allergie (si registrano solo con il consenso).',
+    }
+  }
   const mod = ini.modalita
 
   // ── Turni (campi estivi) ──
@@ -233,6 +244,11 @@ export function costruisciReport(db: Db, cfg: CfgReport, oggiIso: string): Repor
 
 /** Tipi di report ammessi per un evento (o senza evento). */
 export function tipiAmmessi(ini: Iniziativa | undefined): Array<[TipoReport, string, string]> {
+  const base = tipiBase(ini)
+  // esigenze alimentari: per ogni evento con persone (non per il magazzino dei biglietti)
+  return ini && ini.modalita !== 'MAGAZZINO' ? [...base, ['alimentari', 'Esigenze alimentari', 'Chi ha esigenze o allergie (solo chi ha dato il consenso), con i totali: per chi prepara']] : base
+}
+function tipiBase(ini: Iniziativa | undefined): Array<[TipoReport, string, string]> {
   const SOCI: [TipoReport, string, string] = ['soci', 'Elenco soci', 'Nominativi per sede di consegna, senza evento']
   const QUOTE: [TipoReport, string, string] = ['quote', 'Quote associative', 'Per anno solare: modalità, mesi pagati, dovuto, versato, saldo']
   const m = ini?.modalita

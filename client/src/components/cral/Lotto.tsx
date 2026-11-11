@@ -9,13 +9,14 @@
 // una. Le bloccate non si possono accettare.
 // ============================================================
 
+import { mostraTelefono, nomiEsigenze, riassuntoAlimentari, riassuntoContatti, type Alimentari, type Contatti } from './contatti'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { cralApi } from '../../api/endpoints'
 import type { Db, Lotto, SezioneLotto, Variazione } from './tipi'
 import { MESI, MODI_QUOTA, STATI, TIPOLOGIE, fmtData, fmtEuro, nomeDi, sedeNome } from './logica'
 import {
   Conferma, D, Ico, Pill, avviso, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario, cardCls, chipCls, etichettaCls,
-  messaggioErrore, useCral, type Tono,
+  messaggioErrore, useCral, type Tono, Scorrevole
 } from './ui'
 
 export const NOMI_SEZIONI: Record<SezioneLotto, string> = { sedi: 'Sedi', tabelle: 'Parametri e tabelle', soci: 'Soci e familiari', quote: 'Quote associative', eventi: 'Eventi' }
@@ -39,6 +40,16 @@ export function fmtValore(db: Db, campo: string, v: unknown): string {
     return o.stato === 'CESSATO' ? `${st} il ${fmtData(o.cessatoIl)}` : o.stato === 'ELIMINATO' ? `${st} il ${fmtData(o.eliminatoIl)}` : st
   }
   if (campo === 'sede') return sedeNome(db, String(v))
+  if (campo === 'contatti') {
+    const c = v as Partial<Contatti>
+    // un file bloccato porta solo quello che chiedeva (es. il solo consenso), non i contatti interi
+    if (c.whatsapp === undefined || c.consenso === undefined) return [c.telefono ? mostraTelefono(c.telefono) : '', c.consenso ? `consenso ${c.consenso === 'SI' ? 'sì' : c.consenso === 'NO' ? 'no' : 'revocato'}` : '', c.whatsapp ? `WhatsApp ${c.whatsapp === 'SI' ? 'sì' : c.whatsapp === 'NO' ? 'no' : 'non verificato'}` : ''].filter(Boolean).join(' · ') || '—'
+    return riassuntoContatti(c as Contatti)
+  }
+  if (campo === 'alimentari') {
+    const a = v as Alimentari
+    return a.consenso ? riassuntoAlimentari(a) : [nomiEsigenze(a.esigenze ?? []), a.allergie ? `allergie: ${a.allergie}` : ''].filter(Boolean).join(' · ') || 'nessun dato (senza consenso)'
+  }
   if (campo === 'versamenti') {
     const o = v as { mesi: boolean[]; importi: number[] }
     const r = o.importi.flatMap((x, k) => (x ? [`${MESI[k]} ${fmtEuro(x)}${o.mesi[k] ? '' : ' (parz.)'}`] : o.mesi[k] ? [`${MESI[k]} ✓`] : []))
@@ -210,7 +221,7 @@ function RigaVariazione({ db, v, onDecidi }: { db: Db; v: Variazione; onDecidi: 
       </div>
       {v.bloccata && <p className="text-xs text-red-300">{v.bloccata}</p>}
       {v.avviso && <p className="text-xs text-amber-300">{v.avviso}</p>}
-      {v.campi.length > 0 && <div className="overflow-x-auto"><table className="text-xs">
+      {v.campi.length > 0 && <Scorrevole><table className="text-xs">
         <thead><tr className="text-left text-[10px] uppercase tracking-wider text-slate-500">
           {modifica && !fatto && <th className="pr-2 py-1 font-semibold w-6" />}<th className="pr-4 py-1 font-semibold">Campo</th>{!(v.tipo === 'NUOVO') && <th className="pr-4 py-1 font-semibold">Qui</th>}<th className="pr-4 py-1 font-semibold">{v.tipo === 'NUOVO' ? 'Valore' : 'In arrivo'}</th><th className="py-1" />
         </tr></thead>
@@ -222,7 +233,7 @@ function RigaVariazione({ db, v, onDecidi }: { db: Db; v: Variazione; onDecidi: 
             <td className={`pr-4 py-0.5 max-w-[320px] ${c.blocco ? 'text-slate-500 line-through' : 'text-slate-100'}`}>{fmtValore(db, c.campo, c.dopo)}</td>
             <td className="py-0.5 text-red-300/90">{c.blocco ?? ''}</td>
           </tr>))}</tbody>
-      </table></div>}
+      </table></Scorrevole>}
       {v.nota && <p className={`text-xs ${v.esito === 'ERRORE' ? 'text-red-300' : 'text-slate-400'}`}>{v.nota}</p>}
     </div>
   )

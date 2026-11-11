@@ -49,17 +49,18 @@ import { z } from 'zod'
 import { requireAdmin } from '../middleware/authenticate.js'
 import { PgCralRepository } from '../db/repositories/PgCralRepository.js'
 import { PgAuditRepository } from '../db/repositories/PgAuditRepository.js'
-import type { CralErrore, CralOperazioneImport, CralQuotaRow } from '../db/IRepository.js'
+import type { CralErrore, CralOperazioneImport, CralPatchContatti, CralQuotaRow } from '../db/IRepository.js'
 import {
   abbina, erroreDati, erroreIniziativa, iniziativaSchema, parametriTesseraSchema, riga, sceltaSchema, scontoPersonale,
   unisciDati, usiTolti, type AnagraficaCral, type DatiScelta, type ConfigEvento,
 } from '../lib/cral.js'
 import { leggiFogli, MAX_BYTE_FILE } from '../services/cral/fogli.js'
-import { foglioQuote, foglioSoci } from '../services/cral/esporta.js'
+import { COLONNE_ELENCO, elencoSoci, foglioQuote, foglioSoci, type ColonnaElenco } from '../services/cral/esporta.js'
 import {
   SEZIONI, archivioDaStato, archivioSchema, confrontaArchivio, confrontaT6, confrontaT7, conteggi, personaDaRiga, rigaT6Schema, rigaT7Schema, type Sezione,
 } from '../lib/cralLotti.js'
 import { readFileSync } from 'node:fs'
+import { ID_ESIGENZE, ID_ORIGINI, contattabile, perWhatsapp, type PatchAlimentari, type PatchContatti } from '../lib/cralContatti.js'
 
 const VERSIONE = (() => {
   try { return String(JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version ?? '') } catch { return '' }
@@ -76,6 +77,21 @@ const DATA       = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const MATRICOLA  = z.string().regex(/^\d{1,10}$/)
 const TESSERA    = z.string().trim().max(30).regex(/^[A-Za-z0-9 ._/-]*$/)
 const EMAIL      = z.string().trim().max(254).refine(s => !s || /^[^\s@<>"',;]+@[^\s@<>"',;]+\.[A-Za-z]{2,}$/.test(s), 'email')
+const TELEFONO   = z.string().regex(/^(\+[1-9]\d{6,14})?$/)
+const CONTATTI   = z.object({
+  telefono: TELEFONO.optional(), waId: z.string().regex(/^([1-9]\d{6,14})?$/).optional(),
+  consenso: z.enum(['NO', 'SI', 'REVOCATO']).optional(), consensoIl: DATA.nullable().optional(), origine: z.enum(ID_ORIGINI).nullable().optional(),
+  revocatoIl: DATA.nullable().optional(), whatsapp: z.enum(['SI', 'NO', 'NV']).optional(), waIl: DATA.nullable().optional(),
+}).strict()
+const ALIMENTARI = z.object({
+  consenso: z.boolean().optional(), consensoIl: DATA.nullable().optional(), esigenze: z.array(z.enum(ID_ESIGENZE)).max(10).optional(),
+  allergie: z.string().trim().max(300).regex(/^[^\u0000-\u001f]*$/).optional(),
+}).strict()
+const MODELLO_EXPORT = z.object({
+  id: z.string().regex(/^[a-z0-9-]{1,40}$/), nome: z.string().trim().min(1).max(60).regex(/^[^\u0000-\u001f<>]*$/),
+  colonne: z.array(z.string().regex(/^[A-Za-z]{1,30}$/)).min(1).max(60),
+  solo: z.enum(['TUTTI', 'CONTATTABILI', 'WHATSAPP', 'ALIMENTARI']), formato: z.enum(['xlsx', 'csv']), separatore: z.enum([';', ',']),
+}).strict()
 const ANNO       = z.coerce.number().int().min(2000).max(2100)
 const MAX_IDS    = 5000
 
@@ -83,6 +99,7 @@ const STATO_HTTP: Record<CralErrore, number> = {
   TESSERA_DOPPIA: 409, MATRICOLA_GIA_SOCIO: 409, NOME_GIA_USATO: 409, SOCIO_NON_TROVATO: 404,
   SEDE_SCONOSCIUTA: 400, LEGAME_NON_VALIDO: 400, STATO_NON_VALIDO: 409, SUFFISSI_ESAURITI: 409, TIPO_SCONOSCIUTO: 400,
   LOTTO_NON_TROVATO: 404, LOTTO_CHIUSO: 409,
+  TELEFONO_NON_VALIDO: 400, TELEFONO_MANCANTE: 400, CONSENSO_REVOCATO: 409, DATA_NON_VALIDA: 400,
 }
 const eErrore = (x: unknown): x is CralErrore => typeof x === 'string' && x in STATO_HTTP
 
@@ -137,13 +154,13 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
 
   const PERSONA_IMPORT = {
     cognome: riga(100, 1), nome: riga(100), nascita: DATA.nullable(), email: EMAIL, sede: ID_SEDE.nullable(),
-    tessera: TESSERA, atipico: z.boolean(), nota: riga(300),
+    tessera: TESSERA, atipico: z.boolean(), nota: riga(300), telefono: TELEFONO.optional(),
   }
   app.post('/import/conferma', admin, async (request, reply) => {
     const b = z.object({
       file: riga(200, 1),
       operazioni: z.array(z.discriminatedUnion('op', [
-        z.object({ op: z.literal('aggiorna'), socio: ID_PERSONA, sede: ID_SEDE.nullable().optional(), tessera: TESSERA.optional(), atipico: z.boolean().optional(), nota: riga(300).optional() }),
+        z.object({ op: z.literal('aggiorna'), socio: ID_PERSONA, sede: ID_SEDE.nullable().optional(), tessera: TESSERA.optional(), atipico: z.boolean().optional(), nota: riga(300).optional(), telefono: TELEFONO.optional() }),
         z.object({ op: z.literal('nuovoPgs'), matricola: MATRICOLA, tipo: z.enum(['SD', 'EST']), ...PERSONA_IMPORT }),
         z.object({ op: z.literal('nuovoEsterno'), tipo: z.enum(['SE', 'EST']), ...PERSONA_IMPORT }),
         z.object({ op: z.literal('cessa'), socio: ID_PERSONA, nota: riga(300).optional() }),
@@ -225,7 +242,7 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
       tipo: z.enum(['SD', 'SE', 'EST', 'FAM']), matricola: MATRICOLA.optional(),
       cognome: riga(100).default(''), nome: riga(100).default(''), nascita: DATA.nullable().default(null),
       email: EMAIL.default(''), sede: ID_SEDE.nullable().default(null), tessera: TESSERA.default(''), note: riga(1000).default(''),
-      legami: LEGAMI.optional(), perIniziativa: UUID.optional(),
+      legami: LEGAMI.optional(), perIniziativa: UUID.optional(), contatti: CONTATTI.optional(), alimentari: ALIMENTARI.optional(),
     }).parse(request.body)
     if (b.tipo === 'SD' && !b.matricola) return reply.code(400).send({ error: 'MATRICOLA_MANCANTE' })
     let { cognome, nome, nascita } = b
@@ -242,6 +259,7 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
       tipo: b.tipo, ...(b.matricola ? { matricola: b.matricola } : {}), cognome: b.matricola ? cognome : cognome.toUpperCase(), nome, nascita,
       email: b.email, sede: b.sede, tessera: b.tessera, note: b.note, ...(b.legami ? { legami: b.legami } : {}),
       stato, ...(b.perIniziativa ? { perIniziativa: b.perIniziativa } : {}),
+      ...(b.contatti ? { contatti: b.contatti as PatchContatti } : {}), ...(b.alimentari ? { alimentari: b.alimentari as PatchAlimentari } : {}),
     }, uid(request))
     if (eErrore(r)) return errore(reply, r)
     await audit(request, 'CRAL_PERSONA_CREATA', r.id, { tipo: r.tipo, stato: r.stato, ...(b.perIniziativa ? { evento: b.perIniziativa } : {}) })
@@ -259,6 +277,45 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     if (eErrore(r)) return errore(reply, r)
     await audit(request, 'CRAL_PERSONA_MODIFICATA', id, { campi: Object.keys(b) })
     return reply.send({ socio: r })
+  })
+
+  // Telefono, consenso, WhatsApp e dati alimentari. Nell'audit mai il numero ne' le esigenze: solo che cosa e' cambiato.
+  const cosaCambia = (b: { contatti?: Record<string, unknown> | undefined; alimentari?: Record<string, unknown> | undefined }) => ({
+    contatti: Object.keys(b.contatti ?? {}), alimentari: Object.keys(b.alimentari ?? {}),
+    ...(b.contatti?.['consenso'] ? { consenso: b.contatti['consenso'] } : {}), ...(b.alimentari?.['consenso'] !== undefined ? { consensoAlimentari: b.alimentari['consenso'] } : {}),
+  })
+  app.put('/soci/:id/contatti', admin, async (request, reply) => {
+    const { id } = z.object({ id: ID_PERSONA }).parse(request.params)
+    const b = z.object({ contatti: CONTATTI.optional(), alimentari: ALIMENTARI.optional() }).strict().parse(request.body)
+    const r = await repo.salvaContatti([id], b as CralPatchContatti, uid(request))
+    if (eErrore(r)) return errore(reply, r)
+    if (r.fatte) await audit(request, 'CRAL_CONTATTI_MODIFICATI', id, cosaCambia(b))
+    return reply.send({ socio: await repo.socio(id) })
+  })
+  app.post('/soci/contatti', admin, async (request, reply) => {
+    const b = z.object({
+      ids: z.array(ID_PERSONA).min(1).max(MAX_IDS),
+      // in blocco: consenso e WhatsApp (mai il numero), consenso ai dati alimentari
+      contatti: CONTATTI.pick({ consenso: true, consensoIl: true, origine: true, revocatoIl: true, whatsapp: true, waIl: true }).strict().optional(),
+      alimentari: ALIMENTARI.pick({ consenso: true, consensoIl: true }).strict().optional(),
+    }).strict().parse(request.body)
+    const r = await repo.salvaContatti(b.ids, { ...(b.contatti ? { contatti: b.contatti } : {}), ...(b.alimentari ? { alimentari: b.alimentari } : {}) } as CralPatchContatti, uid(request))
+    if (eErrore(r)) return errore(reply, r)
+    await audit(request, 'CRAL_CONTATTI_IN_BLOCCO', undefined, { richieste: b.ids.length, ...r, ...cosaCambia(b) })
+    return reply.send(r)
+  })
+  app.put('/parametri/contatti', admin, async (request, reply) => {
+    const b = z.object({ prefissoTel: z.string().regex(/^[1-9]\d{0,3}$/) }).parse(request.body)
+    await repo.salvaParametriContatti(b, uid(request))
+    await audit(request, 'CRAL_PARAMETRI_CONTATTI', undefined, { ...b })
+    return reply.send({ parametri: await repo.parametri() })
+  })
+  app.put('/parametri/modelli-export', admin, async (request, reply) => {
+    const b = z.object({ modelli: z.array(MODELLO_EXPORT).max(30) }).parse(request.body)
+    if (b.modelli.some(m => m.colonne.some(c => !COLONNE_ELENCO.some(x => x.id === c)))) return reply.code(400).send({ error: 'COLONNA_SCONOSCIUTA' })
+    await repo.salvaParametriContatti({ modelliExport: b.modelli }, uid(request))
+    await audit(request, 'CRAL_MODELLI_EXPORT', undefined, { modelli: b.modelli.length })
+    return reply.send({ parametri: await repo.parametri() })
   })
 
   app.put('/soci/:id/legami', admin, async (request, reply) => {
@@ -331,6 +388,28 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     const buf = foglioSoci(soci, familiari, st.sedi)
     await audit(request, 'CRAL_EXPORT_SOCI', undefined, { soci: soci.length, familiari: familiari.length, ambiente: ambienteDi(request) })
     return reply.send({ ambiente: ambienteDi(request), base64: buf.toString('base64') })
+  })
+
+  // Elenco a scelta: colonne, filtro e formato decisi da chi esporta. Senza consenso valido il numero
+  // non esce mai da qui (per la manutenzione dei dati c'e' l'Excel dei soci, tracciato T6).
+  app.post('/export/elenco', admin, async (request, reply) => {
+    const b = z.object({
+      ids: z.array(ID_PERSONA).min(1).max(50_000), colonne: MODELLO_EXPORT.shape.colonne, solo: MODELLO_EXPORT.shape.solo,
+      formato: MODELLO_EXPORT.shape.formato, separatore: MODELLO_EXPORT.shape.separatore.default(';'), titolo: riga(60).default(''),
+    }).parse(request.body)
+    const colonne = b.colonne.map(c => COLONNE_ELENCO.find(x => x.id === c))
+    if (colonne.some(c => !c)) return reply.code(400).send({ error: 'COLONNA_SCONOSCIUTA' })
+    const st = await repo.stato()
+    const scelti = new Set(b.ids)
+    const righe = st.soci.filter(s => scelti.has(s.id) && s.stato !== 'ELIMINATO' && (
+      b.solo === 'CONTATTABILI' ? contattabile(s.contatti) : b.solo === 'WHATSAPP' ? perWhatsapp(s.contatti)
+        : b.solo === 'ALIMENTARI' ? s.alimentari.esigenze.length > 0 || !!s.alimentari.allergie : true))
+    const buf = elencoSoci(righe, colonne as ColonnaElenco[], st, b.formato, b.separatore, b.titolo || 'Elenco')
+    await audit(request, 'CRAL_EXPORT_ELENCO', undefined, {
+      persone: righe.length, colonne: b.colonne, solo: b.solo, formato: b.formato,
+      conTelefono: colonne.some(c => c!.dato === 'telefono'), conAlimentari: colonne.some(c => c!.dato === 'alimentari'), ambiente: ambienteDi(request),
+    })
+    return reply.send({ righe: righe.length, base64: buf.toString('base64') })
   })
 
   app.post('/export/quote', admin, async (request, reply) => {

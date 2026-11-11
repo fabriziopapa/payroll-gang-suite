@@ -12,7 +12,7 @@ import {
   nomeDi, nominativo, norm, oggi, ordineRichieste, persona, regolaCat,
 } from './logica'
 import { ScontoPersonaleModal } from './Sconti'
-import { Campo, D, Ico, Modale, Origine, Pill, avviso, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario, cardCls, inputCls, thCls, useCral, type Tono } from './ui'
+import { Campo, D, Ico, Modale, Origine, Pill, avviso, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario, cardCls, inputCls, thCls, useCral, type Tono, Scorrevole } from './ui'
 
 export const STATI_RIC: Record<Richiesta['stato'], [string, Tono]> = { ATTESA: ['In attesa', 'warn'], CONSEGNATA: ['Consegnata', 'ok'], ANNULLATA: ['Annullata', 'neutro'] }
 export const MODI_CONS: Record<Richiesta['modo'], string> = { MANO: 'A mano', EMAIL: 'Digitale via email' }
@@ -66,14 +66,14 @@ export function MagazzinoCorpo({ ini, chiusa }: { ini: Iniziativa; chiusa: boole
             <Campo label="Data carico"><input type="date" className={inputCls} value={car.data} onChange={e => setCar({ ...car, data: e.target.value })} /></Campo>
             <div className="col-span-2 sm:col-span-3 flex gap-2"><input className={inputCls} maxLength={300} placeholder="Note (es. lotto, scadenza dei biglietti)" value={car.note} onChange={e => setCar({ ...car, note: e.target.value })} /><button className={btnPrimario + ' whitespace-nowrap'} disabled={!car.qta || !car.art} onClick={() => void carica()}><Ico d={D.plus} />Carica</button></div>
           </div>}
-          <div className="max-h-64 overflow-y-auto divide-y divide-slate-800/70">
+          <div className="max-h-64 overflow-y-auto divide-y divide-slate-800/70 pgs-discreto">
             {ini.carichi.slice().sort((a, b) => b.data.localeCompare(a.data)).map(c => <div key={c.id} className="px-5 py-2 flex items-center gap-3 text-sm"><span className="text-slate-400 tabular-nums w-20">{fmtData(c.data)}</span><span className="flex-1 text-slate-200">{artNome(c.art)}{c.note && <span className="text-xs text-slate-500"> · {c.note}</span>}</span><span className="text-emerald-300 tabular-nums">+{c.qta}</span></div>)}
             {!ini.carichi.length && <p className="px-5 py-6 text-sm text-slate-500">Nessun carico.</p>}
           </div>
         </div>
         <div className={`${cardCls} overflow-hidden`}>
           <div className="px-5 py-3 border-b border-slate-800 flex items-center"><div className="flex-1"><p className="text-sm font-medium text-white">Registro di magazzino</p><p className="text-xs text-slate-500">Carichi e consegne in ordine di data, con la giacenza che scala.</p></div><button className={btnPiccoloSec} onClick={() => setMovOn(!movOn)}>{movOn ? 'Nascondi' : 'Mostra'}</button></div>
-          {movOn && <div className="max-h-72 overflow-y-auto"><table className="w-full text-sm"><tbody className="divide-y divide-slate-800/70 tabular-nums">
+          {movOn && <div className="max-h-72 overflow-y-auto pgs-discreto"><table className="w-full text-sm"><tbody className="divide-y divide-slate-800/70 tabular-nums">
             {movimentiMagazzino(db, ini).map((m, k) => <tr key={k}><td className="px-5 py-1.5 text-slate-400 w-24">{fmtData(m.data)}</td><td className="px-2 py-1.5 text-slate-300">{artNome(m.art)}</td><td className="px-2 py-1.5 text-xs text-slate-500">{m.desc}</td><td className={`px-2 py-1.5 text-right ${m.q > 0 ? 'text-emerald-300' : 'text-red-300'}`}>{m.q > 0 ? `+${m.q}` : m.q}</td><td className="px-5 py-1.5 text-right text-white">{m.giac}</td></tr>)}
           </tbody></table></div>}
         </div>
@@ -86,7 +86,7 @@ export function MagazzinoCorpo({ ini, chiusa }: { ini: Iniziativa; chiusa: boole
           <select className={inputCls + ' sm:w-48'} value={art} onChange={e => setArt(e.target.value)}><option value="">Tutti gli articoli</option>{ini.articoli.map(a => <option key={a.id} value={a.id}>{a.nome}</option>)}</select>
           {!chiusa && <button className={btnPrimario} onClick={() => setNuova(true)}><Ico d={D.plus} />Nuova richiesta</button>}
         </div>
-        <div className="overflow-x-auto max-h-[520px] overflow-y-auto"><table className="w-full text-sm">
+        <Scorrevole className="max-h-[520px]"><table className="w-full text-sm">
           <thead className="sticky top-0 bg-slate-900 text-left text-[11px] uppercase tracking-wider text-slate-500"><tr><th className="px-5 py-2.5 font-semibold">Richiesta il</th><th className={thCls}>Persona</th><th className={thCls}>Articolo</th><th className={thCls + ' text-right'}>Q.tà</th><th className={thCls + ' text-right'}>Importo</th><th className={thCls}>Stato</th><th className={thCls}>Consegna</th><th className={thCls + ' text-center'}>Pagato</th><th className="px-5 py-2.5 font-semibold text-right">Azioni</th></tr></thead>
           <tbody className="divide-y divide-slate-800/70">
             {lista.map(r => {
@@ -110,7 +110,7 @@ export function MagazzinoCorpo({ ini, chiusa }: { ini: Iniziativa; chiusa: boole
             })}
             {!lista.length && <tr><td colSpan={9} className="px-5 py-10 text-center text-slate-500">Nessuna richiesta con questi filtri.</td></tr>}
           </tbody>
-        </table></div>
+        </table></Scorrevole>
         <p className="px-5 py-3 border-t border-slate-800 text-xs text-slate-500">Le richieste in attesa si servono in ordine di data: «consegnabile» se la giacenza basta. «Consegna» scala la giacenza con la data di oggi; «Storna consegna» la rimette in magazzino. L'importo tiene conto degli sconti: regola della tipologia (€ a biglietto) o sconto personale sulla richiesta.</p>
       </div>
       {spRic && <ScontoPersonaleModal titolo={`Sconto · ${nomeDi(db, spRic.persona)}`} sotto={`${spRic.qta} biglietti · sulla richiesta intera`} regola={regolaCat(ini, catPersona(persona(db, spRic.persona)))} valore={spRic.sconto} lordo={lordoRichiesta(ini, spRic)} onClose={() => setSpRic(null)}
@@ -140,7 +140,7 @@ function NuovaRichiestaModal({ ini, onClose }: { ini: Iniziativa; onClose: () =>
       <div className="flex flex-col gap-4">
         {ric.persona ? <div className="flex items-center gap-3 rounded-lg border border-slate-700 px-3 py-2"><span className="font-mono text-xs text-slate-400">{ric.persona.id}</span><span className="text-slate-100 text-sm flex-1">{nominativo(ric.persona)}</span><Origine s={ric.persona} /><button className={btnPiccoloSec} onClick={() => setRic({ ...ric, persona: null })}>Cambia</button></div>
           : <div className="flex flex-col gap-2"><input autoFocus className={inputCls} placeholder="Chi chiede: cognome, ID o tessera" value={q} onChange={e => setQ(e.target.value)} />
-            {n.length >= 2 && <div className="border border-slate-800 rounded-lg divide-y divide-slate-800 max-h-56 overflow-y-auto">{ris.map(s => <button key={s.id} className="w-full text-left px-3 py-2 hover:bg-slate-800 flex items-center gap-3 text-sm" onClick={() => setRic({ ...ric, persona: s })}><span className="font-mono text-xs text-slate-400 w-20">{s.id}</span><span className="text-slate-100 flex-1">{nominativo(s)}</span><Origine s={s} /></button>)}{!ris.length && <p className="px-3 py-3 text-sm text-slate-500">Nessuno tra i partecipanti.</p>}</div>}</div>}
+            {n.length >= 2 && <div className="border border-slate-800 rounded-lg divide-y divide-slate-800 max-h-56 overflow-y-auto pgs-discreto">{ris.map(s => <button key={s.id} className="w-full text-left px-3 py-2 hover:bg-slate-800 flex items-center gap-3 text-sm" onClick={() => setRic({ ...ric, persona: s })}><span className="font-mono text-xs text-slate-400 w-20">{s.id}</span><span className="text-slate-100 flex-1">{nominativo(s)}</span><Origine s={s} /></button>)}{!ris.length && <p className="px-3 py-3 text-sm text-slate-500">Nessuno tra i partecipanti.</p>}</div>}</div>}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="col-span-2"><Campo label="Articolo"><select className={inputCls} value={ric.art} onChange={e => setRic({ ...ric, art: e.target.value })}>{ini.articoli.map(a => <option key={a.id} value={a.id}>{a.nome}</option>)}</select></Campo></div>
           <Campo label="Quantità"><input inputMode="numeric" className={inputCls + ' text-right'} value={ric.qta} onChange={e => setRic({ ...ric, qta: e.target.value.replace(/\D/g, '') })} /></Campo>

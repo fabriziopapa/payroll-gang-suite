@@ -893,7 +893,9 @@ export interface CralTesseraParam {
   formato: 'NUM' | 'PREF'; prefisso: string; cifre: number; prossimo: number
   riammissione: 'NUOVO' | 'SUFFISSO'; sepSuffisso: '' | '/' | '-' | '.'; cifreSuffisso: number
 }
-export interface CralParametriRow { tessera: CralTesseraParam; extProssimo: number; famProssimo: number }
+/** 0025: modello di esportazione salvato (colonne, filtri, formato): validato in routes/cral.ts. */
+export interface CralModelloExport { id: string; nome: string; colonne: string[]; solo: 'TUTTI' | 'CONTATTABILI' | 'WHATSAPP' | 'ALIMENTARI'; formato: 'xlsx' | 'csv'; separatore: ';' | ',' }
+export interface CralParametriRow { tessera: CralTesseraParam; extProssimo: number; famProssimo: number; prefissoTel: string; modelliExport: CralModelloExport[] }
 
 export interface CralSocioRow {
   id: string; tipo: 'SD' | 'SE' | 'EST' | 'FAM'; origine: 'PGS' | 'EST'; matricola: string | null
@@ -904,6 +906,8 @@ export interface CralSocioRow {
   /** 0023: eliminato (con lo stato di prima), anni esenti dalla quota, ex matricola di chi è passato a socio esterno. */
   eliminatoIl: string | null; eliminatoDa: string | null; statoPrima: 'ATTIVO' | 'DA_VALIDARE' | 'RIFIUTATO' | 'CESSATO' | null
   anniEsenti: number[]; exMatricola: string | null
+  /** 0025: telefono (E.164), consensi, WhatsApp; esigenze alimentari. */
+  contatti: import('../lib/cralContatti.js').Contatti; alimentari: import('../lib/cralContatti.js').Alimentari
   creatoDa: string | null; creatoIl: string; validatoDa: string | null; validatoIl: string | null
   modificatoDa: string | null; modificatoIl: string | null
   legami: Array<{ socio: string; relazione: 'CONIUGE' | 'FIGLIO' }>
@@ -955,15 +959,17 @@ export interface CralNuovaPersona {
   legami?: Array<{ socio: string; relazione: 'CONIUGE' | 'FIGLIO' }>
   stato: 'ATTIVO' | 'DA_VALIDARE'
   perIniziativa?: string
+  /** 0025 */
+  contatti?: import('../lib/cralContatti.js').PatchContatti; alimentari?: import('../lib/cralContatti.js').PatchAlimentari
 }
 export interface CralModificaPersona {
   tipo?: 'SD' | 'SE' | 'EST'; cognome?: string; nome?: string; nascita?: string | null; email?: string
   sede?: string | null; tessera?: string; note?: string; atipico?: boolean
 }
 export type CralOperazioneImport =
-  | { op: 'aggiorna'; socio: string; sede?: string | null; tessera?: string; atipico?: boolean; nota?: string }
-  | { op: 'nuovoPgs'; matricola: string; tipo: 'SD' | 'EST'; cognome: string; nome: string; nascita: string | null; email: string; sede: string | null; tessera: string; atipico: boolean; nota: string }
-  | { op: 'nuovoEsterno'; tipo: 'SE' | 'EST'; cognome: string; nome: string; nascita: string | null; email: string; sede: string | null; tessera: string; atipico: boolean; nota: string }
+  | { op: 'aggiorna'; socio: string; sede?: string | null; tessera?: string; atipico?: boolean; nota?: string; telefono?: string }
+  | { op: 'nuovoPgs'; matricola: string; tipo: 'SD' | 'EST'; cognome: string; nome: string; nascita: string | null; email: string; sede: string | null; tessera: string; atipico: boolean; nota: string; telefono?: string }
+  | { op: 'nuovoEsterno'; tipo: 'SE' | 'EST'; cognome: string; nome: string; nascita: string | null; email: string; sede: string | null; tessera: string; atipico: boolean; nota: string; telefono?: string }
   | { op: 'cessa'; socio: string; nota?: string }
 export interface CralEsitoImport { nuoviPgs: number; nuoviEsterni: number; aggiornati: number; tessere: number; cessati: number }
 
@@ -971,6 +977,7 @@ export type CralErrore =
   | 'TESSERA_DOPPIA' | 'MATRICOLA_GIA_SOCIO' | 'SOCIO_NON_TROVATO' | 'SEDE_SCONOSCIUTA'
   | 'LEGAME_NON_VALIDO' | 'STATO_NON_VALIDO' | 'SUFFISSI_ESAURITI' | 'NOME_GIA_USATO' | 'TIPO_SCONOSCIUTO'
   | 'LOTTO_NON_TROVATO' | 'LOTTO_CHIUSO'
+  | 'TELEFONO_NON_VALIDO' | 'TELEFONO_MANCANTE' | 'CONSENSO_REVOCATO' | 'DATA_NON_VALIDA'
 
 export type CralAzioneStato = 'valida' | 'rifiuta' | 'rimetti' | 'cessa' | 'riattiva' | 'elimina' | 'ripristina'
 
@@ -990,7 +997,14 @@ export interface CralVariazioneRow {
 }
 export interface CralEsitoApplica { applicate: number; errori: number; campiSaltati: number; chiuso: boolean }
 
+export interface CralPatchContatti {
+  contatti?: import('../lib/cralContatti.js').PatchContatti
+  alimentari?: import('../lib/cralContatti.js').PatchAlimentari
+}
 export interface ICralRepository {
+  /** 0025: contatti e dati alimentari di una o piu' persone; fatte = quante sono cambiate. */
+  salvaContatti(ids: string[], patch: CralPatchContatti, userId: string | null): Promise<{ fatte: number; saltate: number } | CralErrore>
+  salvaParametriContatti(p: { prefissoTel?: string; modelliExport?: CralModelloExport[] }, userId: string | null): Promise<void>
   stato(): Promise<CralStato>
   anagrafica(): Promise<CralAnagraficaRow[]>
   cercaAnagrafica(q: string, limite: number): Promise<CralAnagraficaRow[]>

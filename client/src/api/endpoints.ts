@@ -5,7 +5,7 @@
 import { apiFetch } from './client'
 import type { AppSettings, VoceConfig } from '../types'
 import type {
-  AnagraficaPgs, ArchivioTestata, Carico, Iniziativa, Legame, Lotto, ParametriTessera, PatchScelta, Persona, QuotaSocio, Richiesta,
+  AnagraficaPgs, ArchivioTestata, Carico, Iniziativa, Legame, Lotto, ModelloExport, ParametriTessera, PatchScelta, Persona, QuotaSocio, Richiesta,
   ScontoPers, Sede, SezioneLotto, StatoApi, TipoEvento, Tipologia, Variazione,
 } from '../components/cral/tipi'
 
@@ -1262,14 +1262,21 @@ export interface CralAbbinamentoApi {
   nascitaDiversa?: string
 }
 export type CralOperazioneApi =
-  | { op: 'aggiorna'; socio: string; sede?: string | null; tessera?: string; atipico?: boolean; nota?: string }
-  | { op: 'nuovoPgs'; matricola: string; tipo: 'SD' | 'EST'; cognome: string; nome: string; nascita: string | null; email: string; sede: string | null; tessera: string; atipico: boolean; nota: string }
-  | { op: 'nuovoEsterno'; tipo: 'SE' | 'EST'; cognome: string; nome: string; nascita: string | null; email: string; sede: string | null; tessera: string; atipico: boolean; nota: string }
+  | { op: 'aggiorna'; socio: string; sede?: string | null; tessera?: string; atipico?: boolean; nota?: string; telefono?: string }
+  | { op: 'nuovoPgs'; matricola: string; tipo: 'SD' | 'EST'; cognome: string; nome: string; nascita: string | null; email: string; sede: string | null; tessera: string; atipico: boolean; nota: string; telefono?: string }
+  | { op: 'nuovoEsterno'; tipo: 'SE' | 'EST'; cognome: string; nome: string; nascita: string | null; email: string; sede: string | null; tessera: string; atipico: boolean; nota: string; telefono?: string }
   | { op: 'cessa'; socio: string; nota?: string }
 export interface CralRigaT6 {
   socio: string; riga: number
-  valori: { sede?: string | null; nascita?: string | null; email?: string | null; tessera?: string | null; note?: string | null; tipo?: 'SD' | 'SE' | 'EST'; stato?: 'ATTIVO' | 'CESSATO' | 'ELIMINATO'; dataStato?: string }
+  valori: { sede?: string | null; nascita?: string | null; email?: string | null; tessera?: string | null; note?: string | null; tipo?: 'SD' | 'SE' | 'EST'; stato?: 'ATTIVO' | 'CESSATO' | 'ELIMINATO'; dataStato?: string
+    contatti?: CralPatchContatti; alimentari?: CralPatchAlimentari }
 }
+/** Quello che cambia di telefono, consenso e WhatsApp (date ISO; nel T6 mai null). */
+export interface CralPatchContatti {
+  telefono?: string; waId?: string; consenso?: 'NO' | 'SI' | 'REVOCATO'; consensoIl?: string; origine?: 'CARTACEO' | 'ONLINE' | 'EMAIL' | 'VOCE'
+  revocatoIl?: string; whatsapp?: 'SI' | 'NO' | 'NV'; waIl?: string
+}
+export interface CralPatchAlimentari { consenso?: boolean; consensoIl?: string; esigenze?: Array<'VEGETARIANO' | 'VEGANO' | 'CELIACO' | 'LATTOSIO'>; allergie?: string }
 /** Riga del T7 (quote versate): importi in centesimi, 'X' = la rata (o la quota dell'anno per l'unica soluzione). */
 export interface CralRigaT7 {
   socio: string; riga: number; anno: number; modo?: 'UNICA' | 'MENSILE' | 'TRATTENUTA'
@@ -1278,6 +1285,7 @@ export interface CralRigaT7 {
 export interface CralNuovaPersonaApi {
   tipo: 'SD' | 'SE' | 'EST' | 'FAM'; matricola?: string; cognome?: string; nome?: string; nascita?: string | null
   email?: string; sede?: string | null; tessera?: string; note?: string; legami?: Legame[]; perIniziativa?: string
+  contatti?: CralPatchContatti; alimentari?: CralPatchAlimentari
 }
 export type CralIniziativaBody = Pick<Iniziativa, 'tipo' | 'titolo' | 'anno' | 'data' | 'scadenza' | 'stato' | 'modalita' | 'modoPart' | 'gruppi' | 'sedi' | 'predefinita' | 'fornitore' | 'pagamento' | 'note' | 'quota'> & {
   config: Pick<Iniziativa, 'opzioni' | 'prodotti' | 'periodi' | 'articoli' | 'sconti'>
@@ -1315,6 +1323,14 @@ export const cralApi = {
     apiFetch<{ fatte: number }>('/cral/soci/stato', corpo('POST', { ids, azione })),
   tipologia: (ids: string[], tipo: 'SD' | 'SE' | 'EST') => apiFetch<{ fatte: number }>('/cral/soci/tipologia', corpo('POST', { ids, tipo })),
   passaEsterno: (id: string) => apiFetch<{ socio: Persona }>(`/cral/soci/${enc(id)}/passa-esterno`, corpo('POST', {})),
+  contatti: (id: string, b: { contatti?: CralPatchContatti; alimentari?: CralPatchAlimentari }) =>
+    apiFetch<{ socio: Persona }>(`/cral/soci/${enc(id)}/contatti`, corpo('PUT', b)),
+  contattiInBlocco: (ids: string[], b: { contatti?: Omit<CralPatchContatti, 'telefono' | 'waId'>; alimentari?: Pick<CralPatchAlimentari, 'consenso' | 'consensoIl'> }) =>
+    apiFetch<{ fatte: number; saltate: number }>('/cral/soci/contatti', corpo('POST', { ids, ...b })),
+  salvaPrefissoTel: (prefissoTel: string) => apiFetch<unknown>('/cral/parametri/contatti', corpo('PUT', { prefissoTel })),
+  salvaModelliExport: (modelli: ModelloExport[]) => apiFetch<unknown>('/cral/parametri/modelli-export', corpo('PUT', { modelli })),
+  esportaElenco: (b: { ids: string[]; colonne: string[]; solo: ModelloExport['solo']; formato: 'xlsx' | 'csv'; separatore: ';' | ','; titolo: string }) =>
+    apiFetch<{ righe: number; base64: string }>('/cral/export/elenco', corpo('POST', b), 60_000),
   esportaSoci: (ids: string[]) => apiFetch<{ ambiente: string; base64: string }>('/cral/export/soci', corpo('POST', { ids }), 60_000),
   esportaArchivio: (sezioni: SezioneLotto[]) => apiFetch<ArchivioTestata>(`/cral/export/archivio?sezioni=${enc(sezioni.join(','))}`, undefined, 120_000),
   lotti: () => apiFetch<{ lotti: Lotto[] }>('/cral/lotti'),

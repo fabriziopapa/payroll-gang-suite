@@ -6,6 +6,7 @@
 // centesimi interi.
 // ============================================================
 
+import { ESIGENZE } from './contatti'
 import type {
   CatSconto, Db, Iniziativa, Modalita, ParametriTessera, Persona, Prodotto, Relazione, Richiesta,
   ScontoPers, ScontoRegola, StatoPeriodo, TipoPersona, QuotaSocio,
@@ -251,6 +252,19 @@ export function dovutoTurni(db: Db, ini: Iniziativa, s: Persona): number {
   return p ? applicaSconto(n * ini.quota, p) : n * quotaDi(db, ini, s)
 }
 export const iscrittoTurni = (ini: Iniziativa, sid: string): boolean => ini.periodi.some(p => statoPer(ini, sid, p.id))
+
+// ── Esigenze alimentari di un evento (0025) ──────────────────
+/** Chi partecipa davvero: negli ordini chi ha ordinato, nei campi chi è iscritto, altrimenti i destinatari. */
+export function partecipantiEffettivi(db: Db, ini: Iniziativa): Persona[] {
+  const d = destinatari(db, ini)
+  return ini.modalita === 'ORDINE' ? d.filter(s => haOrdinato(ini, s.id)) : ini.modalita === 'TURNI' ? d.filter(s => iscrittoTurni(ini, s.id)) : d
+}
+/** Conteggi per esigenza ed elenco di chi ha esigenze o allergie (esistono solo col consenso). */
+export function riepilogoAlimentare(persone: Persona[]): { conteggi: Array<[string, number]>; conDati: Persona[]; allergie: number } {
+  const conDati = persone.filter(p => p.alimentari.consenso && (p.alimentari.esigenze.length > 0 || !!p.alimentari.allergie)).sort((a, b) => nominativo(a).localeCompare(nominativo(b)))
+  const conteggi = ESIGENZE.map(e => [e.nome, conDati.filter(p => p.alimentari.esigenze.includes(e.id)).length] as [string, number]).filter(([, n]) => n > 0)
+  return { conteggi, conDati, allergie: conDati.filter(p => p.alimentari.allergie).length }
+}
 export const aCaricoDi = (db: Db, ini: Iniziativa, s: Persona): string => { const r = rifDi(db, ini, s); return r && r.id !== s.id ? nominativo(r) : '' }
 export const occupati = (db: Db, ini: Iniziativa, pid: string): number => destinatari(db, ini).filter(s => pagaPer(statoPer(ini, s.id, pid))).length
 export interface ContiTurni { dest: Persona[]; isc: Persona[]; dovuto: number; versato: number; settimane: number }
@@ -372,17 +386,6 @@ export function simNome(a: string, b: string): number {
     prec = cur
   }
   return 1 - prec[y.length]! / Math.max(x.length, y.length)
-}
-/** Aggancio di una riga di file a una persona: matricola/ID/tessera, poi email, poi nominativo. */
-export function agganciaPersona(elenco: Persona[], idTxt: string, email: string, nom: string): [Persona | null, string] {
-  if (idTxt) {
-    const id = idTxt.trim()
-    const p = elenco.find(s => s.id === id.padStart(6, '0') || s.id === id || s.id === id.toUpperCase() || (s.tessera && norm(s.tessera) === norm(id)))
-    if (p) return [p, 'matricola/tessera']
-  }
-  if (email) { const p = elenco.find(s => s.email && s.email.toLowerCase() === email.toLowerCase()); if (p) return [p, 'email'] }
-  if (nom) { const r = risolvi(nom, elenco); if (r.esito === 'trovato' && r.cand[0]) return [r.cand[0], 'nominativo'] }
-  return [null, '']
 }
 /** Riga d'intestazione: la prima (entro 10) che contiene NOMINATIVO, COGNOME, NOME o MATRICOLA. Sopra può esserci un titolo. */
 export const trovaIntestazione = (rows: string[][] | undefined): number => {

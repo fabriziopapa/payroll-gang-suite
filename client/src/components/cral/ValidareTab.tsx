@@ -11,7 +11,7 @@ import { TIPOLOGIE, fmtData, nominativo, tesseraDaTesto, tesseraDoppia } from '.
 import { CercaAnagrafica } from './SociTab'
 import { ElencoLotti } from './Lotto'
 import {
-  Campo, Conferma, D, Ico, Modale, Origine, Pill, avviso, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario, cardCls, inputCls, inputW, thCls, useCral,
+  Campo, Conferma, D, Ico, Modale, Origine, Pill, avviso, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario, cardCls, inputCls, inputW, thCls, useCral, Scorrevole
 } from './ui'
 
 export function ValidareTab() {
@@ -79,7 +79,7 @@ function SezioneValidazione({ tipo, titolo, spiega, onCollega, onRifiuta }: {
           {senzaTessera > 0 && <p className="text-xs text-amber-400 mt-1">{senzaTessera === 1 ? '1 socio esterno senza tessera' : `${senzaTessera} soci esterni senza tessera`}: scrivi il numero del libro soci nella colonna Tessera (si può validare anche senza, e aggiungerla dopo).</p>}</div>
         <button className={btnPrimario} disabled={!sel.size} onClick={() => valida([...sel])}><Ico d={D.check} />Valida selezionati {sel.size ? `(${sel.size})` : ''}</button>
       </div>
-      <div className="overflow-x-auto"><table className="w-full text-sm">
+      <Scorrevole><table className="w-full text-sm">
         <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 bg-slate-900/60">
           <th className="pl-5 pr-2 py-2.5"><input type="checkbox" className="accent-indigo-500" checked={tutti} onChange={() => setSel(tutti ? new Set() : new Set(lista.map(s => s.id)))} aria-label="Seleziona tutti" /></th>
           <th className={thCls}>Nominativo</th><th className={thCls}>Tipologia</th><th className={thCls}>Sede</th>{socio && <th className={thCls}>Tessera</th>}<th className="px-5 py-2.5 font-semibold text-right">Azioni</th></tr></thead>
@@ -106,7 +106,7 @@ function SezioneValidazione({ tipo, titolo, spiega, onCollega, onRifiuta }: {
           })}
           {!lista.length && <tr><td colSpan={8} className="px-5 py-8 text-center text-slate-500">Nessuno in attesa. Arrivano dall'importazione, da «Nuova persona» o dall'aggiunta a un evento.</td></tr>}
         </tbody>
-      </table></div>
+      </table></Scorrevole>
       {mod && <ModificaDaValidare s={mod} onClose={() => setMod(null)} />}
     </section>
   )

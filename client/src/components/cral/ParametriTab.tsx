@@ -42,6 +42,20 @@ function ListaParametri({ titolo, sotto, voci, usi, onRinomina, onFlag, flagLabe
   )
 }
 
+/** Prefisso internazionale dato ai numeri scritti senza: vale per la scheda e per tutte le importazioni. */
+function ParametriTelefono() {
+  const { db, esegui } = useCral()
+  return (
+    <div className={`${cardCls} p-5 flex flex-col gap-3`}>
+      <div><p className="text-sm font-medium text-white">Numeri di telefono</p><p className="text-xs text-slate-500 mt-0.5">I numeri si conservano nel formato delle API di WhatsApp: prefisso internazionale e numero, es. <span className="font-mono">+393331234567</span> (wa_id <span className="font-mono">393331234567</span>).</p></div>
+      <div className="flex items-center gap-3"><span className="text-sm text-slate-300">Prefisso per chi non lo scrive</span><span className="text-slate-500">+</span>
+        <input inputMode="numeric" className={inputW + ' py-1 w-20 tabular-nums'} maxLength={4} defaultValue={db.prefissoTel} key={db.prefissoTel}
+          onBlur={e => { const v = e.target.value.trim(); if (!/^[1-9]\d{0,3}$/.test(v)) { avviso('Prefisso non valido', 'error'); e.target.value = db.prefissoTel; return } if (v !== db.prefissoTel) void esegui(() => cralApi.salvaPrefissoTel(v), `Prefisso +${v} salvato`) }} /></div>
+      <p className="text-xs text-slate-500">Con +39: i cellulari iniziano per 3, i fissi tengono lo 0. Un numero estero va scritto col suo prefisso (+44…, 0044…).</p>
+    </div>
+  )
+}
+
 function ParametriQuote() {
   const { db, esegui } = useCral()
   const righe = [...db.quoteAnno].sort((a, b) => b.anno - a.anno)
@@ -119,6 +133,7 @@ export function ParametriTab() {
           onFlag={(id, attiva) => void esegui(() => cralApi.aggiornaSede(id, { attiva }), attiva ? 'Sede attivata' : 'Sede disattivata', 'info')}
           onAggiungi={async nome => !!(await esegui(() => cralApi.creaSede(nome), `Sede «${nome}» aggiunta`))} />
         <ParametriQuote />
+        <ParametriTelefono />
         <ParametriTesseraCard />
       </div>
       <div className="flex flex-col gap-4">

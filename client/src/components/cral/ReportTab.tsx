@@ -8,7 +8,7 @@ import { Fragment, useMemo, useState } from 'react'
 import type { Richiesta } from './tipi'
 import { GRUPPI, TIPOLOGIE, creaCsv, fmtData, oggi, sedeBreve } from './logica'
 import { MODI_QUOTA, STATI_RIC_ETICH, costruisciReport, creaPdf, tipiAmmessi, type CfgReport } from './report'
-import { Campo, D, Ico, Interruttore, avviso, btnPrimario, btnSecondario, cardCls, chipCls, etichettaCls, inputCls, scarica, sceltaCls, useCral } from './ui'
+import { Campo, D, Ico, Interruttore, avviso, btnPrimario, btnSecondario, cardCls, chipCls, etichettaCls, inputCls, scarica, sceltaCls, useCral, Scorrevole } from './ui'
 
 export function ReportTab() {
   const { db, utente } = useCral()
@@ -111,7 +111,7 @@ export function ReportTab() {
       </div>
       <div className={`${cardCls} overflow-hidden min-w-0`}>
         <div className="px-5 py-3 border-b border-slate-800 flex flex-wrap items-center gap-2"><p className="text-sm font-medium text-white flex-1">{rep.titolo}</p><span className="text-xs text-slate-500 tabular-nums">{rep.totale ? Math.max(0, rep.righe.length - 1) : rep.righe.length} righe</span></div>
-        <div className="overflow-x-auto max-h-[640px] overflow-y-auto"><table className="w-full text-sm">
+        <Scorrevole className="max-h-[640px]"><table className="w-full text-sm">
           <thead className="sticky top-0 bg-slate-900 text-left text-[11px] uppercase tracking-wider text-slate-500">
             {rep.sopra && <tr>{(() => {
               const out: Array<{ t: string; n: number }> = []
@@ -130,7 +130,7 @@ export function ReportTab() {
             })}
             {!rep.righe.length && <tr><td colSpan={rep.intest.length || 1} className="px-5 py-10 text-center text-slate-500">{rep.vuoto ?? 'Nessun dato con questi filtri.'}</td></tr>}
           </tbody>
-        </table></div>
+        </table></Scorrevole>
         {rep.righe.length > 500 && <p className="px-5 py-2 border-t border-slate-800 text-xs text-slate-500">Anteprima delle prime 500 righe: CSV e PDF le contengono tutte.</p>}
       </div>
     </div>

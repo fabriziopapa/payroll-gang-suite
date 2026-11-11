@@ -4,12 +4,14 @@
 // scelte, ordini, consegne, partecipanti singoli e importazioni.
 // ============================================================
 
+import { nomiEsigenze } from './contatti'
+import { EsportaElenco } from './Esporta'
 import { useState, type ReactNode } from 'react'
 import { cralApi, type CralIniziativaBody } from '../../api/endpoints'
 import type { Iniziativa, Modalita, Persona, Prodotto, PatchScelta, TipoPersona } from './tipi'
 import {
   GRUPPI, TIPOLOGIE, catPersona, contiMagazzino, contiOrdine, contiTurni, descrPart, destinatari, etichettaPers, fmtData, fmtEuro, fmtImp,
-  fmtQ, generaSettimane, gruppiProdotti, haOrdinato, nettoSocio, nominativo, norm, parseEuro, perUnita, persDi, prodLabel, qta, regolaCat,
+  fmtQ, generaSettimane, gruppiProdotti, haOrdinato, nettoSocio, nominativo, norm, parseEuro, partecipantiEffettivi, riepilogoAlimentare, perUnita, persDi, prodLabel, qta, regolaCat,
   riassuntoSconti, riepilogo, righeOrdiniPerSede, sedeBreve, sedeNome, tipNome, totaleSocio,
 } from './logica'
 import { ScontiTipologia, ScontoPersonaleModal, scontiDaTxt, scontiInTxt, scontiTxtOk, type ScontiTxt } from './Sconti'
@@ -19,7 +21,7 @@ import { ModuloRisposteModal, OrdiniImportModal, PartecipantiImportModal } from 
 import { NuovoSocioModal } from './SociTab'
 import {
   Campo, Conferma, D, DiChi, Ico, Interruttore, Modale, Origine, Pill, TipoChip, avviso, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario,
-  cardCls, chipCls, etichettaCls, inputCls, inputW, sceltaCls, thCls, useCral, type Tono,
+  cardCls, chipCls, etichettaCls, inputCls, inputW, sceltaCls, thCls, useCral, type Tono, Scorrevole
 } from './ui'
 
 const STATI_INI: Record<Iniziativa['stato'], [string, Tono]> = { BOZZA: ['Bozza', 'neutro'], APERTA: ['Raccolta aperta', 'ok'], CHIUSA: ['Chiusa', 'cyan'] }
@@ -198,14 +200,14 @@ function IniziativaModal({ id, onClose, onCreata }: { id: string | null; onClose
               <div className="w-28"><Campo label="Posti a sett."><input inputMode="numeric" className={inputCls} value={gen.posti} placeholder="—" onChange={e => setGen({ ...gen, posti: e.target.value.replace(/\D/g, '') })} /></Campo></div>
               <button className={btnSecondario} disabled={!gen.dal || !(+gen.n > 0) || +gen.n > 60 || usatiPer.size > 0} title={usatiPer.size ? 'Ci sono già iscrizioni: modifica le settimane una per una' : ''} onClick={() => setF({ ...f, periodi: generaSettimane(gen.dal, +gen.n, +gen.posti || null) })}>Genera settimane lun–ven</button>
             </div>
-            <div className="overflow-x-auto"><table className="w-full text-sm">
+            <Scorrevole><table className="w-full text-sm">
               <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500"><th className="py-1.5 pr-2 font-semibold">Periodo</th><th className="py-1.5 px-2 font-semibold">Dal</th><th className="py-1.5 px-2 font-semibold">Al</th><th className="py-1.5 px-2 font-semibold">Posti</th><th /></tr></thead>
               <tbody>{f.periodi.map(p => <tr key={p.id}>
                 <td className="py-1 pr-2 min-w-[160px]"><input className={inputCls + ' py-1.5'} maxLength={60} value={p.nome} onChange={e => setPeriodo(p.id, { nome: e.target.value })} /></td>
                 <td className="py-1 px-2"><input type="date" className={inputCls + ' py-1.5'} value={p.dal} onChange={e => setPeriodo(p.id, { dal: e.target.value })} /></td>
                 <td className="py-1 px-2"><input type="date" className={inputCls + ' py-1.5'} value={p.al} onChange={e => setPeriodo(p.id, { al: e.target.value })} /></td>
                 <td className="py-1 px-2 w-24"><input inputMode="numeric" className={inputCls + ' py-1.5 text-right'} value={p.postiTxt} placeholder="—" onChange={e => setPeriodo(p.id, { postiTxt: e.target.value.replace(/\D/g, '') })} /></td>
-                <td className="py-1 pl-1"><button disabled={usatiPer.has(p.id)} title={usatiPer.has(p.id) ? 'Ci sono iscritti: non si toglie' : 'Togli'} className="p-2 rounded-md text-slate-500 hover:text-red-400 disabled:opacity-30" onClick={() => setF({ ...f, periodi: f.periodi.filter(x => x.id !== p.id) })}><Ico d={D.trash} /></button></td></tr>)}</tbody></table></div>
+                <td className="py-1 pl-1"><button disabled={usatiPer.has(p.id)} title={usatiPer.has(p.id) ? 'Ci sono iscritti: non si toglie' : 'Togli'} className="p-2 rounded-md text-slate-500 hover:text-red-400 disabled:opacity-30" onClick={() => setF({ ...f, periodi: f.periodi.filter(x => x.id !== p.id) })}><Ico d={D.trash} /></button></td></tr>)}</tbody></table></Scorrevole>
             <button className={btnPiccoloSec + ' self-start'} onClick={() => {
               const u = f.periodi[f.periodi.length - 1]
               const g = u?.dal ? generaSettimane(new Date(new Date(`${u.dal}T12:00:00`).getTime() + 7 * 864e5).toISOString().slice(0, 10), 1, u.postiTxt ? +u.postiTxt : null, f.periodi.length + 1)[0]! : { id: nuovoId('W'), nome: '', dal: '', al: '', postiTxt: '' }
@@ -216,18 +218,18 @@ function IniziativaModal({ id, onClose, onCreata }: { id: string | null; onClose
             <Campo label="Come si paga"><input className={inputCls} maxLength={300} value={f.pagamento} placeholder="Es. bonifico al CRAL prima dell'inizio della settimana" onChange={e => setF({ ...f, pagamento: e.target.value })} /></Campo>
           </>}
           {mod === 'MAGAZZINO' && <>
-            <div className="overflow-x-auto"><table className="w-full text-sm">
+            <Scorrevole><table className="w-full text-sm">
               <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500"><th className="py-1.5 pr-2 font-semibold">Articolo (es. cinema)</th><th className="py-1.5 px-2 font-semibold">Prezzo al socio €</th><th /></tr></thead>
               <tbody>{f.articoli.map(a => <tr key={a.id}>
                 <td className="py-1 pr-2"><input className={inputCls + ' py-1.5'} maxLength={80} value={a.nome} placeholder="Es. Cinema convenzionato" onChange={e => setF({ ...f, articoli: f.articoli.map(x => x.id === a.id ? { ...x, nome: e.target.value } : x) })} /></td>
                 <td className="py-1 px-2 w-36"><input inputMode="decimal" className={inputCls + ' py-1.5 text-right tabular-nums'} value={a.prezzoTxt} placeholder="0,00" onChange={e => setF({ ...f, articoli: f.articoli.map(x => x.id === a.id ? { ...x, prezzoTxt: e.target.value } : x) })} /></td>
-                <td className="py-1 pl-1 w-10"><button disabled={usatiArt.has(a.id) || f.articoli.length <= 1} className="p-2 rounded-md text-slate-500 hover:text-red-400 disabled:opacity-30" onClick={() => setF({ ...f, articoli: f.articoli.filter(x => x.id !== a.id) })}><Ico d={D.trash} /></button></td></tr>)}</tbody></table></div>
+                <td className="py-1 pl-1 w-10"><button disabled={usatiArt.has(a.id) || f.articoli.length <= 1} className="p-2 rounded-md text-slate-500 hover:text-red-400 disabled:opacity-30" onClick={() => setF({ ...f, articoli: f.articoli.filter(x => x.id !== a.id) })}><Ico d={D.trash} /></button></td></tr>)}</tbody></table></Scorrevole>
             <button className={btnPiccoloSec + ' self-start'} onClick={() => setF({ ...f, articoli: [...f.articoli, { id: nuovoId('A'), nome: '', prezzoTxt: '' }] })}><Ico d={D.plus} cls="w-3.5 h-3.5" />Aggiungi articolo</button>
             <p className="text-xs text-slate-500">I carichi (biglietti arrivati, con la data) e le richieste si registrano nella pagina dell'evento. Ogni consegna scala la giacenza.</p>
             <Campo label="Come si paga"><input className={inputCls} maxLength={300} value={f.pagamento} placeholder="Es. contanti alla consegna" onChange={e => setF({ ...f, pagamento: e.target.value })} /></Campo>
           </>}
           {mod === 'ORDINE' && <>
-            <div className="overflow-x-auto"><table className="w-full text-sm">
+            <Scorrevole><table className="w-full text-sm">
               <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500"><th className="py-1.5 pr-2 font-semibold">Tipologia</th><th className="py-1.5 px-2 font-semibold">Prodotto / formato</th><th className="py-1.5 px-2 font-semibold">Prezzo €</th><th className="py-1.5 px-2 font-semibold">Si vende</th><th className="py-1.5 px-2 font-semibold">Contenuto</th><th className="py-1.5 px-2 font-semibold">Max a testa</th><th /></tr></thead>
               <tbody>{f.prodotti.map(p => {
                 const errP = p.prezzoTxt !== '' && parseEuro(p.prezzoTxt) === null
@@ -242,7 +244,7 @@ function IniziativaModal({ id, onClose, onCreata }: { id: string | null; onClose
                     <td className="py-1 pl-1"><button title={ordinati.has(p.id) ? 'Già ordinato da qualcuno: non si toglie' : 'Togli prodotto'} disabled={ordinati.has(p.id) || f.prodotti.length <= 1} className="p-2 rounded-md text-slate-500 hover:text-red-400 disabled:opacity-30" onClick={() => setF({ ...f, prodotti: f.prodotti.filter(x => x.id !== p.id) })}><Ico d={D.trash} /></button></td>
                   </tr>)
               })}</tbody>
-            </table></div>
+            </table></Scorrevole>
             <button className={btnPiccoloSec + ' self-start'} onClick={() => setF({ ...f, prodotti: [...f.prodotti, prodVuoto()] })}><Ico d={D.plus} cls="w-3.5 h-3.5" />Aggiungi prodotto</button>
             <p className="text-xs text-slate-500">Ogni riga è un prodotto con il suo prezzo: per l'olio, una riga per ogni varietà e formato. «Al kg» accetta quantità decimali (1,5 kg); «a cassetta» conta le cassette. Il contenuto serve a sommare litri o kg nell'ordine al fornitore. Prezzo 0,00 = omaggio. Le tipologie si personalizzano in Parametri.</p>
             <div className="grid sm:grid-cols-2 gap-4"><Campo label="Fornitore"><input className={inputCls} maxLength={160} value={f.fornitore} placeholder="A chi va l'ordine complessivo" onChange={e => setF({ ...f, fornitore: e.target.value })} /></Campo>
@@ -285,7 +287,7 @@ function TabellaRiepilogo({ ini, mancantiComePred }: { ini: Iniziativa; mancanti
   const vis = colonne.filter(c => c !== '__NONE' || (tot['__NONE'] ?? 0) > 0)
   const totG = Object.values(tot).reduce((a, b) => a + b, 0)
   return (
-    <div className="overflow-x-auto"><table className="w-full text-sm">
+    <Scorrevole><table className="w-full text-sm">
       <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 bg-slate-900/60">
         <th className="px-5 py-2.5 font-semibold">Sede</th>{vis.map(c => <th key={c} className={`${thCls} text-right ${c === '__NONE' ? 'text-amber-500/80' : ''}`}>{etich(c).split(' - ')[0]}</th>)}<th className="px-5 py-2.5 font-semibold text-right">Totale</th></tr></thead>
       <tbody className="divide-y divide-slate-800/70 tabular-nums">
@@ -294,7 +296,7 @@ function TabellaRiepilogo({ ini, mancantiComePred }: { ini: Iniziativa; mancanti
           <td className="px-5 py-2 text-right text-white font-medium">{Object.values(r).reduce((a, b) => a + b, 0)}</td></tr>)}
         <tr className="bg-slate-800/40 font-semibold"><td className="px-5 py-2 text-white">Totale complessivo</td>{vis.map(c => <td key={c} className="px-3 py-2 text-right text-white">{tot[c]}</td>)}<td className="px-5 py-2 text-right text-white">{totG}</td></tr>
       </tbody>
-    </table></div>
+    </table></Scorrevole>
   )
 }
 
@@ -305,7 +307,7 @@ function TabellaOrdini({ ini }: { ini: Iniziativa }) {
   const tq: Record<string, number> = Object.fromEntries(ini.prodotti.map(p => [p.id, righe.reduce((a, [, r]) => a + (r.q[p.id] ?? 0), 0)]))
   const te = righe.reduce((a, [, r]) => a + r.eur, 0), tn = righe.reduce((a, [, r]) => a + r.n, 0)
   return (
-    <div className="overflow-x-auto"><table className="w-full text-sm">
+    <Scorrevole><table className="w-full text-sm">
       <thead className="text-[11px] uppercase tracking-wider text-slate-500 bg-slate-900/60">
         <tr><th rowSpan={2} className="px-5 py-2 font-semibold text-left align-bottom">Sede</th><th rowSpan={2} className={thCls + ' text-right align-bottom'}>Ordini</th>{gruppiProdotti(ini).map(g => <th key={g.tip} colSpan={g.prod.length} className="px-3 pt-2 pb-1 font-semibold text-center text-pink-300/90 border-b border-slate-800">{tipNome(db, g.tip)}</th>)}<th rowSpan={2} className="px-5 py-2 font-semibold text-right align-bottom">Importo</th></tr>
         <tr>{ini.prodotti.map(p => <th key={p.id} className="px-3 pb-2 pt-1 font-semibold text-right normal-case tracking-normal whitespace-nowrap">{p.nome}</th>)}</tr></thead>
@@ -314,7 +316,7 @@ function TabellaOrdini({ ini }: { ini: Iniziativa }) {
           {ini.prodotti.map(p => <td key={p.id} className={`px-3 py-2 text-right ${r.q[p.id] ? 'text-slate-200' : 'text-slate-600'}`}>{fmtQ(r.q[p.id] ?? 0)}</td>)}<td className="px-5 py-2 text-right text-white font-medium whitespace-nowrap">{fmtEuro(r.eur)}</td></tr>)}
         <tr className="bg-slate-800/40 font-semibold"><td className="px-5 py-2 text-white">Totale complessivo</td><td className="px-3 py-2 text-right text-white">{tn}</td>{ini.prodotti.map(p => <td key={p.id} className="px-3 py-2 text-right text-white">{fmtQ(tq[p.id] ?? 0)}</td>)}<td className="px-5 py-2 text-right text-white whitespace-nowrap">{fmtEuro(te)}</td></tr>
       </tbody>
-    </table></div>
+    </table></Scorrevole>
   )
 }
 
@@ -332,7 +334,7 @@ function AggiungiPartecipanteModal({ ini, onClose }: { ini: Iniziativa; onClose:
       <div className="flex flex-col gap-2">
         <div className="relative"><span className="absolute left-3 top-2.5 text-slate-500"><Ico d={D.search} /></span>
           <input autoFocus className={inputCls + ' pl-9'} placeholder="Cognome, ID o tessera: soci dipendenti, soci esterni, esterni, familiari" value={q} onChange={e => setQ(e.target.value)} /></div>
-        {n.length >= 2 && <div className="border border-slate-800 rounded-lg divide-y divide-slate-800 max-h-72 overflow-y-auto">
+        {n.length >= 2 && <div className="border border-slate-800 rounded-lg divide-y divide-slate-800 max-h-72 overflow-y-auto pgs-discreto">
           {ris.map(s => <button key={s.id} onClick={() => aggiungi(s)} className="w-full text-left px-3 py-2 hover:bg-slate-800 flex items-center gap-3 text-sm"><span className="font-mono text-xs text-slate-400 w-20">{s.id}</span><span className="text-slate-100 flex-1">{nominativo(s)}{s.tipo === 'FAM' && <span className="block"><DiChi db={db} s={s} /></span>}</span>{s.stato === 'DA_VALIDARE' && <Pill tono="warn">da validare</Pill>}<Origine s={s} /><Ico d={D.plus} cls="w-3.5 h-3.5 text-indigo-400" /></button>)}
           {!ris.length && <p className="px-3 py-3 text-sm text-slate-500">Nessuno. Se è una persona nuova usa «Persona nuova».</p>}
         </div>}
@@ -343,7 +345,28 @@ function AggiungiPartecipanteModal({ ini, onClose }: { ini: Iniziativa; onClose:
 }
 
 // ── Pagina dell'evento ───────────────────────────────────────
+/** Esigenze alimentari dei partecipanti: conteggi e, a richiesta, i nomi. Solo chi ha dato il consenso. */
+function EsigenzeEvento({ ini }: { ini: Iniziativa }) {
+  const { db } = useCral()
+  const [aperto, setAperto] = useState(false)
+  const pers = partecipantiEffettivi(db, ini)
+  const r = riepilogoAlimentare(pers)
+  if (ini.modalita === 'MAGAZZINO' || !r.conDati.length) return null
+  return (
+    <div className="rounded-xl border border-amber-900/50 bg-amber-950/10 px-4 py-2.5 text-sm text-slate-300 flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1"><span className="text-amber-300 font-medium">Esigenze alimentari</span>
+        {r.conteggi.map(([n, k]) => <span key={n}><b className="text-white tabular-nums">{k}</b> {n.toLowerCase()}</span>)}
+        {r.allergie > 0 && <span><b className="text-white tabular-nums">{r.allergie}</b> con allergie</span>}
+        <span className="text-xs text-slate-500">su {pers.length} {ini.modalita === 'ORDINE' ? 'che hanno ordinato' : ini.modalita === 'TURNI' ? 'iscritti' : 'partecipanti'}</span>
+        <button className="ml-auto text-xs text-indigo-400 hover:text-indigo-300" aria-expanded={aperto} onClick={() => setAperto(!aperto)}>{aperto ? 'Nascondi i nomi' : 'Mostra i nomi'}</button></div>
+      {aperto && <ul className="text-xs text-slate-300 grid sm:grid-cols-2 gap-x-6 gap-y-0.5">{r.conDati.map(s => <li key={s.id}><span className="text-slate-100">{nominativo(s)}</span> — {[nomiEsigenze(s.alimentari.esigenze), s.alimentari.allergie ? `allergie: ${s.alimentari.allergie}` : ''].filter(Boolean).join(' · ')}</li>)}</ul>}
+      {aperto && <p className="text-[11px] text-slate-500">Per chi prepara: Report › Esigenze alimentari (PDF o Excel).</p>}
+    </div>
+  )
+}
+
 function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void }) {
+  const [esporta, setEsporta] = useState(false)
   const { db, esegui, scelta } = useCral()
   const ini = db.iniziative.find(i => i.id === id)
   const [cerca, setCerca] = useState('')
@@ -411,10 +434,13 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
         <div className="ml-auto flex flex-wrap gap-2">
           {singoli && !chiusa && <><button className={btnSecondario} onClick={() => setImpPar(true)}><Ico d={D.upload} />Importa partecipanti</button><button className={btnSecondario} onClick={() => setAddPar(true)}><Ico d={D.plus} />Nuovo partecipante</button></>}
           {(mod === 'SCELTA' || mod === 'ORDINE' || mod === 'TURNI') && !chiusa && <button className={btnSecondario} onClick={() => setModulo(true)}><Ico d={D.upload} />{mod === 'ORDINE' ? 'Importa ordini' : mod === 'TURNI' ? 'Importa iscrizioni' : 'Importa risposte modulo'}</button>}
+          <button className={btnSecondario} onClick={() => setEsporta(true)} title="Lista WhatsApp, rubrica, esigenze alimentari: scegli colonne e formato"><Ico d={D.download} />Esporta elenco</button>
           {!ini.archiviata && <button className={btnSecondario} onClick={() => setEdit(true)}>Modifica</button>}
           <button className={btnSecondario} onClick={() => { if (ini.archiviata) archivia(false); else setConfArch(true) }}>{ini.archiviata ? 'Ripristina' : 'Archivia'}</button>
         </div>
       </div>
+      {esporta && <EsportaElenco ids={partecipantiEffettivi(db, ini).map(s => s.id)} titolo={ini.titolo} onClose={() => setEsporta(false)} />}
+      <EsigenzeEvento ini={ini} />
       {ini.archiviata && <div className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-2.5 text-sm text-slate-400">Evento archiviato il {fmtData(ini.archiviataIl)}{ini.archiviataDa ? ` da ${ini.archiviataDa}` : ''}: sola lettura. «Ripristina» lo riporta tra gli eventi attivi.</div>}
       <div><h3 className="text-lg font-semibold text-white">{ini.titolo}</h3>
         <p className="text-sm text-slate-400 tabular-nums">{fmtData(ini.data)}{ini.scadenza ? ` · ${({ ORDINE: 'ordini', TURNI: 'iscrizioni', MAGAZZINO: 'richieste' } as Record<string, string>)[mod] ?? 'scelte'} entro ${fmtData(ini.scadenza)}` : ''} · {dest.length} partecipanti ({descrPart(ini)}){ini.fornitore ? ` · Fornitore: ${ini.fornitore}` : ''}{ini.pagamento ? ` · Pagamento: ${ini.pagamento}` : ''}{ini.note ? ` · ${ini.note}` : ''}</p>
@@ -452,7 +478,7 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
                   <button className={btnPiccoloSec + ' h-[38px]'} title={ord.dir > 0 ? 'Crescente' : 'Decrescente'} onClick={() => setOrd({ ...ord, dir: ord.dir === 1 ? -1 : 1 })}>{ord.dir > 0 ? 'A→Z' : 'Z→A'}</button></div>
                 {mod === 'SCELTA' && ini.predefinita && mancanti > 0 && !chiusa && <button className={btnPiccoloSec} onClick={() => setConfPred(true)}>Assegna la predefinita ai {mancanti} senza scelta</button>}
               </div>
-              <div className="overflow-x-auto max-h-[560px] overflow-y-auto"><table className="w-full text-sm">
+              <Scorrevole className="max-h-[560px]"><table className="w-full text-sm">
                 <thead className="sticky top-0 bg-slate-900 z-10 text-left text-[11px] uppercase tracking-wider text-slate-500">
                   {mod === 'ORDINE' && <tr><th colSpan={3} />{gruppiProdotti(ini).map(g => <th key={g.tip} colSpan={g.prod.length} className="px-2 pt-2 pb-1 font-semibold text-center text-pink-300/90 border-b border-slate-800">{tipNome(db, g.tip)}</th>)}<th colSpan={4} /></tr>}
                   <tr>
@@ -484,7 +510,7 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
                   })}
                   {!lista.length && <tr><td colSpan={20} className="px-5 py-10 text-center text-slate-500">{singoli && !ini.partecipanti.length ? 'Nessun partecipante: usa «Importa partecipanti» o «Nuovo partecipante».' : 'Nessuno con questi filtri.'}</td></tr>}
                 </tbody>
-              </table></div>
+              </table></Scorrevole>
             </div>
           </>}
       {spOrd && <ScontoPersonaleModal titolo={`Sconto · ${nominativo(spOrd)}`} sotto="Sull'ordine intero" regola={regolaCat(ini, catPersona(spOrd))} valore={persDi(ini, spOrd.id)} lordo={totaleSocio(ini, spOrd.id)} onClose={() => setSpOrd(null)}
