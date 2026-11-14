@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.11.14-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.11.14.1-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -56,7 +56,7 @@ payroll-gang-suite/
 │       │   │                    #   report.ts (CSV/PDF nel browser), ui.tsx (contesto e componenti)
 │       │   └── certificatoTemplate/  # Editor template certificato
 │       │   ├── VistaFluida.tsx  # contenitore di pagina «Vista Fluida» (tutta larghezza, margine fluido; per ora solo CRAL)
-│       │   ├── AmbienteBanner.tsx  # barra fissa «PRE-PRODUZIONE» / «NON DI PRODUZIONE»; nulla in produzione
+│       │   ├── AmbienteBanner.tsx  # linea d'ambiente in alto con linguetta «PRE» / «TEST»; nulla in produzione
 │       ├── constants/           # csvDefaults, scorporoCoefficients, palette gruppi
 │       ├── hooks/               # useDebounce, usePdfDocument, …
 │       ├── pages/               # Dashboard, Editor, Viewer, Ricerca, Anagrafiche, Voci,
@@ -540,13 +540,13 @@ operativa interna. Chi vuole eseguire il progetto trova tutto il necessario in
 
 ## Banner d'ambiente (dalla 26.11.14)
 
-Fuori produzione una barra fissa in alto, che non si chiude, dice dove ci si trova. Nessuna configurazione: l'ambiente si ricava dall'host.
+Fuori produzione una linea colorata di 3 px sul bordo superiore, con una piccola linguetta al centro, dice dove ci si trova; host, versione e nota sui dati sono nel suggerimento della linguetta. Non si chiude. Nessuna configurazione: l'ambiente si ricava dall'host.
 
 | Host | Ambiente | Cosa si vede |
 |---|---|---|
 | `fabriziopapa.com`, `www.fabriziopapa.com` | produzione | niente (nessun elemento nel DOM) |
-| `pre.fabriziopapa.com` | pre-produzione | barra a strisce ambra «PRE-PRODUZIONE · host · versione», `[PRE]` nel titolo della scheda, bollino ambra sulla favicon |
-| qualsiasi altro (mirror, `*.cpanel.site`, `localhost`) | non identificato | barra a strisce rosse «AMBIENTE NON DI PRODUZIONE», `[TEST]` nel titolo, bollino rosso |
+| `pre.fabriziopapa.com` | pre-produzione | linea ambra con linguetta «PRE», `[PRE]` nel titolo della scheda, bollino ambra sulla favicon |
+| qualsiasi altro (mirror, `*.cpanel.site`, `localhost`) | non identificato | linea rossa con linguetta «TEST», `[TEST]` nel titolo, bollino rosso |
 
 - **Regola prudente**: e' produzione *solo* un host dell'elenco; un host sconosciuto mostra il banner.
 - **Client** (`utils/ambiente.ts`, `components/AmbienteBanner.tsx`): guarda `window.location.hostname` prima del primo render, quindi il banner c'e' gia' nella pagina di login e non provoca salti. Lo spazio e' riservato con la variabile CSS `--pgs-env-h` (0 in produzione) e le classi `.pgs-h-schermo`, `.pgs-min-h-schermo`, `.pgs-sotto-banner`.
@@ -606,6 +606,11 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.11.14.1
+**Banner d'ambiente piu' discreto**
+
+- Al posto della barra a strisce alta 28 px: **linea colorata di 3 px** sul bordo superiore (ambra in pre-produzione, rossa per un host non riconosciuto) e una **piccola linguetta** al centro, «PRE» o «TEST». Host, versione e nota «i dati sono una copia della produzione» passano nel suggerimento della linguetta. La pagina scende di soli 3 px. Titolo della scheda, favicon, email e regola di riconoscimento invariati; produzione invariata (nulla).
 
 ### 26.11.14
 **Banner d'ambiente: la pre-produzione si riconosce a colpo d'occhio, anche nelle email**

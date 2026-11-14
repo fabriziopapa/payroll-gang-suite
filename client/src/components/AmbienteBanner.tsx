@@ -1,6 +1,8 @@
 // ============================================================
 // PAYROLL GANG SUITE — Banner d'ambiente
-// Barra fissa in alto, non chiudibile, visibile SOLO fuori produzione.
+// Linea colorata di 3 px sul bordo superiore + piccola linguetta al
+// centro («PRE» / «TEST»), visibili SOLO fuori produzione. Il dettaglio
+// (host, versione) è nel suggerimento al passaggio del mouse.
 // L'ambiente si ricava dall'host della pagina (utils/ambiente.ts).
 // In produzione il componente non produce alcun elemento.
 // ============================================================
@@ -8,35 +10,38 @@
 import { APP_VERSION } from '../types'
 import type { Ambiente } from '../utils/ambiente'
 
-const STILI: Record<Exclude<Ambiente, 'produzione'>, { strisce: string; etichetta: string; testo: string; nome: string }> = {
+const STILI: Record<Exclude<Ambiente, 'produzione'>, { linea: string; linguetta: string; sigla: string; nome: string; testo: string }> = {
   'preproduzione': {
-    strisce:   'repeating-linear-gradient(-45deg, #f59e0b 0 10px, #1c1917 10px 20px)',
-    etichetta: 'bg-amber-400 text-slate-950',
+    linea:     'bg-amber-400',
+    linguetta: 'bg-amber-400 text-slate-950',
+    sigla:     'PRE',
+    nome:      'Pre-produzione',
     testo:     'i dati sono una copia della produzione',
-    nome:      'PRE-PRODUZIONE',
   },
   'non-identificato': {
-    strisce:   'repeating-linear-gradient(-45deg, #dc2626 0 10px, #1c1917 10px 20px)',
-    etichetta: 'bg-red-600 text-white',
+    linea:     'bg-red-600',
+    linguetta: 'bg-red-600 text-white',
+    sigla:     'TEST',
+    nome:      'Ambiente non di produzione',
     testo:     'host non riconosciuto',
-    nome:      'AMBIENTE NON DI PRODUZIONE',
   },
 }
 
 export function AmbienteBanner({ ambiente, host }: { ambiente: Ambiente; host: string }) {
   if (ambiente === 'produzione') return null
   const s = STILI[ambiente]
+  const dettaglio = `${s.nome} · ${host} · v${APP_VERSION} — ${s.testo}`
 
   return (
-    <div
-      role="note"
-      aria-label={`Ambiente: ${s.nome}`}
-      className="fixed inset-x-0 top-0 z-[100] flex items-center justify-center px-2 select-none"
-      style={{ height: 'var(--pgs-env-h)', background: s.strisce }}
-    >
-      <span className={`${s.etichetta} max-w-full truncate rounded px-3 py-0.5 text-xs font-bold tracking-wide shadow`}>
-        {s.nome}
-        <span className="hidden sm:inline font-semibold"> · {host} · v{APP_VERSION} — {s.testo}</span>
+    <div role="note" aria-label={dettaglio} className="fixed inset-x-0 top-0 z-[100] pointer-events-none select-none">
+      <div className={s.linea} style={{ height: 'var(--pgs-env-h)' }} />
+      <span
+        title={dettaglio}
+        className={`${s.linguetta} pointer-events-auto absolute left-1/2 -translate-x-1/2
+                    rounded-b-md px-2 pb-0.5 text-[10px] font-bold leading-4 tracking-widest shadow`}
+        style={{ top: 'var(--pgs-env-h)' }}
+      >
+        {s.sigla}
       </span>
     </div>
   )

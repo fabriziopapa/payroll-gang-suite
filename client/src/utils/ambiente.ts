@@ -14,8 +14,8 @@ export type Ambiente = 'produzione' | 'preproduzione' | 'non-identificato'
 export const HOST_PRODUZIONE:    readonly string[] = ['fabriziopapa.com', 'www.fabriziopapa.com']
 export const HOST_PREPRODUZIONE: readonly string[] = ['pre.fabriziopapa.com']
 
-/** Altezza del banner: il resto della pagina si sposta di questa misura. */
-export const ALTEZZA_BANNER = '28px'
+/** Altezza della linea d'ambiente: il resto della pagina si sposta di questa misura. */
+export const ALTEZZA_BANNER = '3px'
 
 /** Ambiente a partire da un nome host (senza porta). */
 export function ambienteDaHost(host: string | null | undefined): Ambiente {
