@@ -1,6 +1,7 @@
 // ============================================================
 // PAYROLL GANG SUITE — Impostazioni
-// Sezioni: Scorporo · CSV defaults · Rubrica · Modelli comunicazione
+// Sezioni: Scorporo · CSV defaults · Rubrica · Modelli comunicazione ·
+// Esporta e importa (file cifrato fra ambienti, solo amministratori)
 // ============================================================
 
 import { useState, useEffect } from 'react'
@@ -8,6 +9,7 @@ import { useStore } from '../store/useStore'
 import { settingsApi } from '../api/endpoints'
 import { showToast } from '../components/ToastManager'
 import PaesiContoCard from '../components/PaesiContoCard'
+import EsportaImporta from '../components/trasferimento/EsportaImporta'
 import type { Contatto, ModelloComunicazione, ScorporoMap } from '../types'
 import { DEFAULT_BOLLO_OPZIONI } from '../types'
 
@@ -22,7 +24,7 @@ export default function ImpostazioniPage() {
   const { settings, setSettings, user } = useStore()
 
   // ── Tab attiva ────────────────────────────────────────────
-  type Tab = 'generali' | 'rubrica' | 'modelli' | 'bollo' | 'paesi'
+  type Tab = 'generali' | 'rubrica' | 'modelli' | 'bollo' | 'paesi' | 'trasferimento'
   const [tab, setTab] = useState<Tab>('generali')
 
   // ── Stato locale — sezione Generali ───────────────────────
@@ -303,6 +305,8 @@ export default function ImpostazioniPage() {
     { id: 'modelli',  label: `Modelli comunicazione (${modelli.length})` },
     { id: 'bollo',    label: `Marca da bollo (${bolli.length})` },
     { id: 'paesi',    label: 'Paesi e area del conto' },
+    // file cifrato fra ambienti: solo amministratori (il server lo impone comunque)
+    ...(user?.isAdmin ? [{ id: 'trasferimento' as Tab, label: 'Esporta e importa' }] : []),
   ]
 
   return (
@@ -820,6 +824,9 @@ export default function ImpostazioniPage() {
       {/* ── TAB MARCA DA BOLLO ────────────────────────────────── */}
       {/* ── TAB PAESI E AREA DEL CONTO — tutti vedono, solo admin cambia ── */}
       {tab === 'paesi' && <PaesiContoCard admin={Boolean(user?.isAdmin)} />}
+
+      {/* ── TAB ESPORTA E IMPORTA — solo amministratori ── */}
+      {tab === 'trasferimento' && user?.isAdmin && <EsportaImporta />}
 
       {tab === 'bollo' && (
         <>

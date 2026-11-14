@@ -5,7 +5,7 @@
 import { apiFetch } from './client'
 import type { AppSettings, VoceConfig } from '../types'
 import type {
-  AnagraficaPgs, ArchivioTestata, Carico, Iniziativa, Legame, Lotto, ModelloExport, ParametriTessera, PatchScelta, Persona, QuotaSocio, Richiesta,
+  AnagraficaPgs, ArchivioTestata, Carico, EsitoProva, Iniziativa, Legame, Lotto, ModelloExport, ParametriTessera, PatchScelta, Persona, QuotaSocio, Richiesta,
   ScontoPers, Sede, SezioneLotto, StatoApi, TipoEvento, Tipologia, Variazione,
 } from '../components/cral/tipi'
 
@@ -1362,6 +1362,8 @@ export const cralApi = {
     apiFetch<{ fatte: number }>(`/cral/lotti/${enc(id)}`, corpo('PATCH', b), 60_000),
   applicaLotto: (id: string) => apiFetch<{ esito: { applicate: number; errori: number; campiSaltati: number; chiuso: boolean } }>(`/cral/lotti/${enc(id)}/applica`, corpo('POST', {}), 300_000),
   scartaLotto: (id: string) => apiFetch<{ ok: true }>(`/cral/lotti/${enc(id)}/scarta`, corpo('POST', {})),
+  /** Applica e annulla: dice cosa succederebbe, senza scrivere nulla. */
+  provaLotto: (id: string) => apiFetch<{ esito: EsitoProva }>(`/cral/lotti/${enc(id)}/prova`, corpo('POST', {}), 55_000),
   riammetti: (id: string) => apiFetch<{ socio: Persona }>(`/cral/soci/${enc(id)}/riammetti`, corpo('POST', {})),
   collega: (id: string, matricola: string) => apiFetch<{ socio: Persona }>(`/cral/soci/${enc(id)}/collega`, corpo('POST', { matricola })),
   sposta: (ids: string[], sede: string | null) => apiFetch<{ fatte: number }>('/cral/soci/sposta', corpo('POST', { ids, sede })),
@@ -1389,4 +1391,30 @@ export const cralApi = {
   /** «Allinea soci» (0028): quota dovuta, esente o non dovuta per i soci indicati; esente e non dovuta col motivo. */
   allineaQuote: (anno: number, voci: Array<{ socio: string; stato: 'DOVUTA' | 'ESENTE' | 'NON_DOVUTA'; motivo: string }>) =>
     apiFetch<{ fatte: number }>(`/cral/quote/${anno}/allinea`, corpo('POST', { voci })),
+}
+
+// ============================================================
+// ESPORTA E IMPORTA (26.11.14.4) — file cifrato .pgsx fra ambienti
+// ============================================================
+export interface TrasferimentoStato {
+  app: string; ambiente: string; schema: { migrazioni: number; ultima: string }
+  limiti: { byteFile: number; bytePezzo: number }
+  sezioni: { cral: Partial<Record<SezioneLotto, number>> }
+}
+export interface TrasferimentoEsportato { nome: string; byte: number; base64: string; frase: string; righe: { cral: Partial<Record<SezioneLotto, number>> } }
+export interface TrasferimentoAperto {
+  aperto: boolean; file: string; byte: number
+  app: string; ambiente: string; esportato: string; da: string
+  stessoAmbiente: boolean; ambienteQui: string; appQui: string
+  schema: { uguale: boolean; motivo: string | null; file: { migrazioni: number; ultima: string }; qui: { migrazioni: number; ultima: string } }
+  sezioni: { cral: { parti: SezioneLotto[]; righe: Partial<Record<SezioneLotto, number>> } | null }
+}
+export const trasferimentoApi = {
+  stato: () => apiFetch<TrasferimentoStato>('/trasferimento/stato'),
+  esporta: (cral: SezioneLotto[], otp: string) => apiFetch<TrasferimentoEsportato>('/trasferimento/esporta', corpo('POST', { cral, otp }), 55_000),
+  carica: (nome: string, byte: number, pezzi: number) => apiFetch<{ id: string; bytePezzo: number }>('/trasferimento/carica', corpo('POST', { nome, byte, pezzi })),
+  pezzo: (id: string, n: number, base64: string) => apiFetch<{ ricevuti: number; di: number }>(`/trasferimento/carica/${enc(id)}/pezzo`, corpo('POST', { n, base64 }), 55_000),
+  apri: (id: string, frase: string) => apiFetch<TrasferimentoAperto>(`/trasferimento/carica/${enc(id)}/apri`, corpo('POST', { frase }), 55_000),
+  confronta: (id: string, cral: SezioneLotto[]) => apiFetch<{ lotto: string; variazioni: number }>(`/trasferimento/carica/${enc(id)}/confronta`, corpo('POST', { cral }), 55_000),
+  abbandona: (id: string) => apiFetch<void>(`/trasferimento/carica/${enc(id)}`, { method: 'DELETE' }),
 }

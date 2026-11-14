@@ -524,7 +524,7 @@ CREATE TABLE IF NOT EXISTS cral_quote (
 -- Lotti di variazioni da validare (migrazione 0023)
 CREATE TABLE IF NOT EXISTS cral_lotti (
   id          UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-  origine     VARCHAR(8)    NOT NULL CONSTRAINT cral_lotti_origine_check CHECK (origine IN ('T6', 'T7', 'ARCHIVIO')),
+  origine     VARCHAR(8)    NOT NULL CONSTRAINT cral_lotti_origine_check CHECK (origine IN ('T6', 'T7', 'ARCHIVIO', 'PGSX')),
   file        VARCHAR(200)  NOT NULL DEFAULT '',
   ambiente    VARCHAR(80)   NOT NULL DEFAULT '',
   esportato   TIMESTAMPTZ,

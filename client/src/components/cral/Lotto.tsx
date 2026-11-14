@@ -12,7 +12,7 @@
 import { mostraTelefono, nomiEsigenze, riassuntoAlimentari, riassuntoContatti, type Alimentari, type Contatti } from './contatti'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { cralApi } from '../../api/endpoints'
-import type { Db, Lotto, SezioneLotto, Variazione } from './tipi'
+import type { Db, EsitoProva, Lotto, SezioneLotto, Variazione } from './tipi'
 import { MESI, MODI_QUOTA, STATI, TIPOLOGIE, fmtData, fmtEuro, nomeDi, sedeNome } from './logica'
 import {
   Conferma, D, Ico, Pill, avviso, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario, cardCls, chipCls, etichettaCls,
@@ -21,7 +21,9 @@ import {
 
 export const NOMI_SEZIONI: Record<SezioneLotto, string> = { sedi: 'Sedi', tabelle: 'Parametri e tabelle', soci: 'Soci e familiari', quote: 'Quote associative', eventi: 'Eventi' }
 const TIPI: Record<Variazione['tipo'], [string, Tono]> = { NUOVO: ['Nuovo', 'nuovo'], MODIFICA: ['Modificato', 'cyan'], CONFLITTO: ['Conflitto', 'err'] }
-const ORIGINI: Record<Lotto['origine'], string> = { T6: 'Aggiornamento dati (T6)', T7: 'Quote versate (T7)', ARCHIVIO: 'Archivio' }
+const ORIGINI: Record<Lotto['origine'], string> = { T6: 'Aggiornamento dati (T6)', T7: 'Quote versate (T7)', ARCHIVIO: 'Archivio', PGSX: 'File cifrato' }
+/** Da un altro ambiente: archivio in chiaro o file cifrato. */
+const daFuori = (l: Lotto) => l.origine === 'ARCHIVIO' || l.origine === 'PGSX'
 const ESITI: Record<Variazione['esito'], [string, Tono]> = {
   ATTESA: ['Da decidere', 'warn'], ACCETTATA: ['Accettata', 'ok'], SCARTATA: ['Scartata', 'neutro'], APPLICATA: ['Applicata', 'ok'], ERRORE: ['Errore', 'err'],
 }
@@ -85,6 +87,7 @@ export function LottoView({ id, onChiuso }: { id: string; onChiuso?: () => void 
   const [quanti, setQuanti] = useState(PASSO)
   const [occupato, setOccupato] = useState(false)
   const [scarta, setScarta] = useState(false)
+  const [prova, setProva] = useState<EsitoProva | null>(null)
   const carica = useCallback(async () => {
     try { setDati(await cralApi.lotto(id)) } catch (e) { avviso(messaggioErrore(e), 'error') }
   }, [id])
@@ -112,13 +115,14 @@ export function LottoView({ id, onChiuso }: { id: string; onChiuso?: () => void 
   async function decidi(v: Variazione, esito: 'ACCETTATA' | 'SCARTATA' | 'ATTESA', campi?: string[]) {
     const acc = esito !== 'ACCETTATA' ? [] : v.tipo !== 'MODIFICA' ? ['*'] : (campi ?? liberi(v)).filter(c => liberi(v).includes(c))
     const finale = esito === 'ACCETTATA' && v.tipo === 'MODIFICA' && !acc.length ? 'ATTESA' : esito
+    setProva(null)
     setDati(d => d && ({ ...d, variazioni: d.variazioni.map(x => x.id === v.id ? { ...x, esito: finale, accettati: acc, nota: '' } : x) }))
     try { await cralApi.decidi(id, { voci: [{ id: v.id, esito: finale, ...(finale === 'ACCETTATA' ? { accettati: acc } : {}) }] }) }
     catch (e) { avviso(messaggioErrore(e), 'error'); void carica() }
   }
   async function inBlocco(azione: 'accettaTutte' | 'scartaTutte' | 'azzera') {
     if (!corrente) return
-    setOccupato(true)
+    setOccupato(true); setProva(null)
     try {
       const r = await cralApi.decidi(id, { sezione: corrente, azione })
       await carica()
@@ -126,8 +130,18 @@ export function LottoView({ id, onChiuso }: { id: string; onChiuso?: () => void 
     } catch (e) { avviso(messaggioErrore(e), 'error') }
     setOccupato(false)
   }
-  async function applica() {
+  /** Prova: il server applica davvero le accettate e poi annulla. Qui non cambia nulla. */
+  async function provaLotto() {
     setOccupato(true)
+    try {
+      const { esito } = await cralApi.provaLotto(id)
+      setProva(esito)
+      avviso(esito.pulita ? `Prova riuscita: ${esito.applicabili} variazioni passano per intero. Nulla è stato scritto.` : `Prova con problemi: ${esito.problemi.length} variazioni non passano per intero. Nulla è stato scritto.`, esito.pulita ? 'success' : 'warning')
+    } catch (e) { avviso(messaggioErrore(e), 'error') }
+    setOccupato(false)
+  }
+  async function applica() {
+    setOccupato(true); setProva(null)
     try {
       const { esito } = await cralApi.applicaLotto(id)
       await Promise.all([carica(), ricarica()])
@@ -143,17 +157,33 @@ export function LottoView({ id, onChiuso }: { id: string; onChiuso?: () => void 
       <div className={`${cardCls} p-5 flex flex-wrap gap-4 items-start`}>
         <div className="w-10 h-10 rounded-lg bg-indigo-600/20 text-indigo-400 flex items-center justify-center shrink-0"><Ico d={D.doc} cls="w-5 h-5" /></div>
         <div className="flex-1 min-w-[240px]">
-          <p className="text-white font-medium">{lotto.origine === 'ARCHIVIO' ? `Archivio da «${lotto.ambiente}»` : ORIGINI[lotto.origine]} · <span className="font-mono text-sm text-slate-300">{lotto.file}</span></p>
+          <p className="text-white font-medium">{daFuori(lotto) ? `${ORIGINI[lotto.origine]} da «${lotto.ambiente}»` : ORIGINI[lotto.origine]} · <span className="font-mono text-sm text-slate-300">{lotto.file}</span></p>
           <p className="text-xs text-slate-500 mt-0.5">
             Caricato il {fmtData(lotto.creatoIl)}{lotto.creatoDa ? ` da ${lotto.creatoDa}` : ''}{lotto.esportato ? ` · esportato il ${fmtData(lotto.esportato)}` : ''}
             {lotto.stato !== 'APERTO' && ` · ${lotto.stato === 'CHIUSO' ? 'chiuso' : 'scartato'} il ${fmtData(lotto.chiusoIl)}${lotto.chiusoDa ? ` da ${lotto.chiusoDa}` : ''}`}</p>
           {lotto.riepilogo['stessoAmbiente'] === true && <p className="text-xs text-amber-400 mt-1">L'archivio viene da questo stesso ambiente: le differenze sono le modifiche fatte dopo l'export.</p>}
+          {aperto && lotto.origine === 'PGSX' && <p className="text-xs text-slate-400 mt-1">Arrivato da un file cifrato: si applica solo per intero, tutto o niente. In questa versione si confronta, si accetta e si prova; l'applicazione arriva col prossimo rilascio.</p>}
         </div>
         {aperto && <div className="flex flex-wrap gap-2">
           <button className={btnSecondario} disabled={occupato} onClick={() => setScarta(true)}>Scarta il lotto</button>
-          <button className={btnPrimario} disabled={occupato || !accettate} onClick={() => void applica()}><Ico d={D.check} />Applica le accettate ({accettate})</button>
+          <button className={btnSecondario} disabled={occupato || !accettate} onClick={() => void provaLotto()} title="Applica davvero le accettate e poi annulla tutto: dice cosa succederebbe, senza scrivere nulla">{occupato ? 'Attendi…' : `Prova (${accettate})`}</button>
+          {lotto.origine !== 'PGSX' && <button className={btnPrimario} disabled={occupato || !accettate} onClick={() => void applica()}><Ico d={D.check} />Applica le accettate ({accettate})</button>}
         </div>}
       </div>
+
+      {aperto && prova && <div className={`${cardCls} p-5 text-sm border ${prova.pulita ? 'border-emerald-800' : 'border-amber-800'}`}>
+        <div className="flex flex-wrap items-center gap-2">
+          <Pill tono={prova.pulita ? 'ok' : 'warn'}>{prova.pulita ? 'Prova riuscita' : 'Prova con problemi'}</Pill>
+          <span className="text-slate-300">{prova.applicabili} di {prova.accettate} variazioni accettate passano per intero.</span>
+          <span className="text-xs text-slate-500">Il server le ha applicate davvero e poi ha annullato tutto: nel database non è cambiato nulla.</span>
+          <span className="flex-1" /><button className={btnPiccoloSec} onClick={() => setProva(null)}>Chiudi</button>
+        </div>
+        {prova.problemi.length > 0 && <ul className="mt-3 space-y-1 text-xs">{prova.problemi.slice(0, 200).map(p => <li key={p.id} className="text-slate-300"><span className="text-slate-500">{NOMI_SEZIONI[p.sezione as SezioneLotto] ?? p.sezione} · </span>{p.etichetta}<span className="text-amber-300"> — {p.motivo || 'non applicabile'}</span></li>)}
+          {prova.problemi.length > 200 && <li className="text-slate-500">… e altre {prova.problemi.length - 200}</li>}</ul>}
+        <table className="mt-3 text-xs w-full"><tbody>{prova.integrita.map(c => <tr key={c.controllo} className="border-t border-slate-800">
+          <td className="py-1.5 pr-3 text-slate-300">{c.controllo}</td><td className="py-1.5 pr-3 text-slate-400 tabular-nums whitespace-nowrap">prima {c.prima} · dopo {c.dopo}</td>
+          <td className="py-1.5 text-right"><Pill tono={c.ok ? 'ok' : 'err'}>{c.ok ? 'invariato o meglio' : 'peggiora'}</Pill></td></tr>)}</tbody></table>
+      </div>}
 
       {!aperto && <div className={`${cardCls} p-5 text-sm text-slate-300`}>
         <p>Lotto {lotto.stato === 'CHIUSO' ? 'applicato e chiuso' : 'scartato'}. I dati copiati nel lotto sono stati cancellati: restano i conteggi.</p>
@@ -252,8 +282,8 @@ export function ElencoLotti() {
     const c = l.conteggi ?? {}
     return (
       <button key={l.id} onClick={() => setAperto(aperto === l.id ? null : l.id)} className={`w-full text-left px-5 py-3 hover:bg-slate-800/40 flex flex-wrap items-center gap-3 ${aperto === l.id ? 'bg-slate-800/40' : ''}`}>
-        <Pill tono={l.origine === 'ARCHIVIO' ? 'nuovo' : l.origine === 'T7' ? 'ok' : 'cyan'}>{l.origine === 'ARCHIVIO' ? 'Archivio' : l.origine}</Pill>
-        <span className="text-sm text-slate-100 flex-1 min-w-[200px]">{l.origine === 'ARCHIVIO' ? `Da «${l.ambiente}»` : ORIGINI[l.origine]} · <span className="font-mono text-xs text-slate-400">{l.file}</span></span>
+        <Pill tono={daFuori(l) ? 'nuovo' : l.origine === 'T7' ? 'ok' : 'cyan'}>{daFuori(l) ? ORIGINI[l.origine] : l.origine}</Pill>
+        <span className="text-sm text-slate-100 flex-1 min-w-[200px]">{daFuori(l) ? `Da «${l.ambiente}»` : ORIGINI[l.origine]} · <span className="font-mono text-xs text-slate-400">{l.file}</span></span>
         <span className="text-xs text-slate-500 tabular-nums">{fmtData(l.creatoIl)}{l.creatoDa ? ` · ${l.creatoDa}` : ''}</span>
         {l.stato === 'APERTO'
           ? <span className="text-xs text-slate-400">{c['ATTESA'] ? <span className="text-amber-400">{c['ATTESA']} da decidere</span> : 'tutto deciso'}{c['ACCETTATA'] ? ` · ${c['ACCETTATA']} da applicare` : ''}{c['ERRORE'] ? <span className="text-red-300"> · {c['ERRORE']} in errore</span> : ''}</span>

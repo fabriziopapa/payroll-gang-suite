@@ -45,6 +45,7 @@
 //   GET    /lotti | GET /lotti/:id             lotti e variazioni
 //   PATCH  /lotti/:id                          accetta/scarta (voci o intera sezione)
 //   POST   /lotti/:id/applica | /scarta        applica le accettate | scarta il lotto
+//   POST   /lotti/:id/prova                    applica e annulla: dice cosa succederebbe (26.11.14.4)
 // ============================================================
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
@@ -105,7 +106,7 @@ const MAX_IDS    = 5000
 const STATO_HTTP: Record<CralErrore, number> = {
   TESSERA_DOPPIA: 409, TESSERA_FORMATO: 400, MATRICOLA_GIA_SOCIO: 409, NOME_GIA_USATO: 409, SOCIO_NON_TROVATO: 404,
   SEDE_SCONOSCIUTA: 400, LEGAME_NON_VALIDO: 400, STATO_NON_VALIDO: 409, SUFFISSI_ESAURITI: 409, TIPO_SCONOSCIUTO: 400,
-  LOTTO_NON_TROVATO: 404, LOTTO_CHIUSO: 409,
+  LOTTO_NON_TROVATO: 404, LOTTO_CHIUSO: 409, LOTTO_SOLO_PROVA: 409, OCCUPATO: 409,
   TELEFONO_NON_VALIDO: 400, TELEFONO_MANCANTE: 400, CONSENSO_REVOCATO: 409, DATA_NON_VALIDA: 400,
 }
 const eErrore = (x: unknown): x is CralErrore => typeof x === 'string' && x in STATO_HTTP
@@ -577,6 +578,15 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     const r = await repo.applicaLotto(id, uid(request))
     if (eErrore(r)) return errore(reply, r)
     await audit(request, 'CRAL_LOTTO_APPLICATO', id, { ...r })
+    return reply.send({ esito: r })
+  })
+
+  // Prova: l'applicazione eseguita davvero e poi annullata. Non scrive nulla (26.11.14.4).
+  app.post('/lotti/:id/prova', admin, async (request, reply) => {
+    const { id } = z.object({ id: UUID }).parse(request.params)
+    const r = await repo.provaLotto(id, uid(request))
+    if (eErrore(r)) return errore(reply, r)
+    await audit(request, 'CRAL_LOTTO_PROVA', id, { accettate: r.accettate, applicabili: r.applicabili, problemi: r.problemi.length, pulita: r.pulita })
     return reply.send({ esito: r })
   })
 

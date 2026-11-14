@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.11.14.3-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.11.14.4-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -90,7 +90,7 @@ payroll-gang-suite/
 │       ├── auth/                # TOTP (RFC 6238) + JWT ES256 + refresh rotante Argon2id
 │       ├── db/
 │       │   ├── schema.ts        # ★ Schema Drizzle — fonte di verità del DB
-│       │   ├── migrations/      # 0001…0028 — applicate da ./pgs-migra.sh, registrate in schema_migrations
+│       │   ├── migrations/      # 0001…0029 — applicate da ./pgs-migra.sh, registrate in schema_migrations
 │       │   │                    #   (già incluse in setup.sql: NON eseguire su install nuova)
 │       │   └── repositories/    # Repository pattern (PgBozze, PgUsers, PgCertificati, …)
 │       ├── lib/                 # clientIp.ts (IP reale dietro Cloudflare) ·
@@ -101,11 +101,14 @@ payroll-gang-suite/
 │       │                        # versamenti.ts (email degli enti, schema dei modelli mail, con test) ·
 │       │                        # cral.ts (config degli eventi, scelte, sconti, tessera, abbinamento
 │       │                        #   del libro soci all'anagrafica, con test)
+│       │                        # trasferimento.ts (file cifrato .pgsx, frase, manifesto, impronta dello
+│       │                        #   schema, con test)
 │       ├── middleware/          # authenticate.ts (JWT preHandler)
 │       ├── routes/              # /api/v1: auth, bozze, anagrafiche, voci, capitoli,
 │       │                        # settings, users, certificati, emolumenti, emolumenti/tipi-conto (tipiConto.ts),
 │       │                        # pdf-region, cineca, area-conto (areaConto.ts), versamenti (versamenti.ts),
-│       │                        # cral (cral.ts, solo admin)
+│       │                        # cral (cral.ts, solo admin), trasferimento (trasferimento.ts, solo admin:
+│       │                        #   esporta e importa in file cifrato .pgsx)
 │       ├── schemas/             # Zod validazione (BozzaDatiSchema, …)
 │       └── services/            # cryptoService, importService, mailerService, cinecaService
 │           ├── emolumenti/      #   risoluzione nominativi → matricole, testate CSA → conto
@@ -458,7 +461,7 @@ Elenco soci, quote associative e, per ogni evento, riepilogo per sede, scelte/or
 
 `cral_sedi`, `cral_parametri` (tessera e progressivi; dalla 0025 prefisso dei numeri e modelli di esportazione; dalla 0026 `tessera_vincolante`), `cral_tipi`, `cral_tipologie_prodotto`, `cral_soci` (nessun codice fiscale; dalla 0025 telefono, consensi, WhatsApp, esigenze alimentari), `cral_familiari_legami`, `cral_soci_tessere`, `cral_iniziative` (config in JSON validato dal server; `gruppi` fra SD, SE, EST, FAM e, dalla 0027, FEX), `cral_iniziative_partecipanti`, `cral_scelte` (dati in JSON validato contro la config), `cral_carichi`, `cral_richieste`, `cral_quote_anno`, `cral_quote` (dalla 0028 `stato` — dovuta, esente, non dovuta — e `motivo`), `cral_lotti` e `cral_lotti_variazioni` (0023; le variazioni si svuotano alla chiusura del lotto). Importi in centesimi interi.
 
-Audit (entita' `cral`): `CRAL_FILE_LETTO`, `CRAL_IMPORT_ABBINAMENTO`, `CRAL_IMPORT_CONFERMATO`, `CRAL_PERSONA_CREATA` / `_MODIFICATA`, `CRAL_LEGAMI_FAMILIARE`, `CRAL_PERSONE_VALIDA` / `_RIFIUTA` / `_RIMETTI` / `_CESSA` / `_RIATTIVA`, `CRAL_SOCIO_RIAMMESSO`, `CRAL_TROVATO_IN_PGS`, `CRAL_SEDE_ASSEGNATA`, `CRAL_SEDE_*`, `CRAL_TIPO_*`, `CRAL_TIPOLOGIA_*`, `CRAL_PARAMETRI_TESSERA`, `CRAL_EVENTO_CREATO` / `_MODIFICATO` / `_ARCHIVIATO` / `_RIPRISTINATO`, `CRAL_PARTECIPANTI`, `CRAL_SCELTA`, `CRAL_SCELTE_IN_BLOCCO`, `CRAL_CARICO`, `CRAL_RICHIESTA` / `_MODIFICATA`, `CRAL_QUOTA_ANNO`, `CRAL_QUOTA_SOCIO`, `CRAL_TRATTENUTA_MESE`, `CRAL_QUOTA_STATO` (dalla 26.11.14.3: un rigo per socio, con l'ID e il passaggio di stato della quota); dalla 26.10.29 `CRAL_PERSONE_ELIMINA` / `_RIPRISTINA`, `CRAL_TIPOLOGIA_IN_BLOCCO`, `CRAL_PASSAGGIO_SOCIO_ESTERNO`, `CRAL_EXPORT_SOCI`, `CRAL_EXPORT_ARCHIVIO` (ambiente, sezioni, conteggi), `CRAL_LOTTO_T6`, `CRAL_LOTTO_T7`, `CRAL_EXPORT_QUOTE`, `CRAL_LOTTO_ARCHIVIO`, `CRAL_LOTTO_APPLICATO`, `CRAL_LOTTO_SCARTATO`.
+Audit (entita' `cral`): `CRAL_FILE_LETTO`, `CRAL_IMPORT_ABBINAMENTO`, `CRAL_IMPORT_CONFERMATO`, `CRAL_PERSONA_CREATA` / `_MODIFICATA`, `CRAL_LEGAMI_FAMILIARE`, `CRAL_PERSONE_VALIDA` / `_RIFIUTA` / `_RIMETTI` / `_CESSA` / `_RIATTIVA`, `CRAL_SOCIO_RIAMMESSO`, `CRAL_TROVATO_IN_PGS`, `CRAL_SEDE_ASSEGNATA`, `CRAL_SEDE_*`, `CRAL_TIPO_*`, `CRAL_TIPOLOGIA_*`, `CRAL_PARAMETRI_TESSERA`, `CRAL_EVENTO_CREATO` / `_MODIFICATO` / `_ARCHIVIATO` / `_RIPRISTINATO`, `CRAL_PARTECIPANTI`, `CRAL_SCELTA`, `CRAL_SCELTE_IN_BLOCCO`, `CRAL_CARICO`, `CRAL_RICHIESTA` / `_MODIFICATA`, `CRAL_QUOTA_ANNO`, `CRAL_QUOTA_SOCIO`, `CRAL_TRATTENUTA_MESE`, `CRAL_QUOTA_STATO` (dalla 26.11.14.3: un rigo per socio, con l'ID e il passaggio di stato della quota); dalla 26.10.29 `CRAL_PERSONE_ELIMINA` / `_RIPRISTINA`, `CRAL_TIPOLOGIA_IN_BLOCCO`, `CRAL_PASSAGGIO_SOCIO_ESTERNO`, `CRAL_EXPORT_SOCI`, `CRAL_EXPORT_ARCHIVIO` (ambiente, sezioni, conteggi), `CRAL_LOTTO_T6`, `CRAL_LOTTO_T7`, `CRAL_EXPORT_QUOTE`, `CRAL_LOTTO_ARCHIVIO`, `CRAL_LOTTO_APPLICATO`, `CRAL_LOTTO_SCARTATO`; dalla 26.11.14.4 `CRAL_LOTTO_PROVA` (accettate, applicabili, problemi: l'applicazione provata e annullata).
 
 ## Sezione PDF Region Editor
 
@@ -478,6 +481,39 @@ Strumento admin per costruire **template di riconoscimento layout** dei cedolini
 **Schema DB**: tabella, indici (incluso l'unico parziale "1 versione attiva per famiglia") e seed inclusi in `server/sql/setup.sql` (consolidato). Le migrazioni storiche `0006`/`0007` restano come riferimento del DB di produzione (nota: la `0007` usava `CREATE UNIQUE INDEX CONCURRENTLY`, da eseguire fuori transazione — irrilevante su installazione nuova).
 
 **Nginx (deploy)**: il rendering PDF carica un Web Worker da `pdfjs-dist` — la CSP servita da Nginx per la SPA deve includere `worker-src 'self';` (assente di default, va aggiunta manualmente alla direttiva `Content-Security-Policy` nel vhost — il CSP di `@fastify/helmet` lato server **non** governa gli asset statici serviti da Nginx).
+
+---
+
+## Esporta e importa (file cifrato fra ambienti, dalla 26.11.14.4)
+
+*Impostazioni → Esporta e importa*, **solo amministratori**. Porta i dati da un'installazione di PGS a un'altra (produzione ↔ pre-produzione, nei due versi) in un file cifrato `.pgsx`. Rotte `/api/v1/trasferimento` (`routes/trasferimento.ts`), regole pure in `server/src/lib/trasferimento.ts`, scheda in `client/src/components/trasferimento/EsportaImporta.tsx`. **In questa versione si trasferisce il CRAL**; le altre sezioni arrivano nei prossimi rilasci.
+
+### Il file `.pgsx`
+
+- **Cifrato per intero**: AES-256-GCM, chiave derivata dalla frase con Argon2id (64 MiB, 3 passate). In chiaro restano 33 byte tecnici (sigla, versione, sale, nonce), anch'essi protetti dal sigillo: ne' l'ambiente ne' il contenuto si leggono senza la frase.
+- **La frase la genera il server** (5 gruppi di 5 caratteri, circa 123 bit), la mostra **una volta** e non la conserva: non c'e' modo di recuperarla. File e frase non vanno tenuti insieme.
+- **Parametri di derivazione fissati dalla versione del formato**, mai letti dal file: un file ostile non puo' chiedere gigabyte di memoria prima di essere verificato. La decompressione ha un tetto (64 MB), il file anche (16 MB).
+- Un bit cambiato, un file troncato o la frase sbagliata danno lo **stesso** rifiuto.
+- `*.pgsx` e' in `.gitignore` e fra i file che il pre-commit rifiuta: sono dati, anche se cifrati.
+
+### Esportare
+
+Si scelgono le parti (sedi, parametri e tabelle, soci e familiari, quote, eventi) e si conferma con un **codice OTP nuovo**: un token di accesso rubato non basta a portarsi via i dati. Stesse difese del login (blocco dopo 5 errori, codice non riusabile); il codice usato per entrare non vale una seconda volta.
+
+### Importare
+
+1. Il file si carica **a pezzi** (384 kB): non dipende dai limiti di dimensione di nginx, Apache, ModSecurity o Cloudflare. Pezzi e contenuto vivono **in memoria**, per 15 minuti al massimo, visibili solo a chi li ha caricati; nulla tocca il disco.
+2. Il server lo apre con la frase e verifica: **integrita'** (sigillo, impronta di ogni sezione contro il manifesto) e **schema**. Lo schema del file e quello di qui devono coincidere in due cose: le migrazioni registrate (versione e checksum) e la struttura reale del database letta dal catalogo (tabelle, colonne, tipi, chiavi, nomi dei vincoli). Se non coincidono il file e' **rifiutato** con la spiegazione, prima di leggere qualunque dato.
+3. Il confronto prepara un **lotto da validare** nel modulo CRAL (provenienza *File cifrato*): record nuovi, modificati, in conflitto, bloccati; si accetta o si scarta anche un campo alla volta. Niente si cancella in arrivo, un valore vuoto non svuota.
+4. **Prova** (`POST /cral/lotti/:id/prova`, disponibile per ogni lotto): il server applica **davvero** le variazioni accettate e poi **annulla tutto**. Dice in anticipo quali passano per intero, quali no e perche', e confronta prima e dopo i controlli che il database non fa da se' (soci dipendenti senza matricola in anagrafica, sedi citate dagli eventi, progressivi). Non scrive nulla, nemmeno l'esito sulle variazioni. Se un collega tiene occupati gli stessi dati rinuncia in 5 secondi (`OCCUPATO`).
+
+**Applicare** un lotto arrivato da file cifrato non e' ancora possibile (`LOTTO_SOLO_PROVA`): si applichera' solo per intero, tutto o niente, col prossimo rilascio. Fino ad allora per scrivere resta la strada di sempre (*Importa → Archivio fra ambienti*, in chiaro).
+
+L'impronta dello schema non guarda il **testo** dei vincoli `CHECK` ne' le estensioni: PostgreSQL riscrive i `CHECK` a ogni dump e ripristino, e due ambienti identici risulterebbero diversi (verificato sui due server). Il modulo non usa funzioni XML ne' estensioni: il PostgreSQL di produzione e' compilato senza `libxml`.
+
+Audit (entita' `trasferimento`): `TRASFERIMENTO_EXPORT` (file, dimensione, impronta, conteggi; mai la frase), `TRASFERIMENTO_FILE_APERTO`, `TRASFERIMENTO_FILE_RIFIUTATO`, `TRASFERIMENTO_CONFRONTO`; `OTP_CONFERMA_FALLITA` (entita' `users`); `CRAL_LOTTO_PROVA` (entita' `cral`).
+
+`pgs-diagnosi-trasferimento.sh` (da root, sola lettura, stampa solo numeri) dice in che stato e' un ambiente prima di un trasferimento: pesi, cifratura dei campi protetti, riferimenti gia' orfani, contatori, limiti del proxy.
 
 ---
 
@@ -627,6 +663,20 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.11.14.4
+**Esporta e importa: file cifrato `.pgsx` fra ambienti (primo rilascio: il CRAL, senza scrittura)**
+
+- **Il problema**: i dati del CRAL vivono in pre-produzione e devono arrivare in produzione; l'archivio fra ambienti di oggi e' un JSON **in chiaro** con telefoni, consensi ed esigenze alimentari, e la sua applicazione conferma le variazioni riuscite lasciando in errore le altre (importazione parziale).
+- **Scheda *Impostazioni → Esporta e importa*** (solo amministratori). **Esporta**: parti del CRAL a scelta, conferma con un codice OTP nuovo, file `.pgsx` cifrato per intero (AES-256-GCM, chiave da Argon2id) e frase generata dal server, mostrata una volta. **Importa**: file caricato a pezzi, aperto con la frase, verificato (integrita' e schema identico: migrazioni e struttura reale), confronto con i dati di qui in un lotto da validare nel modulo CRAL.
+- **Prova** su ogni lotto (*Da validare*): il server applica davvero le accettate e poi annulla tutto; dice quali variazioni passano per intero, quali no e perche', e se i controlli sul database reggono. Nulla viene scritto.
+- **Da qui non si scrive ancora**: un lotto arrivato da file cifrato non si applica con la strada degli altri (`LOTTO_SOLO_PROVA`); si applichera' solo per intero col prossimo rilascio. L'archivio in chiaro e i tracciati Excel funzionano come prima.
+- **Migrazione `0029_cral_lotti_pgsx.sql`**: aggiunge la provenienza `PGSX` al vincolo di `cral_lotti.origine`. Non tocca i dati; idempotente; `setup.sql` allineato.
+- **Server**: `lib/trasferimento.ts` (file cifrato, frase, manifesto, impronta dello schema), `routes/trasferimento.ts`, `PgTrasferimentoRepository` (catalogo, sola lettura), `AuthService.confermaOtp`, `PgCralRepository.provaLotto` (il cuore dell'applicazione ora e' condiviso da «Applica» e dalla Prova: per «Applica» il comportamento non cambia).
+- **Client**: `components/trasferimento/EsportaImporta.tsx` (nuovo), scheda in `ImpostazioniPage.tsx`, pulsante «Prova» e riquadro dell'esito in `components/cral/Lotto.tsx`.
+- **`pgs-diagnosi-trasferimento.sh`** (gia' pubblicato): diagnosi di sola lettura e soli conteggi dei due ambienti. Ha fatto trovare 176 codici fiscali in chiaro nei riferimenti cedolino di due bozze storiche, cifrati il 14/11 con `encrypt-bozze-cf-backfill.ts` su entrambi i server.
+- **File vietati**: `*.pgsx` in `.gitignore` e nel pre-commit.
+- **Test**: server +10 (file cifrato, frase, manifesto, impronta dello schema).
 
 ### 26.11.14.3
 **Modulo CRAL: «Allinea soci» nelle Quote associative — quota dovuta, esente o non dovuta**

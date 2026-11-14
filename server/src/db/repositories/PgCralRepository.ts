@@ -14,7 +14,7 @@ import type {
   ICralRepository, CralModelloExport, CralPatchContatti, CralStato, CralSedeRow, CralTipoRow, CralTipologiaRow, CralParametriRow, CralTesseraParam,
   CralSocioRow, CralIniziativaRow, CralCaricoRow, CralRichiestaRow, CralQuotaRow, CralStatoQuota, CralVoceAllinea, CralAnagraficaRow,
   CralNuovaPersona, CralModificaPersona, CralOperazioneImport, CralEsitoImport, CralErrore, CralAzioneStato,
-  CralLottoRow, CralVariazioneRow, CralEsitoApplica,
+  CralLottoRow, CralVariazioneRow, CralEsitoApplica, CralEsitoProva, CralOrigineLotto,
 } from '../IRepository.js'
 import { ALIMENTARI_VUOTI, CONTATTI_VUOTI, alimentariDopo, contattiDopo, type Alimentari, type Contatti } from '../../lib/cralContatti.js'
 import { baseTessera, erroreDati, prossimoDopo, quotaDopoModifica, rataMese, tesseraNelFormato, tesseraRiammissione, usiTolti, type ConfigEvento } from '../../lib/cral.js'
@@ -46,9 +46,17 @@ function violazioneUnica(err: unknown): boolean {
 class Annulla extends Error { constructor(readonly codice: CralErrore) { super(codice) } }
 /** Una variazione del lotto che non si puo' applicare: resta in errore con il motivo. */
 class Salta extends Error {}
+/** Fine di una Prova: porta fuori l'esito e fa annullare la transazione. */
+class FineProva extends Error { constructor(readonly esito: CralEsitoProva) { super('PROVA') } }
+/** PostgreSQL ha rinunciato ad aspettare un blocco (55P03) o ha superato il tempo massimo (57014). */
+function attesaScaduta(err: unknown): boolean {
+  const e = err as { code?: string; cause?: { code?: string } } | null
+  const c = e?.code ?? e?.cause?.code
+  return c === '55P03' || c === '57014'
+}
 
 interface CtxApplica {
-  userId: string | null; ambiente: string; origine: 'T6' | 'T7' | 'ARCHIVIO'
+  userId: string | null; ambiente: string; origine: CralOrigineLotto
   /** username → id degli utenti di qui */
   utenti: Map<string, string>
   /** ID dell'archivio → ID di qui (chi entra con un nuovo ID); resta nel lotto fra un'applicazione e l'altra */
@@ -756,7 +764,7 @@ export class PgCralRepository implements ICralRepository {
 
   // ── Lotti di variazioni (0023) ─────────────────────────────
   async creaLotto(
-    l: { origine: 'T6' | 'T7' | 'ARCHIVIO'; file: string; ambiente: string; esportato: string | null; sezioni: string[]; riepilogo: Record<string, unknown> },
+    l: { origine: CralOrigineLotto; file: string; ambiente: string; esportato: string | null; sezioni: string[]; riepilogo: Record<string, unknown> },
     vs: Variazione[], userId: string | null,
   ): Promise<string> {
     return this.db.transaction(async tx => {
@@ -877,43 +885,126 @@ export class PgCralRepository implements ICralRepository {
       const [l] = await tx.select().from(schema.cralLotti).where(eq(schema.cralLotti.id, id)).for('update')
       if (!l) throw new Annulla('LOTTO_NON_TROVATO')
       if (l.stato !== 'APERTO') throw new Annulla('LOTTO_CHIUSO')
-      const vs = await tx.select().from(schema.cralLottiVariazioni)
-        .where(and(eq(schema.cralLottiVariazioni.lottoId, id), eq(schema.cralLottiVariazioni.esito, 'ACCETTATA'))).orderBy(asc(schema.cralLottiVariazioni.ordine))
-      const utenti = new Map((await tx.select({ id: schema.users.id, username: schema.users.username }).from(schema.users)).map(u => [u.username, u.id]))
-      const rie = l.riepilogo as { mappaId?: Record<string, string>; daRimappare?: string[] }
-      const ctx: CtxApplica = {
-        userId, ambiente: l.ambiente, origine: l.origine as 'T6' | 'T7' | 'ARCHIVIO', utenti, oggi: oggi(),
-        idMap: new Map(Object.entries(rie.mappaId ?? {})), vietati: new Set(rie.daRimappare ?? []),
-      }
-      const esito: CralEsitoApplica = { applicate: 0, errori: 0, campiSaltati: 0, chiuso: false }
-      for (const v of vs) {
-        let ok = false, nota = ''
-        try {
-          const r = await tx.transaction(sp => this.applicaVariazione(sp as unknown as TX, v, ctx))
-          ok = r.fatti > 0; esito.campiSaltati += r.saltati.length
-          nota = r.saltati.length ? `Saltati: ${r.saltati.join('; ')}` : ''
-          if (!ok && !nota) nota = 'Niente da applicare'
-        } catch (e) {
-          nota = e instanceof Salta ? e.message : e instanceof Annulla ? e.codice : violazioneUnica(e) ? 'valore già usato (tessera o matricola)' : `errore del database${(e as { code?: string })?.code ? ` (${(e as { code?: string }).code})` : ''}`
-        }
-        await tx.update(schema.cralLottiVariazioni).set({ esito: ok ? 'APPLICATA' : 'ERRORE', nota: nota.slice(0, 300) }).where(eq(schema.cralLottiVariazioni.id, v.id))
-        if (ok) esito.applicate++; else esito.errori++
-      }
-      if (ctx.idMap.size) {
-        await tx.update(schema.cralLotti).set({ riepilogo: sql`${schema.cralLotti.riepilogo} || ${JSON.stringify({ mappaId: Object.fromEntries(ctx.idMap) })}::jsonb` }).where(eq(schema.cralLotti.id, id))
-      }
-      // i prossimi EXT-/FAM- non devono ripetere un ID arrivato dall'archivio
-      await tx.execute(sql`
-        UPDATE cral_parametri SET
-          ext_prossimo = GREATEST(ext_prossimo, COALESCE((SELECT max(substring(id FROM 5)::int) FROM cral_soci WHERE id LIKE 'EXT-%'), 0) + 1),
-          fam_prossimo = GREATEST(fam_prossimo, COALESCE((SELECT max(substring(id FROM 5)::int) FROM cral_soci WHERE id LIKE 'FAM-%'), 0) + 1)
-        WHERE id = 1`)
+      // Un lotto arrivato da un file cifrato si applica solo per intero (tutto o niente):
+      // questa strada, che assorbe l'errore di una variazione e conferma le altre, non e' per lui.
+      if (l.origine === 'PGSX') throw new Annulla('LOTTO_SOLO_PROVA')
+      const { esito } = await this.eseguiAccettate(tx, l, userId)
       const [resto] = await tx.select({ n: sql<number>`count(*)::int` }).from(schema.cralLottiVariazioni)
         // le bloccate non si possono accettare: non tengono aperto il lotto
         .where(and(eq(schema.cralLottiVariazioni.lottoId, id), sql`(${schema.cralLottiVariazioni.esito} IN ('ACCETTATA', 'ERRORE') OR (${schema.cralLottiVariazioni.esito} = 'ATTESA' AND NOT (${schema.cralLottiVariazioni.dati} ? 'bloccata')))`))
       if (!resto?.n) { await this.chiudiLotto(tx, id, 'CHIUSO', userId); esito.chiuso = true }
       return esito
     })
+  }
+
+  /**
+   * Prova: esegue l'applicazione delle variazioni accettate DAVVERO, poi
+   * annulla tutto (ROLLBACK). Dice in anticipo, e con certezza, che cosa
+   * succederebbe: quali variazioni passano, quali no e perche', e se i
+   * controlli sul database reggono. Non scrive nulla: nemmeno l'esito
+   * sulle variazioni, che resta com'era.
+   *
+   * Vale per ogni lotto aperto. Tempi massimi propri: se un collega tiene
+   * occupati gli stessi dati la Prova rinuncia ('OCCUPATO') invece di
+   * restare in attesa.
+   */
+  async provaLotto(id: string, userId: string | null): Promise<CralEsitoProva | CralErrore> {
+    try {
+      await this.db.transaction(async tx => {
+        await tx.execute(sql`SET LOCAL lock_timeout = '5s'`)
+        await tx.execute(sql`SET LOCAL statement_timeout = '40s'`)
+        await tx.execute(lucchetto)
+        const [l] = await tx.select().from(schema.cralLotti).where(eq(schema.cralLotti.id, id)).for('update')
+        if (!l) throw new Annulla('LOTTO_NON_TROVATO')
+        if (l.stato !== 'APERTO') throw new Annulla('LOTTO_CHIUSO')
+        const prima = await this.controlliIntegrita(tx)
+        const { esito, accettate, problemi } = await this.eseguiAccettate(tx, l, userId)
+        const dopo = await this.controlliIntegrita(tx)
+        const integrita = prima.map((p, i) => ({ controllo: p.controllo, prima: p.valore, dopo: dopo[i]!.valore, ok: dopo[i]!.valore <= p.valore }))
+        throw new FineProva({
+          accettate, applicabili: esito.applicate - problemi.filter(x => x.parziale).length,
+          problemi: problemi.map(({ parziale: _p, ...x }) => x), integrita,
+          pulita: problemi.length === 0 && integrita.every(c => c.ok),
+        })
+      })
+      throw new Error('la Prova non deve mai confermare la transazione')
+    } catch (e) {
+      if (e instanceof FineProva) return e.esito
+      if (e instanceof Annulla) return e.codice
+      if (attesaScaduta(e)) return 'OCCUPATO'
+      throw e
+    }
+  }
+
+  /**
+   * I controlli che il database non fa da se': riferimenti senza chiave
+   * esterna e contatori. Sono conteggi di cio' che NON va: una Prova e'
+   * pulita se nessuno cresce (in produzione qualcuno puo' non essere a
+   * zero gia' oggi: conta che l'importazione non ne aggiunga).
+   */
+  private async controlliIntegrita(tx: TX): Promise<Array<{ controllo: string; valore: number }>> {
+    const [r] = await tx.execute(sql`
+      SELECT
+        (SELECT count(*)::int FROM cral_soci s WHERE s.matricola IS NOT NULL AND NOT EXISTS (SELECT 1 FROM anagrafiche a WHERE a.matricola = s.matricola)) AS matricole,
+        (SELECT count(*)::int FROM (SELECT DISTINCT unnest(sedi) AS sede FROM cral_iniziative) x WHERE NOT EXISTS (SELECT 1 FROM cral_sedi s WHERE s.id = x.sede)) AS sedi,
+        (SELECT count(*)::int FROM cral_parametri p WHERE p.ext_prossimo <= COALESCE((SELECT max(substring(id FROM 5)::int) FROM cral_soci WHERE id LIKE 'EXT-%'), 0)
+                                                        OR p.fam_prossimo <= COALESCE((SELECT max(substring(id FROM 5)::int) FROM cral_soci WHERE id LIKE 'FAM-%'), 0)) AS contatori
+    `) as unknown as Array<{ matricole: number; sedi: number; contatori: number }>
+    return [
+      { controllo: 'Soci dipendenti con matricola non presente in anagrafica', valore: r?.matricole ?? 0 },
+      { controllo: 'Sedi citate dagli eventi e non presenti fra le sedi', valore: r?.sedi ?? 0 },
+      { controllo: 'Progressivi EXT/FAM non oltre l\'ultimo ID usato', valore: r?.contatori ?? 0 },
+    ]
+  }
+
+  /**
+   * Il cuore dell'applicazione, condiviso da «Applica» e dalla Prova: ogni
+   * variazione accettata nel suo salva-punto, l'esito scritto sulla riga,
+   * la mappa degli ID e i progressivi aggiornati. `problemi` elenca le
+   * variazioni che non sono passate per intero (in errore, o con campi
+   * saltati perche' il valore di qui non e' piu' quello visto).
+   */
+  private async eseguiAccettate(tx: TX, l: typeof schema.cralLotti.$inferSelect, userId: string | null): Promise<{
+    esito: CralEsitoApplica; accettate: number
+    problemi: Array<{ id: number; sezione: string; etichetta: string; motivo: string; parziale: boolean }>
+  }> {
+    const id = l.id
+    const vs = await tx.select().from(schema.cralLottiVariazioni)
+      .where(and(eq(schema.cralLottiVariazioni.lottoId, id), eq(schema.cralLottiVariazioni.esito, 'ACCETTATA'))).orderBy(asc(schema.cralLottiVariazioni.ordine))
+    const utenti = new Map((await tx.select({ id: schema.users.id, username: schema.users.username }).from(schema.users)).map(u => [u.username, u.id]))
+    const rie = l.riepilogo as { mappaId?: Record<string, string>; daRimappare?: string[] }
+    const ctx: CtxApplica = {
+      userId, ambiente: l.ambiente, origine: l.origine as CralOrigineLotto, utenti, oggi: oggi(),
+      idMap: new Map(Object.entries(rie.mappaId ?? {})), vietati: new Set(rie.daRimappare ?? []),
+    }
+    const esito: CralEsitoApplica = { applicate: 0, errori: 0, campiSaltati: 0, chiuso: false }
+    const problemi: Array<{ id: number; sezione: string; etichetta: string; motivo: string; parziale: boolean }> = []
+    for (const v of vs) {
+      let ok = false, nota = ''
+      try {
+        const r = await tx.transaction(sp => this.applicaVariazione(sp as unknown as TX, v, ctx))
+        ok = r.fatti > 0; esito.campiSaltati += r.saltati.length
+        nota = r.saltati.length ? `Saltati: ${r.saltati.join('; ')}` : ''
+        if (!ok && !nota) nota = 'Niente da applicare'
+      } catch (e) {
+        // un'attesa scaduta non e' un difetto della variazione: ferma tutto
+        if (attesaScaduta(e)) throw e
+        nota = e instanceof Salta ? e.message : e instanceof Annulla ? e.codice : violazioneUnica(e) ? 'valore già usato (tessera o matricola)' : `errore del database${(e as { code?: string })?.code ? ` (${(e as { code?: string }).code})` : ''}`
+      }
+      await tx.update(schema.cralLottiVariazioni).set({ esito: ok ? 'APPLICATA' : 'ERRORE', nota: nota.slice(0, 300) }).where(eq(schema.cralLottiVariazioni.id, v.id))
+      if (ok) esito.applicate++; else esito.errori++
+      if (!ok || nota) problemi.push({ id: v.id, sezione: v.sezione, etichetta: String((v.dati as { etichetta?: unknown }).etichetta ?? v.chiave), motivo: nota.slice(0, 300), parziale: ok })
+    }
+    if (ctx.idMap.size) {
+      await tx.update(schema.cralLotti).set({ riepilogo: sql`${schema.cralLotti.riepilogo} || ${JSON.stringify({ mappaId: Object.fromEntries(ctx.idMap) })}::jsonb` }).where(eq(schema.cralLotti.id, id))
+    }
+    // i prossimi EXT-/FAM- non devono ripetere un ID arrivato dall'archivio
+    await tx.execute(sql`
+      UPDATE cral_parametri SET
+        ext_prossimo = GREATEST(ext_prossimo, COALESCE((SELECT max(substring(id FROM 5)::int) FROM cral_soci WHERE id LIKE 'EXT-%'), 0) + 1),
+        fam_prossimo = GREATEST(fam_prossimo, COALESCE((SELECT max(substring(id FROM 5)::int) FROM cral_soci WHERE id LIKE 'FAM-%'), 0) + 1)
+      WHERE id = 1`)
+    return { esito, accettate: vs.length, problemi }
   }
 
   private async applicaVariazione(tx: TX, v: typeof schema.cralLottiVariazioni.$inferSelect, c: CtxApplica): Promise<{ fatti: number; saltati: string[] }> {

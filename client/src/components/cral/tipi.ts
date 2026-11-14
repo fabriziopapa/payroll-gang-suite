@@ -142,10 +142,17 @@ export interface AnagraficaPgs {
 // ── Lotti di variazioni da validare ──────────────────────────
 export type SezioneLotto = 'sedi' | 'tabelle' | 'soci' | 'quote' | 'eventi'
 export interface Lotto {
-  id: string; origine: 'T6' | 'T7' | 'ARCHIVIO'; file: string; ambiente: string; esportato: string | null; sezioni: SezioneLotto[]
+  id: string; origine: 'T6' | 'T7' | 'ARCHIVIO' | 'PGSX'; file: string; ambiente: string; esportato: string | null; sezioni: SezioneLotto[]
   stato: 'APERTO' | 'CHIUSO' | 'SCARTATO'; riepilogo: Record<string, unknown>
   creatoDa: string | null; creatoIl: string; chiusoDa: string | null; chiusoIl: string | null
   conteggi?: Record<string, number>
+}
+/** Esito di una Prova: l'applicazione eseguita davvero e poi annullata (26.11.14.4). */
+export interface EsitoProva {
+  accettate: number; applicabili: number
+  problemi: Array<{ id: number; sezione: string; etichetta: string; motivo: string }>
+  integrita: Array<{ controllo: string; prima: number; dopo: number; ok: boolean }>
+  pulita: boolean
 }
 export interface CampoVariazione { campo: string; etichetta: string; prima: unknown; dopo: unknown; blocco?: string }
 export interface Variazione {

@@ -984,14 +984,16 @@ export interface CralEsitoImport { nuoviPgs: number; nuoviEsterni: number; aggio
 export type CralErrore =
   | 'TESSERA_DOPPIA' | 'TESSERA_FORMATO' | 'MATRICOLA_GIA_SOCIO' | 'SOCIO_NON_TROVATO' | 'SEDE_SCONOSCIUTA'
   | 'LEGAME_NON_VALIDO' | 'STATO_NON_VALIDO' | 'SUFFISSI_ESAURITI' | 'NOME_GIA_USATO' | 'TIPO_SCONOSCIUTO'
-  | 'LOTTO_NON_TROVATO' | 'LOTTO_CHIUSO'
+  | 'LOTTO_NON_TROVATO' | 'LOTTO_CHIUSO' | 'LOTTO_SOLO_PROVA' | 'OCCUPATO'
   | 'TELEFONO_NON_VALIDO' | 'TELEFONO_MANCANTE' | 'CONSENSO_REVOCATO' | 'DATA_NON_VALIDA'
 
 export type CralAzioneStato = 'valida' | 'rifiuta' | 'rimetti' | 'cessa' | 'riattiva' | 'elimina' | 'ripristina'
 
+/** Da dove viene un lotto: tracciati Excel, archivio in chiaro, file cifrato .pgsx (0029). */
+export type CralOrigineLotto = 'T6' | 'T7' | 'ARCHIVIO' | 'PGSX'
 /** Lotto di variazioni da validare (0023). */
 export interface CralLottoRow {
-  id: string; origine: 'T6' | 'T7' | 'ARCHIVIO'; file: string; ambiente: string; esportato: string | null; sezioni: string[]
+  id: string; origine: CralOrigineLotto; file: string; ambiente: string; esportato: string | null; sezioni: string[]
   stato: 'APERTO' | 'CHIUSO' | 'SCARTATO'; riepilogo: Record<string, unknown>
   creatoDa: string | null; creatoIl: string; chiusoDa: string | null; chiusoIl: string | null
   /** Conteggi per esito (solo nell'elenco). */
@@ -1004,6 +1006,19 @@ export interface CralVariazioneRow {
   avviso: string | null; nota: string
 }
 export interface CralEsitoApplica { applicate: number; errori: number; campiSaltati: number; chiuso: boolean }
+/**
+ * Esito di una Prova: l'applicazione eseguita davvero e poi annullata.
+ * `problemi`: le variazioni accettate che non passerebbero per intero;
+ * `integrita`: i controlli sul database prima e dopo (riferimenti senza
+ * chiave esterna, contatori).
+ */
+export interface CralEsitoProva {
+  accettate: number; applicabili: number
+  problemi: Array<{ id: number; sezione: string; etichetta: string; motivo: string }>
+  integrita: Array<{ controllo: string; prima: number; dopo: number; ok: boolean }>
+  /** Si puo' applicare: nessun problema e nessun controllo peggiorato. */
+  pulita: boolean
+}
 
 export interface CralPatchContatti {
   contatti?: import('../lib/cralContatti.js').PatchContatti
@@ -1073,4 +1088,14 @@ export interface RepositoryFactory {
   audit:             IAuditRepository
   capitoliAnag:      ICapitoliAnagRepository
   pdfRegionTemplates: IPdfRegionTemplatesRepository
+}
+
+// ------------------------------------------------------------
+// ESPORTA E IMPORTA (26.11.14.4) — quel che serve dal catalogo
+// ------------------------------------------------------------
+export interface ITrasferimentoRepository {
+  /** Migrazioni registrate (versione e checksum); vuoto se il registro non c'e'. */
+  migrazioni(): Promise<Array<{ versione: string; checksum: string }>>
+  /** Colonne, vincoli e indici unici dello schema public, una riga ciascuno. */
+  struttura(): Promise<string[]>
 }

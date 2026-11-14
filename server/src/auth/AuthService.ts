@@ -183,6 +183,40 @@ export class AuthService {
   }
 
   // ----------------------------------------------------------
+  // Conferma con OTP di un'operazione delicata (utente gia' dentro)
+  // ----------------------------------------------------------
+
+  /**
+   * Chiede di nuovo il codice a chi e' gia' autenticato, prima di
+   * un'operazione che un token rubato non deve poter fare da solo
+   * (esportare i dati in un file). Stesse difese del login, con gli
+   * stessi pezzi: blocco dopo 5 errori, codice non riusabile (claim
+   * atomico). Non emette token e non tocca l'ultimo accesso.
+   *
+   * Lancia 'ACCOUNT_LOCKED' o 'OTP_NON_VALIDO'. Il codice usato per
+   * entrare non vale una seconda volta: serve quello successivo.
+   */
+  async confermaOtp(userId: string, username: string, otpToken: string, ip: string, operazione: string): Promise<void> {
+    const user = await this.usersRepo.findByUsername(username)
+    const rifiuta = async (motivo: string, codice: 'ACCOUNT_LOCKED' | 'OTP_NON_VALIDO'): Promise<never> => {
+      await this.auditRepo.log({ userId, azione: 'OTP_CONFERMA_FALLITA', entita: 'users', entitaId: userId, dettagli: { operazione, motivo }, ip })
+      throw new Error(codice)
+    }
+    // l'identita' viene dal token di accesso: lo username deve essere ancora quello di quell'utente
+    if (!user || user.id !== userId || !user.isActive || !user.totpVerified) return rifiuta('UTENTE_NON_VALIDO', 'OTP_NON_VALIDO')
+    if (user.lockedUntil && user.lockedUntil > new Date()) return rifiuta('ACCOUNT_LOCKED', 'ACCOUNT_LOCKED')
+
+    const result = await this.authModule.verify(user.id, user.totpSecret, otpToken, user.lastOtpToken)
+    if (!result.valid) {
+      await this.usersRepo.incrementFailedOtp(user.id)
+      return rifiuta(result.reason ?? 'INVALID_OTP', 'OTP_NON_VALIDO')
+    }
+    const claimed = await this.usersRepo.claimOtpToken(user.id, otpToken)
+    if (!claimed) return rifiuta('replay', 'OTP_NON_VALIDO')
+    await this.usersRepo.resetFailedOtp(user.id)
+  }
+
+  // ----------------------------------------------------------
   // Refresh token rotante
   // ----------------------------------------------------------
 

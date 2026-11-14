@@ -37,7 +37,7 @@ ALLOW_MATR='09[0-9]{4}|99[0-9]{3}|90[0-9]{4}|000601|000602|000706|000000|000100|
 # Pattern segreti evidenti
 SECRETS='BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|postgres(ql)?://[^ "]*:[^ "]*@|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{30,}|github_pat_|xox[bap]-|sk-[A-Za-z0-9]{20,}'
 # File/dir vietati a prescindere
-BANNED='(^|/)\.env($|\.)|\.pdf$|\.docx$|\.xlsx$|\.dump$|\.bak$|\.pem$|\.key$|\.p12$|\.pfx$|output-esempio/'
+BANNED='(^|/)\.env($|\.)|\.pdf$|\.docx$|\.xlsx$|\.dump$|\.pgsx$|\.bak$|\.pem$|\.key$|\.p12$|\.pfx$|output-esempio/'
 
 while IFS= read -r f; do
   [ -z "$f" ] && continue

@@ -199,6 +199,8 @@ const ERRORI: Record<string, string> = {
   FORBIDDEN: 'Operazione riservata agli amministratori.',
   LOTTO_NON_TROVATO: 'Lotto non trovato: ricarica la pagina.',
   LOTTO_CHIUSO: 'Il lotto è già chiuso.',
+  LOTTO_SOLO_PROVA: 'Un lotto arrivato da file cifrato si applica solo per intero: in questa versione si può confrontare e provare, non ancora applicare.',
+  OCCUPATO: 'Qualcuno sta lavorando sugli stessi dati: riprova fra qualche secondo. Non è stato scritto nulla.',
   ARCHIVIO_NON_VALIDO: 'Il file non è un archivio CRAL valido (esportato da PGS 26.10.29 o successivo).',
   NESSUNA_SEZIONE: 'Scegli almeno una sezione.',
   TELEFONO_NON_VALIDO: 'Numero di telefono non valido.',

@@ -55,6 +55,8 @@ cedolino_expected.json
 # ── Dump e backup database ───────────────────────────────────
 *.dump
 *.bak
+# File cifrati di Esporta e importa (26.11.14.4): sono dati, anche se cifrati.
+*.pgsx
 *.sql.gz
 dump.sql
 # Database locali e archivi (26.10.26.3): un sqlite di un programma
