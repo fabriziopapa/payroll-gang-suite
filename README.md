@@ -121,6 +121,7 @@ payroll-gang-suite/
 ├── ecosystem.config.cjs         # Process manager (produzione)
 ├── .env.example                 # Variabili d'ambiente, documentate una per una
 ├── .githooks/pre-commit         # Guardrail PII e segreti (CF, matricole, idAb, chiavi)
+├── pgs-diagnosi-trasferimento.sh # Diagnosi di sola lettura e soli conteggi (pesi, cifratura, orfani, limiti del proxy): `bash pgs-diagnosi-trasferimento.sh` da root
 └── LICENSE
 ```
 
