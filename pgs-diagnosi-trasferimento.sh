@@ -68,12 +68,11 @@ ORDER BY 1;
 
 \echo
 \echo ######## 2. Righe e peso di ogni tabella
-SELECT c.relname AS tabella,
-       (xpath('/row/n/text()', query_to_xml(format('SELECT count(*) AS n FROM %I', c.relname), false, true, '')))[1]::text::bigint AS righe,
-       pg_size_pretty(pg_total_relation_size(c.oid)) AS peso
+SELECT string_agg(format('SELECT %L AS tabella, count(*) AS righe, pg_size_pretty(pg_total_relation_size(%L::regclass)) AS peso, pg_total_relation_size(%L::regclass) AS byte FROM %I',
+                         c.relname, 'public.' || quote_ident(c.relname), 'public.' || quote_ident(c.relname), c.relname), ' UNION ALL ') || ' ORDER BY byte DESC'
 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = 'public' AND c.relkind = 'r'
-ORDER BY pg_total_relation_size(c.oid) DESC;
+\gexec
 
 \echo
 \echo ######## 3. Peso dei campi JSON (quanto peserebbe una esportazione)
@@ -97,9 +96,9 @@ SELECT campo, stato, count(*) AS righe FROM (
   UNION ALL SELECT 'users.totp_secret', CASE WHEN totp_secret ~ :enc THEN 'cifrato' ELSE 'ALTRO' END FROM users
   UNION ALL SELECT 'bozze nominativi.codFisc', CASE WHEN coalesce(e->>'codFisc','') = '' THEN 'vuoto' WHEN e->>'codFisc' LIKE 'PGS05:%' THEN 'cifrato' WHEN upper(e->>'codFisc') ~ :cf THEN 'IN CHIARO' ELSE 'ALTRO' END
     FROM bozze b, jsonb_array_elements(CASE WHEN jsonb_typeof(b.dati->'nominativi') = 'array' THEN b.dati->'nominativi' ELSE '[]'::jsonb END) e
-  UNION ALL SELECT 'bozze nominativi.riferimentoCedolino', CASE WHEN coalesce(e->>'riferimentoCedolino','') = '' THEN 'vuoto' WHEN e->>'riferimentoCedolino' LIKE 'PGS05:%' THEN 'cifrato' WHEN upper(e->>'riferimentoCedolino') ~ :cfi THEN 'IN CHIARO' ELSE 'senza codice fiscale' END
+  UNION ALL SELECT 'bozze nominativi.riferimentoCedolino', CASE WHEN coalesce(e->>'riferimentoCedolino','') = '' THEN 'vuoto' WHEN e->>'riferimentoCedolino' LIKE 'PGS05:%' THEN 'cifrato' WHEN e->>'riferimentoCedolino' ~ :cfi THEN 'IN CHIARO' WHEN upper(e->>'riferimentoCedolino') ~ :cfi THEN 'IN CHIARO (minuscole)' ELSE 'senza codice fiscale' END
     FROM bozze b, jsonb_array_elements(CASE WHEN jsonb_typeof(b.dati->'nominativi') = 'array' THEN b.dati->'nominativi' ELSE '[]'::jsonb END) e
-  UNION ALL SELECT 'bozze dettagli.riferimentoCedolino', CASE WHEN coalesce(e->>'riferimentoCedolino','') = '' THEN 'vuoto' WHEN e->>'riferimentoCedolino' LIKE 'PGS05:%' THEN 'cifrato' WHEN upper(e->>'riferimentoCedolino') ~ :cfi THEN 'IN CHIARO' ELSE 'senza codice fiscale' END
+  UNION ALL SELECT 'bozze dettagli.riferimentoCedolino', CASE WHEN coalesce(e->>'riferimentoCedolino','') = '' THEN 'vuoto' WHEN e->>'riferimentoCedolino' LIKE 'PGS05:%' THEN 'cifrato' WHEN e->>'riferimentoCedolino' ~ :cfi THEN 'IN CHIARO' WHEN upper(e->>'riferimentoCedolino') ~ :cfi THEN 'IN CHIARO (minuscole)' ELSE 'senza codice fiscale' END
     FROM bozze b, jsonb_array_elements(CASE WHEN jsonb_typeof(b.dati->'dettagli') = 'array' THEN b.dati->'dettagli' ELSE '[]'::jsonb END) e
 ) t GROUP BY campo, stato ORDER BY campo, stato;
 
@@ -163,6 +162,9 @@ if [ "${#APACHE_DIRS[@]}" -gt 0 ]; then
   echo "apache (anche ModSecurity):"
   grep -rhsE '^\s*(ProxyTimeout|TimeOut|Timeout|LimitRequestBody|SecRequestBodyLimit|SecRequestBodyNoFilesLimit|SecRequestBodyInMemoryLimit)\b' "${APACHE_DIRS[@]}" \
     | sed -E 's/^\s+//' | sort | uniq -c || true
+  echo "dove si trova LimitRequestBody (file:riga):"
+  grep -rnsE '^\s*LimitRequestBody\b' "${APACHE_DIRS[@]}" | sed -E 's/:\s+/: /' || true
+  echo "ModSecurity: moduli caricati = $( (apachectl -M 2>/dev/null || httpd -M 2>/dev/null) | grep -ciE 'security[23]?_module' ), righe SecRequestBodyAccess On = $(grep -rhsiE '^\s*SecRequestBodyAccess\s+On' "${APACHE_DIRS[@]}" | wc -l), righe SecRuleEngine = $(grep -rhsiE '^\s*SecRuleEngine\b' "${APACHE_DIRS[@]}" | sed -E 's/^\s+//' | sort | uniq -c | tr '\n' ';')"
 else
   echo "apache: non presente"
 fi
