@@ -12,6 +12,18 @@
 }
 
 @layer base {
+  /* Banner d'ambiente (components/AmbienteBanner.tsx): --pgs-env-h vale 0 in
+     produzione, l'altezza del banner altrove. La pagina scende di quella misura. */
+  body { padding-top: var(--pgs-env-h, 0px); }
+}
+
+@layer utilities {
+  .pgs-h-schermo     { height:     calc(100vh - var(--pgs-env-h, 0px)); }
+  .pgs-min-h-schermo { min-height: calc(100vh - var(--pgs-env-h, 0px)); }
+  .pgs-sotto-banner  { top: var(--pgs-env-h, 0px); }
+}
+
+@layer base {
   /* Rimuove le frecce su/giù (spin button) da tutti gli input numerici:
      su webkit/blink e firefox. L'input resta comunque numerico. */
   input[type='number']::-webkit-outer-spin-button,

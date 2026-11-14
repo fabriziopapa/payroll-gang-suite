@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.11.11.3-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.11.14-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -56,6 +56,7 @@ payroll-gang-suite/
 │       │   │                    #   report.ts (CSV/PDF nel browser), ui.tsx (contesto e componenti)
 │       │   └── certificatoTemplate/  # Editor template certificato
 │       │   ├── VistaFluida.tsx  # contenitore di pagina «Vista Fluida» (tutta larghezza, margine fluido; per ora solo CRAL)
+│       │   ├── AmbienteBanner.tsx  # barra fissa «PRE-PRODUZIONE» / «NON DI PRODUZIONE»; nulla in produzione
 │       ├── constants/           # csvDefaults, scorporoCoefficients, palette gruppi
 │       ├── hooks/               # useDebounce, usePdfDocument, …
 │       ├── pages/               # Dashboard, Editor, Viewer, Ricerca, Anagrafiche, Voci,
@@ -65,6 +66,7 @@ payroll-gang-suite/
 │       ├── store/               # Stato globale Zustand (useStore.ts); paginaRicordata.ts: pagina da riaprire dopo un aggiornamento del browser
 │       ├── types/               # Interfacce TypeScript + APP_VERSION
 │       └── utils/               # CSV / PDF / EML builder, calcoli scorporo (biz.ts),
+│                                # ambiente.ts (+ test): ambiente dall'host della pagina, titolo e favicon
 │                                # provvedimentiRiga.ts (+ test): piu' provvedimenti per persona in Emolumenti
 │                                # meseNome.ts (+ test): mese di liquidazione nel nome della lavorazione
 │                                #   e pillola «liquidazione …» (mese scelto o, in mancanza, dalla data)
@@ -92,6 +94,7 @@ payroll-gang-suite/
 │       │   │                    #   (già incluse in setup.sql: NON eseguire su install nuova)
 │       │   └── repositories/    # Repository pattern (PgBozze, PgUsers, PgCertificati, …)
 │       ├── lib/                 # clientIp.ts (IP reale dietro Cloudflare) ·
+│       │                        # ambiente.ts (ambiente dal primo CLIENT_ORIGIN, segno nelle email, con test) ·
 │       │                        # turnstile.ts (verifica Turnstile con motivo del rifiuto, con test) ·
 │       │                        # areaConto.ts (regola IT/SEPA/EXTRA_UE — elenco EPC v8.0, con test;
 │       │                        #   unica fonte dell'area del conto, anche per GET /area-conto) ·
@@ -535,6 +538,24 @@ operativa interna. Chi vuole eseguire il progetto trova tutto il necessario in
 
 ---
 
+## Banner d'ambiente (dalla 26.11.14)
+
+Fuori produzione una barra fissa in alto, che non si chiude, dice dove ci si trova. Nessuna configurazione: l'ambiente si ricava dall'host.
+
+| Host | Ambiente | Cosa si vede |
+|---|---|---|
+| `fabriziopapa.com`, `www.fabriziopapa.com` | produzione | niente (nessun elemento nel DOM) |
+| `pre.fabriziopapa.com` | pre-produzione | barra a strisce ambra «PRE-PRODUZIONE · host · versione», `[PRE]` nel titolo della scheda, bollino ambra sulla favicon |
+| qualsiasi altro (mirror, `*.cpanel.site`, `localhost`) | non identificato | barra a strisce rosse «AMBIENTE NON DI PRODUZIONE», `[TEST]` nel titolo, bollino rosso |
+
+- **Regola prudente**: e' produzione *solo* un host dell'elenco; un host sconosciuto mostra il banner.
+- **Client** (`utils/ambiente.ts`, `components/AmbienteBanner.tsx`): guarda `window.location.hostname` prima del primo render, quindi il banner c'e' gia' nella pagina di login e non provoca salti. Lo spazio e' riservato con la variabile CSS `--pgs-env-h` (0 in produzione) e le classi `.pgs-h-schermo`, `.pgs-min-h-schermo`, `.pgs-sotto-banner`.
+- **Server** (`lib/ambiente.ts`): applica la stessa tabella al **primo `CLIENT_ORIGIN`**, cioe' l'host dei link nelle email. Fuori produzione l'oggetto inizia con `[PRE-PRODUZIONE]` (o `[NON PRODUZIONE]`) e il corpo ha una fascia d'avviso.
+- Le due tabelle (client e server) devono restare identiche: lo verifica un test del client. Per aggiungere un host si modificano entrambe.
+- Non c'entra con `PGS_AMBIENTE`, che resta solo il nome dell'ambiente negli archivi CRAL.
+
+---
+
 
 ## Variabili Ambiente
 
@@ -585,6 +606,14 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.11.14
+**Banner d'ambiente: la pre-produzione si riconosce a colpo d'occhio, anche nelle email**
+
+- **Barra fissa in alto, non chiudibile**, solo fuori produzione: strisce ambra con «PRE-PRODUZIONE · pre.fabriziopapa.com · v26.11.14 — i dati sono una copia della produzione»; per un host non riconosciuto strisce rosse con «AMBIENTE NON DI PRODUZIONE». La pagina scende sotto la barra invece di esserne coperta. Anche `[PRE]`/`[TEST]` nel titolo della scheda e un bollino sulla favicon. In produzione non compare nulla.
+- **Riconoscimento automatico dall'host**, senza variabili da impostare: produzione solo `fabriziopapa.com` e `www.fabriziopapa.com`, pre-produzione `pre.fabriziopapa.com`, ogni altro host e' segnalato come non di produzione (`client/src/utils/ambiente.ts`, `server/src/lib/ambiente.ts`, test su entrambi i lati e controllo che le due tabelle coincidano).
+- **Email di attivazione fuori produzione**: oggetto con `[PRE-PRODUZIONE]` e fascia d'avviso nel corpo (HTML e testo), deciso dal primo `CLIENT_ORIGIN`.
+- Nessuna migrazione, nessuna variabile nuova.
 
 ### 26.11.11.3
 **Modulo CRAL: rubrica d'Ateneo, familiari di esterni, Vista Fluida; Dashboard con le liquidazioni per pagina a scelta**

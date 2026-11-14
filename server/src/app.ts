@@ -15,6 +15,7 @@ import { db, closeDb } from './db/connection.js'
 import { TOTPAuthModule } from './auth/modules/TOTPAuthModule.js'
 import { AuthService } from './auth/AuthService.js'
 import { MailerService } from './services/mailerService.js'
+import { ambienteDaOrigin } from './lib/ambiente.js'
 import { makeAuthMiddleware } from './middleware/authenticate.js'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type * as schema from './db/schema.js'
@@ -202,6 +203,9 @@ const mailer = new MailerService({
   user:   env.SMTP_USER,
   pass:   env.SMTP_PASS,
   from:   env.SMTP_FROM,
+  // Fuori produzione oggetto e corpo delle email lo dichiarano (lib/ambiente.ts)
+  ambiente: ambienteDaOrigin(env.CLIENT_ORIGIN[0]),
+  origin:   env.CLIENT_ORIGIN[0],
 })
 
 // ------------------------------------------------------------

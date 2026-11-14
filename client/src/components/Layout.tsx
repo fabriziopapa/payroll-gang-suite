@@ -248,11 +248,11 @@ export default function Layout({ children }: LayoutProps) {
   const isViewer = currentPage === 'viewer'
 
   return (
-    <div className="h-screen bg-slate-950 flex overflow-hidden">
+    <div className="pgs-h-schermo bg-slate-950 flex overflow-hidden">
 
       {/* ── Sidebar ─────────────────────────────────────────── */}
       <aside className={`
-        fixed inset-y-0 left-0 z-40 w-60 bg-slate-900 border-r border-slate-800
+        fixed bottom-0 pgs-sotto-banner left-0 z-40 w-60 bg-slate-900 border-r border-slate-800
         flex flex-col transition-transform duration-200
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
         lg:translate-x-0 lg:static lg:inset-auto

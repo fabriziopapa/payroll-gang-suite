@@ -306,7 +306,7 @@ export default function LoginPage() {
   // ── Render ────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+    <div className="pgs-min-h-schermo bg-slate-950 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
 
         {/* Logo / titolo */}

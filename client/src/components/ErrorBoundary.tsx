@@ -12,7 +12,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
   render() {
     if (this.state.error) {
       return (
-        <div className="flex flex-col items-center justify-center h-screen gap-4 text-white bg-slate-950">
+        <div className="flex flex-col items-center justify-center pgs-h-schermo gap-4 text-white bg-slate-950">
           <p className="text-red-400 font-bold text-lg">Errore imprevisto</p>
           <p className="text-slate-400 text-sm max-w-sm text-center">{this.state.error.message}</p>
           <button

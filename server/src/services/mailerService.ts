@@ -13,6 +13,7 @@
 import nodemailer from 'nodemailer'
 import { randomBytes } from 'node:crypto'
 import { env } from '../config/env.js'
+import { type Ambiente, prefissoOggetto, avvisoEmail } from '../lib/ambiente.js'
 
 // ── SEC-H01: HTML escaping ────────────────────────────────────
 // Previene XSS: tutti i campi utente inseriti in template HTML
@@ -36,6 +37,10 @@ interface MailerConfig {
   user?:   string
   pass?:   string
   from?:   string
+  /** Ambiente del primo CLIENT_ORIGIN: fuori produzione l'email lo dichiara. */
+  ambiente?: Ambiente
+  /** Origine dei link nelle email (primo CLIENT_ORIGIN), citata nell'avviso. */
+  origin?:   string
 }
 
 // ── Service ───────────────────────────────────────────────────
@@ -44,8 +49,13 @@ export class MailerService {
   private readonly transporter: nodemailer.Transporter | null
   private readonly from: string
   private readonly domain: string
+  private readonly prefisso: string
+  private readonly avviso:   string | null
 
   constructor(config: MailerConfig) {
+    const ambiente = config.ambiente ?? 'produzione'
+    this.prefisso  = prefissoOggetto(ambiente)
+    this.avviso    = avvisoEmail(ambiente, config.origin ?? '')
     if (config.host && config.user && config.pass) {
       this.transporter = nodemailer.createTransport({
         host:   config.host,
@@ -98,14 +108,14 @@ export class MailerService {
     // Estrai il payload base64 dalla data URL
     const b64 = opts.qrCodeUrl.split(',')[1] ?? ''
 
-    const html      = buildQrEmail(opts)
+    const html      = buildQrEmail({ ...opts, avviso: this.avviso })
     const messageId = `<${randomBytes(16).toString('hex')}@${this.domain}>`
 
     await this.transporter.sendMail({
       from:    this.from,
       to:      opts.to,
       replyTo: this.from,
-      subject: 'Payroll Gang Suite — Attivazione account',
+      subject: `${this.prefisso}Payroll Gang Suite — Attivazione account`,
 
       // ── Header di reputazione ────────────────────────────────
       messageId,
@@ -126,7 +136,7 @@ export class MailerService {
       // ── Corpo ────────────────────────────────────────────────
       html,
       // Versione testo plain — riduce score spam e migliora deliverability
-      text: buildTextEmail(opts),
+      text: buildTextEmail({ ...opts, avviso: this.avviso }),
 
       // ── Allegato QR inline ───────────────────────────────────
       attachments: [
@@ -150,8 +160,10 @@ function buildTextEmail(opts: {
   username:    string
   backupKey:   string
   activateUrl: string
+  avviso:      string | null
 }): string {
-  return `Payroll Gang Suite — Attivazione account
+  const avviso = opts.avviso ? `*** ${opts.avviso} ***\n\n` : ''
+  return `${avviso}Payroll Gang Suite — Attivazione account
 ==========================================
 
 Benvenuto, ${opts.username}.
@@ -187,7 +199,16 @@ function buildQrEmail(opts: {
   qrCodeUrl:   string
   backupKey:   string
   activateUrl: string
+  avviso:      string | null
 }): string {
+  // Fascia d'avviso fuori produzione (stessi colori del banner dell'app)
+  const avviso = opts.avviso ? `
+          <tr>
+            <td style="padding:10px 32px;background:#f59e0b;color:#0f172a;
+                       font-size:13px;font-weight:700;text-align:center">
+              ${escapeHtml(opts.avviso)}
+            </td>
+          </tr>` : ''
   return `<!DOCTYPE html>
 <html lang="it">
 <head>
@@ -204,6 +225,7 @@ function buildQrEmail(opts: {
           style="max-width:520px;background:#1e293b;border-radius:16px;overflow:hidden;
                  border:1px solid #334155">
 
+          ${avviso}
           <!-- Header -->
           <tr>
             <td style="padding:28px 32px 24px;border-bottom:1px solid #334155">

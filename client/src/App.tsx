@@ -204,7 +204,7 @@ export default function App() {
   // ── Splash screen mentre bootstrap ───────────────────────
   if (!bootstrapDone) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+      <div className="pgs-min-h-schermo bg-slate-950 flex items-center justify-center">
         <div className="text-center">
           <svg className="animate-spin w-8 h-8 text-indigo-400 mx-auto mb-4" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
@@ -220,7 +220,7 @@ export default function App() {
   // Mostrato solo se non c'è ancora una sessione ripristinata.
   if (throttle && !user) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center px-4">
+      <div className="pgs-min-h-schermo bg-slate-950 flex items-center justify-center px-4">
         <div className="max-w-md w-full bg-slate-900 border border-amber-500/30 rounded-xl p-8 text-center">
           <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-amber-500/10 flex items-center justify-center">
             <svg className="w-6 h-6 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
