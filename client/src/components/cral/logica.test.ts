@@ -7,8 +7,8 @@ import assert from 'node:assert/strict'
 import type { Db, Iniziativa, Persona } from './tipi.ts'
 import { ALIMENTARI_VUOTI, CONTATTI_VUOTI } from './contatti.ts'
 import {
-  aggiunti, applicaSconto, codaRichieste, contiMagazzino, contiOrdine, descrPart, destinatari, dovutoTurni, eta, importoRichiesta, leggiData,
-  nettoSocio, parseEuro, quotaDi, quotaDopoModifica, rataMese, rifDi, risolvi, riepilogo, simNome, spezzaNominativo, tenutoQuota, tesseraRiammissione, versatoQuota,
+  aggiunti, applicaSconto, codaRichieste, contiMagazzino, contiOrdine, descrPart, destinatari, differenzeQuote, dovutoTurni, eta, importoRichiesta, leggiData,
+  motivoQuota, nettoSocio, noteQuota, parseEuro, quotaDi, quotaDopoModifica, quoteDovute, rataMese, rifDi, risolvi, riepilogo, simNome, sociAnno, sociQuota, spezzaNominativo, statoQuota, tenutoQuota, tesseraRiammissione, versatoQuota,
 } from './logica.ts'
 import { costruisciReport, testoPdf, type CfgReport } from './report.ts'
 
@@ -263,4 +263,48 @@ test('familiari di esterni: gruppo a sé, sconto dell\'esterno, i familiari dei 
   assert.equal(catPersona(p('FAM-0004'), d), 'EST')
   assert.equal(catPersona(p('FAM-0005'), d), 'DIP')
   assert.equal(catPersona(p('FAM-0004')), 'FAM', 'senza db resta il comportamento di prima')
+})
+
+test('quote (0028): dovuta, esente, non dovuta; «Allinea soci» conta le differenze', () => {
+  // ROSSI e BIANCHI attivi, VERDI socia esterna, VIOLA cessato a maggio 2026 (deve l'anno), COLOMBO entrata e cessata a novembre
+  const err = P('090009', 'SD', 'COLOMBO', 'Ida', { iscrittoIl: '2026-11-03', stato: 'CESSATO', cessatoIl: '2026-11-10' })
+  const soci = [...SOCI, err]
+  const riga = (stato: 'ESENTE' | 'NON_DOVUTA', motivo: string, importi = Array<number>(12).fill(0)) =>
+    ({ modo: 'MENSILE' as const, mesi: importi.map(v => v > 0), importi, pagataIl: null, versatoUnica: null, note: '', stato, motivo })
+  const d = db({ soci, perId: new Map(soci.map(s => [s.id, s])), quoteAnno: [{ anno: 2025, importo: 6000 }, { anno: 2026, importo: 6000 }],
+    quote: { '2025': { 'EXT-0001': riga('ESENTE', 'socia onoraria') }, '2026': { '090002': riga('ESENTE', 'delibera del direttivo', [500, ...Array<number>(11).fill(0)]) } } })
+  const p = (id: string) => d.perId.get(id)!
+  const ids = (xs: Persona[]) => xs.map(s => s.id)
+  // senza riga (o con una riga di prima della 0028) la quota è dovuta
+  assert.equal(statoQuota(d, 2026, p('090001')), 'DOVUTA')
+  assert.equal(statoQuota(db({ quote: { '2026': { '090001': { modo: 'UNICA', mesi: Array<boolean>(12).fill(false), importi: Array<number>(12).fill(0), pagataIl: null, versatoUnica: null, note: '' } } } }), 2026, p('090001')), 'DOVUTA')
+  assert.equal(statoQuota(d, 2026, p('090002')), 'ESENTE'); assert.equal(motivoQuota(d, 2026, p('090002')), 'delibera del direttivo')
+  // per l'anagrafica i soci del 2026 sono cinque: l'errore è fra loro, ed è il caso da correggere
+  assert.deepEqual(ids(sociAnno(d, 2026)), ['090001', '090002', 'EXT-0001', '090004', '090009'])
+  assert.deepEqual(ids(sociQuota(d, 2026)), ['090001', '090002', 'EXT-0001', '090004', '090009'], 'l\'esente resta in elenco')
+  assert.deepEqual(ids(quoteDovute(d, 2026)), ['090001', 'EXT-0001', '090004', '090009'], 'ma non entra nel dovuto')
+  // cosa guardare: entrati e usciti nell'anno, esenti l'anno prima
+  assert.deepEqual(noteQuota(d, 2026, p('090009')), ['entrato il 03/11/2026', 'cessato il 10/11/2026'])
+  assert.deepEqual(noteQuota(d, 2026, p('EXT-0001')), ['esente nel 2025'])
+  assert.deepEqual(noteQuota(d, 2026, p('090001')), [])
+  // differenze: l'errore diventa non dovuta, l'esente del 2025 si riconferma, l'esente di oggi torna dovuta
+  const scelte = { '090009': 'NON_DOVUTA' as const, 'EXT-0001': 'ESENTE' as const, '090002': 'DOVUTA' as const, '090001': 'DOVUTA' as const }
+  const r = differenzeQuote(d, 2026, scelte)
+  assert.deepEqual(r.diff.map(x => [x.s.id, x.prima, x.dopo, x.versato]), [['090002', 'ESENTE', 'DOVUTA', 500], ['090009', 'DOVUTA', 'NON_DOVUTA', 0], ['EXT-0001', 'DOVUTA', 'ESENTE', 0]])
+  assert.equal(r.prima, 4); assert.equal(r.dopo, 3)   // 4 − 2 che escono + 1 che torna
+  assert.deepEqual(differenzeQuote(d, 2026, {}).diff, [])
+  // dopo l'approvazione: la non dovuta esce dall'elenco dell'anno, non dagli altri anni né dall'anagrafica
+  const dopo = db({ soci, perId: d.perId, quoteAnno: d.quoteAnno, quote: { '2026': { '090009': riga('NON_DOVUTA', 'inserita per errore') } } })
+  assert.deepEqual(ids(sociQuota(dopo, 2026)), ['090001', '090002', 'EXT-0001', '090004'])
+  assert.deepEqual(ids(sociAnno(dopo, 2026)), ['090001', '090002', 'EXT-0001', '090004', '090009'], 'in «Allinea soci» si vede ancora, per rimetterla dovuta')
+  assert.equal(tenutoQuota(p('090009'), 2026), true, 'la regola dell\'anagrafica non cambia')
+  // il report Quote: l'esente c'è con dovuto zero, la non dovuta non c'è
+  const cfg = { tipo: 'quote', anno: 2026, sedi: [], origine: '', ordinaPer: 'nom', tessera: false, eta: false, mesi: false, note: true, firma: false, qmodo: '', soloSaldo: false } as unknown as CfgReport
+  const rep = costruisciReport(d, cfg)
+  const col = (nome: string) => rep.intest.indexOf(nome)
+  const rigaDi = (cognome: string) => rep.righe.find(x => String(x[col('Nominativo')]).startsWith(cognome))!
+  assert.equal(rigaDi('BIANCHI')[col('Modalità')], 'Esente'); assert.equal(rigaDi('BIANCHI')[col('Dovuto €')], '0,00'); assert.equal(rigaDi('BIANCHI')[col('Note')], 'delibera del direttivo')
+  assert.equal(rigaDi('ROSSI')[col('Dovuto €')], '60,00')
+  assert.equal(rep.righe.at(-1)![col('Dovuto €')], '240,00', 'totale: quattro quote dovute')
+  assert.equal(costruisciReport(dopo, cfg).righe.some(x => String(x[col('Nominativo')]).startsWith('COLOMBO')), false)
 })

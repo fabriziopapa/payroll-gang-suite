@@ -511,10 +511,14 @@ CREATE TABLE IF NOT EXISTS cral_quote (
   importi     INTEGER[]    NOT NULL DEFAULT ARRAY[0,0,0,0,0,0,0,0,0,0,0,0],
   versato_unica INTEGER,
   note        VARCHAR(300) NOT NULL DEFAULT '',
+  -- 0028: quota dovuta, esente (resta in elenco, non paga) o non dovuta (correzione), col motivo
+  stato       VARCHAR(10)  NOT NULL DEFAULT 'DOVUTA',
+  motivo      VARCHAR(200) NOT NULL DEFAULT '',
   updated_by  UUID         REFERENCES users(id) ON DELETE SET NULL,
   updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
   PRIMARY KEY (anno, socio_id),
-  CONSTRAINT cral_quote_importi CHECK (cardinality(importi) = 12 AND 0 <= ALL(importi) AND (versato_unica IS NULL OR versato_unica >= 0))
+  CONSTRAINT cral_quote_importi CHECK (cardinality(importi) = 12 AND 0 <= ALL(importi) AND (versato_unica IS NULL OR versato_unica >= 0)),
+  CONSTRAINT cral_quote_stato CHECK (stato IN ('DOVUTA', 'ESENTE', 'NON_DOVUTA'))
 );
 
 -- Lotti di variazioni da validare (migrazione 0023)

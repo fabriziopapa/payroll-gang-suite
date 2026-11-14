@@ -934,11 +934,17 @@ export interface CralIniziativaRow {
   carichi: CralCaricoRow[]
   richieste: CralRichiestaRow[]
 }
+/** 0028: la quota di un anno e' dovuta, esente (socio che non paga) o non dovuta (correzione di un errore). */
+export type CralStatoQuota = 'DOVUTA' | 'ESENTE' | 'NON_DOVUTA'
 export interface CralQuotaRow {
   modo: 'UNICA' | 'MENSILE' | 'TRATTENUTA'; mesi: boolean[]; pagataIl: string | null; note: string
   /** 0024: centesimi versati per mese e in unica soluzione; il versato e' la loro somma. */
   importi: number[]; versatoUnica: number | null
+  /** 0028: stato della quota e motivo (vuoto quando e' dovuta). */
+  stato: CralStatoQuota; motivo: string
 }
+/** Una riga di «Allinea soci»: lo stato che la quota del socio deve avere in quell'anno. */
+export interface CralVoceAllinea { socio: string; stato: CralStatoQuota; motivo: string }
 export interface CralStato {
   sedi: CralSedeRow[]; tipi: CralTipoRow[]; tipologie: CralTipologiaRow[]; parametri: CralParametriRow
   soci: CralSocioRow[]; iniziative: CralIniziativaRow[]
@@ -1044,7 +1050,13 @@ export interface ICralRepository {
   aggiornaRichiesta(id: string, rid: string, patch: Partial<Pick<CralRichiestaRow, 'stato' | 'dataCons' | 'modo' | 'pagato' | 'sconto' | 'note'>>, userId: string | null): Promise<CralRichiestaRow | null>
 
   salvaQuotaAnno(anno: number, importo: number, userId: string | null): Promise<void>
-  salvaQuota(anno: number, socio: string, patch: Partial<CralQuotaRow>, modoPredefinito: CralQuotaRow['modo'], userId: string | null): Promise<CralQuotaRow | null>
+  /** null = anno non impostato; 'QUOTA_NON_DOVUTA' = la quota e' esente o non dovuta e si prova a registrare un pagamento. */
+  salvaQuota(anno: number, socio: string, patch: Partial<CralQuotaRow>, modoPredefinito: CralQuotaRow['modo'], userId: string | null): Promise<CralQuotaRow | 'QUOTA_NON_DOVUTA' | null>
+  /**
+   * «Allinea soci» (0028): porta la quota dell'anno dei soci indicati allo stato chiesto, in una sola
+   * transazione. Ritorna solo i cambi veri (prima → dopo); nulla si scrive se un ID non e' un socio.
+   */
+  allineaQuote(anno: number, voci: CralVoceAllinea[], userId: string | null): Promise<'ANNO_NON_IMPOSTATO' | 'SOCIO_NON_VALIDO' | Array<{ socio: string; prima: CralStatoQuota; dopo: CralStatoQuota }>>
   registraTrattenuta(anno: number, mese: number, soci: string[], userId: string | null): Promise<number>
 }
 

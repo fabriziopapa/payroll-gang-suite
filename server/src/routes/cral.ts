@@ -31,6 +31,7 @@
 //   PUT    /quote-anno/:anno                   { importo }
 //   PATCH  /quote/:anno/:socio                 { modo?, mesi?, pagataIl?, note? }
 //   POST   /quote/:anno/trattenuta             { mese } rata del mese per chi ha la trattenuta
+//   POST   /quote/:anno/allinea                { voci[] } «Allinea soci»: quota dovuta, esente o non dovuta (0028)
 //   POST   /soci/tipologia                     { ids, tipo } tipologia in blocco
 //   POST   /soci/:id/passa-esterno             socio dipendente → socio esterno (nuovo ID EXT)
 //   POST   /export/soci                        { ids } → Excel soci + familiari (stesse colonne del T6)
@@ -53,7 +54,7 @@ import { PgCralRepository } from '../db/repositories/PgCralRepository.js'
 import { PgAuditRepository } from '../db/repositories/PgAuditRepository.js'
 import type { CralErrore, CralOperazioneImport, CralPatchContatti, CralQuotaRow } from '../db/IRepository.js'
 import {
-  abbina, erroreDati, erroreIniziativa, iniziativaSchema, parametriTesseraSchema, riga, sceltaSchema, scontoPersonale,
+  abbina, allineaQuoteSchema, erroreAllinea, erroreDati, erroreIniziativa, iniziativaSchema, parametriTesseraSchema, riga, sceltaSchema, scontoPersonale,
   unisciDati, usiTolti, type AnagraficaCral, type DatiScelta, type ConfigEvento,
 } from '../lib/cral.js'
 import { leggiFogli, MAX_BYTE_FILE } from '../services/cral/fogli.js'
@@ -487,7 +488,7 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     if (!imp) return reply.code(404).send({ error: 'ANNO_NON_IMPOSTATO' })
     const scelti = new Set(b.ids)
     const righe = st.soci.filter(s => scelti.has(s.id)).map(s => ({
-      s, q: st.quote[String(b.anno)]?.[s.id] ?? { modo: s.matricola ? 'TRATTENUTA' as const : 'UNICA' as const, mesi: Array<boolean>(12).fill(false), importi: Array<number>(12).fill(0), pagataIl: null, versatoUnica: null, note: '' },
+      s, q: st.quote[String(b.anno)]?.[s.id] ?? { modo: s.matricola ? 'TRATTENUTA' as const : 'UNICA' as const, mesi: Array<boolean>(12).fill(false), importi: Array<number>(12).fill(0), pagataIl: null, versatoUnica: null, note: '', stato: 'DOVUTA' as const, motivo: '' },
     }))
     await audit(request, 'CRAL_EXPORT_QUOTE', String(b.anno), { soci: righe.length, ambiente: ambienteDi(request) })
     return reply.send({ ambiente: ambienteDi(request), base64: foglioQuote(b.anno, imp, righe).toString('base64') })
@@ -739,6 +740,7 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     const predef: CralQuotaRow['modo'] = s.matricola ? 'TRATTENUTA' : 'UNICA'
     const r = await repo.salvaQuota(anno, socio, b, predef, uid(request))
     if (!r) return reply.code(404).send({ error: 'ANNO_NON_IMPOSTATO' })
+    if (r === 'QUOTA_NON_DOVUTA') return reply.code(409).send({ error: 'QUOTA_NON_DOVUTA' })
     await audit(request, 'CRAL_QUOTA_SOCIO', socio, { anno, campi: Object.keys(b) })
     return reply.send({ quota: r })
   })
@@ -749,5 +751,19 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     const n = await repo.registraTrattenuta(anno, b.mese, b.soci, uid(request))
     await audit(request, 'CRAL_TRATTENUTA_MESE', String(anno), { mese: b.mese, soci: n })
     return reply.send({ fatte: n })
+  })
+
+  // «Allinea soci» (0028): le differenze approvate nella scheda Quote. Nel registro un rigo per socio,
+  // con l'ID e il passaggio di stato; il motivo resta sulla quota e non va nel registro.
+  app.post('/quote/:anno/allinea', admin, async (request, reply) => {
+    const { anno } = z.object({ anno: ANNO }).parse(request.params)
+    const b = allineaQuoteSchema.parse(request.body)
+    const e = erroreAllinea(b.voci)
+    if (e) return reply.code(400).send({ error: e })
+    const r = await repo.allineaQuote(anno, b.voci, uid(request))
+    if (r === 'ANNO_NON_IMPOSTATO') return reply.code(404).send({ error: r })
+    if (r === 'SOCIO_NON_VALIDO') return reply.code(400).send({ error: r })
+    for (const c of r) await audit(request, 'CRAL_QUOTA_STATO', c.socio, { anno, prima: c.prima, dopo: c.dopo })
+    return reply.send({ fatte: r.length })
   })
 }

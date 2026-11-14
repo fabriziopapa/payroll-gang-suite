@@ -339,6 +339,11 @@ function SocioModal({ id, onClose, onApri }: { id: string; onClose: () => void; 
         </div>
         {s.stato === 'ELIMINATO' && <p className="text-xs rounded-lg border border-red-900/60 bg-red-950/20 text-red-200 px-3 py-2">Eliminato il {fmtData(s.eliminatoIl)}{s.eliminatoDa ? ` da ${s.eliminatoDa}` : ''}{s.statoPrima ? ` · prima era «${STATI[s.statoPrima].toLowerCase()}»` : ''}. Non compare in elenchi, eventi e report e non deve la quota dal {s.eliminatoIl?.slice(0, 4)}. «Ripristina» lo riporta allo stato di prima con la stessa tessera.</p>}
         {(s.anniEsenti ?? []).length > 0 && <p className="text-xs text-slate-400">Esente dalla quota associativa per: {s.anniEsenti.join(', ')} (anni passati da eliminato).</p>}
+        {(() => {
+          // 0028: quote segnate esenti o non dovute da Quote › «Allinea soci»
+          const fuori = Object.entries(db.quote).flatMap(([a, q]) => { const x = q[s.id]; return x?.stato && x.stato !== 'DOVUTA' ? [`${a} ${x.stato === 'ESENTE' ? 'esente' : 'non dovuta'}${x.motivo ? ` (${x.motivo})` : ''}`] : [] }).sort()
+          return fuori.length > 0 && <p className="text-xs text-slate-400">Quota associativa: {fuori.join(' · ')}. Si cambia da Quote › «Allinea soci».</p>
+        })()}
         <div className="flex flex-wrap gap-2">
           {s.tipo === 'SD' && s.stato === 'ATTIVO' && <button className={btnPiccoloSec} onClick={() => setAzione('passa')} title="Lascia l'Ateneo ma resta socio: nuovo ID EXT, la matricola resta come ex matricola"><Ico d={D.link} cls="w-3.5 h-3.5" />Passa a socio esterno</button>}
           {!s.matricola && (s.tipo === 'SE' || s.tipo === 'EST') && s.stato === 'ATTIVO' && <button className={btnPiccoloSec} onClick={() => setAzione('collega')} title="Se è (di nuovo) un dipendente: prende la matricola come ID"><Ico d={D.search} cls="w-3.5 h-3.5" />Trova in anagrafica PGS</button>}

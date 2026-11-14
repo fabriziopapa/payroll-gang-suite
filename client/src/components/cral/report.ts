@@ -12,7 +12,7 @@ import {
   CAT_SCONTO_1, GRUPPI, MESI, nomeTipologia, MODI_QUOTA, TIPOLOGIE, aCaricoDi, catSconto, conScontiIni, contenutoTot, contiMagazzino, descrScontoPers,
   destinatari, dovutoTurni, eSocio, eta, fmtData, fmtImp, fmtQ, fmtSconto, gruppiProdotti, haOrdinato, importoRichiesta, iscrittoTurni,
   movimentiMagazzino, nettoSocio, nomeDi, nominativo, ordineRichieste, pagaPer, perUnita, periodiDovuti, persDi, persona, qta, quotaAnno,
-  quotaDi, quotaSocio, regolaCat, regolaTurni, riepilogo, righeOrdiniPerSede, rifDi, scontoOrdine, scontoRichiesta, sedeNome, sociQuota,
+  quotaDi, quotaSocio, regolaCat, regolaTurni, riepilogo, righeOrdiniPerSede, rifDi, scontoOrdine, scontoRichiesta, sedeNome, sociQuota, statoQuota,
   statoPer, tipNome, totaleSocio, versatoQuota,
 } from './logica'
 
@@ -66,18 +66,21 @@ export function costruisciReport(db: Db, cfg: CfgReport, oggiIso: string): Repor
   }
   if (cfg.tipo === 'quote') {
     const anno = cfg.anno, imp = quotaAnno(db, anno)
-    const lista = perNome(sociQuota(db, anno).filter(s => sediOk(s) && tipOk(s)).filter(s => !cfg.qmodo || quotaSocio(db, anno, s).modo === cfg.qmodo).filter(s => !cfg.soloSaldo || versatoQuota(db, anno, s) < imp))
+    // 0028: l'esente resta nel report ma non deve nulla; le «non dovute» non ci sono (sociQuota le toglie)
+    const esente = (s: Persona) => statoQuota(db, anno, s) === 'ESENTE'
+    const dov = (s: Persona) => (esente(s) ? 0 : imp)
+    const lista = perNome(sociQuota(db, anno).filter(s => sediOk(s) && tipOk(s)).filter(s => !cfg.qmodo || quotaSocio(db, anno, s).modo === cfg.qmodo).filter(s => !cfg.soloSaldo || versatoQuota(db, anno, s) < dov(s)))
     const pre = ['Sede', ...(cfg.tessera ? ['Tessera'] : []), 'Nominativo', ...(cfg.eta ? ['Età'] : []), 'Tipologia', 'Modalità']
     const intest = [...pre, ...(cfg.mesi ? MESI : []), 'Dovuto €', 'Versato €', 'Saldo €', ...(cfg.note ? ['Note'] : []), ...(cfg.firma ? ['Firma'] : [])]
-    let tv = 0
+    let tv = 0, td = 0
     const righe: Cella[][] = lista.map(s => {
-      const q = quotaSocio(db, anno, s), v = versatoQuota(db, anno, s); tv += v
+      const q = quotaSocio(db, anno, s), v = versatoQuota(db, anno, s); tv += v; td += dov(s)
       const nota = s.stato === 'CESSATO' ? ` (cessato ${fmtData(s.cessatoIl)})` : s.stato === 'ELIMINATO' ? ` (eliminato ${fmtData(s.eliminatoIl)})` : s.iscrittoIl.slice(0, 10) >= `${anno}-01-01` ? ` (dal ${fmtData(s.iscrittoIl)})` : ''
-      return [sedeNome(db, s.sede), ...(cfg.tessera ? [s.tessera] : []), nominativo(s) + nota, ...(cfg.eta ? [etaDi(s, oggiIso)] : []), TIPOLOGIE[s.tipo][0], MODI_QUOTA[q.modo] + (q.modo === 'UNICA' && q.pagataIl ? ` · ${fmtData(q.pagataIl)}` : ''),
-        ...(cfg.mesi ? MESI.map((_, k) => q.modo === 'UNICA' ? (q.pagataIl ? 'X' : '') : q.mesi[k] ? 'X' : '') : []), fmtImp(imp), fmtImp(v), fmtImp(imp - v), ...(cfg.note ? [q.note] : []), ...(cfg.firma ? [''] : [])]
+      return [sedeNome(db, s.sede), ...(cfg.tessera ? [s.tessera] : []), nominativo(s) + nota, ...(cfg.eta ? [etaDi(s, oggiIso)] : []), TIPOLOGIE[s.tipo][0], esente(s) ? 'Esente' : MODI_QUOTA[q.modo] + (q.modo === 'UNICA' && q.pagataIl ? ` · ${fmtData(q.pagataIl)}` : ''),
+        ...(cfg.mesi ? MESI.map((_, k) => q.modo === 'UNICA' ? (q.pagataIl ? 'X' : '') : q.mesi[k] ? 'X' : '') : []), fmtImp(dov(s)), fmtImp(v), fmtImp(dov(s) - v), ...(cfg.note ? [esente(s) ? [q.motivo, q.note].filter(Boolean).join(' · ') : q.note] : []), ...(cfg.firma ? [''] : [])]
     })
     const k0 = pre.length + (cfg.mesi ? 12 : 0)
-    if (righe.length) righe.push(['Totale', ...Array<string>(pre.length - 1 + (cfg.mesi ? 12 : 0)).fill(''), fmtImp(imp * lista.length), fmtImp(tv), fmtImp(imp * lista.length - tv), ...(cfg.note ? [''] : []), ...(cfg.firma ? [''] : [])])
+    if (righe.length) righe.push(['Totale', ...Array<string>(pre.length - 1 + (cfg.mesi ? 12 : 0)).fill(''), fmtImp(td), fmtImp(tv), fmtImp(td - tv), ...(cfg.note ? [''] : []), ...(cfg.firma ? [''] : [])])
     return { titolo: `Quote associative ${anno} · quota ${fmtImp(imp)} €`, intest, righe, numCols: new Set([k0, k0 + 1, k0 + 2]), bold: new Set(righe.length ? [righe.length - 1] : []) }
   }
   if (!ini) return { titolo: '', intest: [], righe: [], vuoto: 'Scegli un evento.' }

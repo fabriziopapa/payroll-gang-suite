@@ -371,6 +371,23 @@ export function pulisciFoglio(righe: unknown[][]): string[][] {
       String(c ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').slice(0, 500)))
 }
 
+// ── Quote associative: dovuta, esente, non dovuta (0028) ─────
+export const STATI_QUOTA = ['DOVUTA', 'ESENTE', 'NON_DOVUTA'] as const
+export type StatoQuota = typeof STATI_QUOTA[number]
+/** Corpo di «Allinea soci»: per ogni socio lo stato che la quota dell'anno deve avere. */
+export const allineaQuoteSchema = z.object({
+  voci: z.array(z.object({
+    socio: z.string().regex(/^([0-9]{1,10}|EXT-[0-9]{4,6})$/), stato: z.enum(STATI_QUOTA), motivo: riga(200),
+  }).strict()).min(1).max(5000),
+}).strict()
+export type VoceAllinea = z.infer<typeof allineaQuoteSchema>['voci'][number]
+/** Coerenza delle voci: un socio una volta sola; esente e non dovuta vogliono il motivo. null = va bene. */
+export function erroreAllinea(voci: VoceAllinea[]): 'SOCI_RIPETUTI' | 'MOTIVO_MANCANTE' | null {
+  if (new Set(voci.map(v => v.socio)).size !== voci.length) return 'SOCI_RIPETUTI'
+  if (voci.some(v => v.stato !== 'DOVUTA' && !v.motivo)) return 'MOTIVO_MANCANTE'
+  return null
+}
+
 // ── Quote associative: rate e importi versati (0024) ─────────
 export interface QuotaValori {
   modo: 'UNICA' | 'MENSILE' | 'TRATTENUTA'; mesi: boolean[]; importi: number[]; pagataIl: string | null; versatoUnica: number | null; note: string

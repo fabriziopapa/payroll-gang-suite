@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  abbina, applicaSconto, baseTessera, configSchema, erroreDati, erroreIniziativa, formatTessera, iniziativaSchema,
+  abbina, allineaQuoteSchema, applicaSconto, baseTessera, configSchema, erroreAllinea, erroreDati, erroreIniziativa, formatTessera, iniziativaSchema,
   numeroTessera, prossimoDopo, quotaDopoModifica, rataMese, sceltaSchema, versato, spezzaNominativo, tesseraDaFile, tesseraNelFormato, tesseraRiammissione, unisciDati, usiTolti,
   type AnagraficaCral, type ParametriTessera,
 } from './cral.js'
@@ -154,4 +154,20 @@ test('tessera nel formato (26.11.11.2): spento come prima, acceso completa o rif
   const S0 = { ...S, sepSuffisso: '' as const }
   assert.deepEqual(tesseraNelFormato(S0, '004201'), { tessera: '004201' })
   assert.deepEqual(tesseraNelFormato(S0, '42'), { tessera: '0042' })
+})
+
+test('quote (0028): «Allinea soci» accetta solo soci, uno per volta, e vuole il motivo', () => {
+  const ok = allineaQuoteSchema.parse({ voci: [{ socio: '090001', stato: 'NON_DOVUTA', motivo: '  inserita per errore ' }, { socio: 'EXT-0003', stato: 'DOVUTA', motivo: '' }] })
+  assert.equal(ok.voci[0]!.motivo, 'inserita per errore')
+  assert.equal(erroreAllinea(ok.voci), null)
+  // un familiare non ha quota; uno stato inventato non passa; campi in piu' nemmeno
+  assert.ok(!allineaQuoteSchema.safeParse({ voci: [{ socio: 'FAM-0001', stato: 'ESENTE', motivo: 'x' }] }).success)
+  assert.ok(!allineaQuoteSchema.safeParse({ voci: [{ socio: '090001', stato: 'GRATIS', motivo: 'x' }] }).success)
+  assert.ok(!allineaQuoteSchema.safeParse({ voci: [{ socio: '090001', stato: 'ESENTE', motivo: 'x', anno: 2025 }] }).success)
+  assert.ok(!allineaQuoteSchema.safeParse({ voci: [] }).success)
+  // esente e non dovuta senza motivo (anche di soli spazi), stesso socio due volte
+  assert.equal(erroreAllinea(allineaQuoteSchema.parse({ voci: [{ socio: '090001', stato: 'ESENTE', motivo: '   ' }] }).voci), 'MOTIVO_MANCANTE')
+  assert.equal(erroreAllinea([{ socio: '090001', stato: 'DOVUTA', motivo: '' }, { socio: '090001', stato: 'ESENTE', motivo: 'x' }]), 'SOCI_RIPETUTI')
+  // tornare dovuta non chiede il motivo
+  assert.equal(erroreAllinea([{ socio: '090001', stato: 'DOVUTA', motivo: '' }]), null)
 })

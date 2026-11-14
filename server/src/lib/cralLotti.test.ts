@@ -229,3 +229,41 @@ test('T6 col formato della tessera obbligatorio: completa, blocca, non tocca que
   const vs2 = confrontaT6([{ socio: 'EXT-0001', riga: 2, valori: { tessera: 'A12' } }], soci, new Set(['CD']), new Map(), '2026-11-11', TESSERA)
   assert.equal(vs2[0]!.campi.find(c => c.campo === 'tessera')!.dopo, 'A12')
 })
+
+test('quote (0028): un versamento del T7 non entra su una quota esente o non dovuta', () => {
+  const soci = [P('090001', 'SD', 'COLOMBO', 'Anna', { iscrittoIl: '2020-01-01' }), P('090002', 'SD', 'VIOLA', 'Marco', { iscrittoIl: '2020-01-01' }), P('EXT-0001', 'SE', 'DE ROSSI', 'Marta', { iscrittoIl: '2020-01-01' })]
+  const riga = (socio: string, stato?: 'DOVUTA' | 'ESENTE' | 'NON_DOVUTA') =>
+    ({ anno: 2026, socio, modo: 'UNICA' as const, mesi: Array<boolean>(12).fill(false), importi: Array<number>(12).fill(0), pagataIl: null, versatoUnica: null, note: '', ...(stato ? { stato, motivo: stato === 'DOVUTA' ? '' : 'motivo di prova' } : {}) })
+  const vs = confrontaT7([
+    { socio: '090001', riga: 2, anno: 2026, mesi: { '1': 500 } },
+    { socio: '090002', riga: 3, anno: 2026, mesi: { '1': 500 } },
+    { socio: 'EXT-0001', riga: 4, anno: 2026, mesi: { '1': 500 } },
+  ], soci, [riga('090001', 'NON_DOVUTA'), riga('090002', 'ESENTE'), riga('EXT-0001')], new Map([[2026, 6000]]), '2026-11-14')
+  assert.match(vs.find(v => v.chiave === '2026|090001')!.bloccata ?? '', /«non dovuta».*rimessa dovuta/)
+  assert.match(vs.find(v => v.chiave === '2026|090002')!.bloccata ?? '', /«esente»/)
+  // una quota senza stato (riga di prima della 0028) e' dovuta: il versamento entra
+  const c = vs.find(v => v.chiave === '2026|EXT-0001')!
+  assert.ok(!c.bloccata); assert.deepEqual(c.campi.map(x => x.campo), ['versamenti'])
+})
+
+test('quote (0028): l\'archivio porta stato e motivo insieme, come variazione da confermare a parte', () => {
+  const soci = [P('090001', 'SD', 'COLOMBO', 'Anna'), P('090002', 'SD', 'VIOLA', 'Marco'), P('090003', 'SD', 'DE ROSSI', 'Marta')]
+  const q = (socio: string, extra: Record<string, unknown> = {}) =>
+    ({ anno: 2026, socio, modo: 'UNICA' as const, mesi: Array<boolean>(12).fill(false), importi: Array<number>(12).fill(0), pagataIl: null, versatoUnica: null, note: '', ...extra })
+  const src = A({ soci, quote: [q('090001', { stato: 'ESENTE', motivo: 'socio onorario' }), q('090002', { stato: 'NON_DOVUTA', motivo: 'inserito per errore' }), q('090003')] })
+  // un archivio di prima della 0028 non ha i due campi: si legge, e vale «dovuta»
+  assert.ok(archivioSchema.safeParse(A({ soci, quote: [q('090003')] })).success)
+  assert.ok(!archivioSchema.safeParse(A({ soci, quote: [q('090003', { stato: 'GRATIS' })] })).success)
+  const dst = A({ soci, quote: [q('090001'), q('090003', { stato: 'DOVUTA', motivo: '' })] })
+  const vs = confrontaArchivio(src, dst, ['quote'], new Set()).variazioni
+  // 090001: qui e' dovuta, in arrivo esente → un solo campo «dovuta», delicata
+  const a = vs.find(v => v.chiave === '2026|090001')!
+  assert.equal(a.tipo, 'MODIFICA'); assert.ok(a.delicata)
+  assert.deepEqual(a.campi.map(c => [c.campo, c.prima, c.dopo]), [['dovuta', { stato: 'DOVUTA', motivo: '' }, { stato: 'ESENTE', motivo: 'socio onorario' }]])
+  // 090002: qui la quota non c'e' → nuova, con lo stato in evidenza e delicata
+  const b = vs.find(v => v.chiave === '2026|090002')!
+  assert.equal(b.tipo, 'NUOVO'); assert.ok(b.delicata)
+  assert.deepEqual(b.campi.find(c => c.campo === 'dovuta')!.dopo, { stato: 'NON_DOVUTA', motivo: 'inserito per errore' })
+  // 090003: dovuta da entrambe le parti (con e senza i campi) → nessuna differenza
+  assert.equal(vs.find(v => v.chiave === '2026|090003'), undefined)
+})

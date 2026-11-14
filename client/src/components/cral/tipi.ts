@@ -95,10 +95,14 @@ export interface Iniziativa {
   richieste: Richiesta[]
 }
 
+/** Quota di un anno (0028): dovuta, esente (socio che non paga, resta in elenco) o non dovuta (correzione di un errore). */
+export type StatoQuota = 'DOVUTA' | 'ESENTE' | 'NON_DOVUTA'
 export interface QuotaSocio {
   modo: 'UNICA' | 'MENSILE' | 'TRATTENUTA'; mesi: boolean[]; pagataIl: string | null; note: string
   /** Centesimi versati per mese e in unica soluzione (0024): il versato è la loro somma. */
   importi: number[]; versatoUnica: number | null
+  /** 0028: senza valore la quota è dovuta. Il motivo c'è solo per esente e non dovuta. */
+  stato?: StatoQuota; motivo?: string
 }
 
 /** Modello di esportazione salvato: colonne (in ordine), chi entra, formato. */

@@ -806,6 +806,9 @@ export const cralQuote = pgTable('cral_quote', {
   importi:      integer('importi').array().notNull().default(sql`ARRAY[0,0,0,0,0,0,0,0,0,0,0,0]`),
   versatoUnica: integer('versato_unica'),
   note:      varchar('note', { length: 300 }).notNull().default(''),
+  // 0028: DOVUTA | ESENTE | NON_DOVUTA, col motivo (vuoto quando e' dovuta)
+  stato:     varchar('stato', { length: 10 }).notNull().default('DOVUTA'),
+  motivo:    varchar('motivo', { length: 200 }).notNull().default(''),
   updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.anno, t.socioId] })])

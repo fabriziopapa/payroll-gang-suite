@@ -9,7 +9,7 @@
 import { ESIGENZE } from './contatti'
 import type {
   CatSconto, Db, Iniziativa, Modalita, ParametriTessera, Persona, Prodotto, Relazione, Richiesta,
-  ScontoPers, ScontoRegola, StatoPeriodo, TipoPersona, QuotaSocio, Gruppo,
+  ScontoPers, ScontoRegola, StatoPeriodo, TipoPersona, QuotaSocio, StatoQuota, Gruppo,
 } from './tipi.ts'
 
 // ── Testo e date ─────────────────────────────────────────────
@@ -346,7 +346,35 @@ export function tenutoQuota(s: Persona, anno: number): boolean {
   if (s.stato === 'ELIMINATO' && (!s.eliminatoIl || anno >= +s.eliminatoIl.slice(0, 4))) return false
   return stato === 'ATTIVO' || (stato === 'CESSATO' && (s.cessatoIl ?? '') >= `${anno}-01-01`)
 }
-export const sociQuota = (db: Db, anno: number): Persona[] => db.soci.filter(s => tenutoQuota(s, anno))
+/** Soci dell'anno secondo l'anagrafica (la regola qui sopra), qualunque sia lo stato della loro quota. */
+export const sociAnno = (db: Db, anno: number): Persona[] => db.soci.filter(s => tenutoQuota(s, anno))
+
+// ── Quota dovuta, esente o non dovuta (0028, «Allinea soci») ──
+export const STATI_QUOTA: Record<StatoQuota, string> = { DOVUTA: 'Dovuta', ESENTE: 'Esente', NON_DOVUTA: 'Non dovuta' }
+export const statoQuota = (db: Db, anno: number, s: Persona): StatoQuota => db.quote[String(anno)]?.[s.id]?.stato ?? 'DOVUTA'
+export const motivoQuota = (db: Db, anno: number, s: Persona): string => db.quote[String(anno)]?.[s.id]?.motivo ?? ''
+/** Elenco delle Quote: i soci dell'anno senza le quote «non dovute». Gli esenti restano (non pagano). */
+export const sociQuota = (db: Db, anno: number): Persona[] => sociAnno(db, anno).filter(s => statoQuota(db, anno, s) !== 'NON_DOVUTA')
+/** Chi la quota la deve davvero: è su questi che si conta il dovuto. */
+export const quoteDovute = (db: Db, anno: number): Persona[] => sociAnno(db, anno).filter(s => statoQuota(db, anno, s) === 'DOVUTA')
+/** Perché conviene guardare la quota di questo socio: entrato o uscito nell'anno, esente l'anno prima. */
+export function noteQuota(db: Db, anno: number, s: Persona): string[] {
+  const n: string[] = []
+  if (s.iscrittoIl.slice(0, 10) >= `${anno}-01-01`) n.push(`entrato il ${fmtData(s.iscrittoIl)}`)
+  if (s.stato === 'CESSATO') n.push(`cessato il ${fmtData(s.cessatoIl)}`)
+  if (s.stato === 'ELIMINATO') n.push(`eliminato il ${fmtData(s.eliminatoIl)}`)
+  if (statoQuota(db, anno - 1, s) === 'ESENTE') n.push(`esente nel ${anno - 1}`)
+  return n
+}
+export interface DiffQuota { s: Persona; prima: StatoQuota; dopo: StatoQuota; versato: number }
+/** Le differenze fra lo stato di oggi e quello scelto, con le quote dovute prima e dopo. */
+export function differenzeQuote(db: Db, anno: number, scelte: Record<string, StatoQuota>): { diff: DiffQuota[]; prima: number; dopo: number } {
+  const soci = sociAnno(db, anno)
+  const diff = soci.flatMap(s => { const p = statoQuota(db, anno, s), d = scelte[s.id] ?? p; return d === p ? [] : [{ s, prima: p, dopo: d, versato: versatoQuota(db, anno, s) }] })
+    .sort((a, b) => nominativo(a.s).localeCompare(nominativo(b.s)))
+  const prima = soci.filter(s => statoQuota(db, anno, s) === 'DOVUTA').length
+  return { diff, prima, dopo: prima + diff.filter(x => x.dopo === 'DOVUTA').length - diff.filter(x => x.prima === 'DOVUTA').length }
+}
 export const quotaSocio = (db: Db, anno: number, s: Persona): QuotaSocio =>
   db.quote[String(anno)]?.[s.id] ?? { modo: s.matricola ? 'TRATTENUTA' : 'UNICA', mesi: Array<boolean>(12).fill(false), importi: Array<number>(12).fill(0), pagataIl: null, versatoUnica: null, note: '' }
 /** Rata del mese k (0–11): l'ultima prende i centesimi di resto. */

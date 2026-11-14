@@ -58,6 +58,8 @@ export function fmtValore(db: Db, campo: string, v: unknown): string {
   if (campo === 'unica') { const o = v as { pagataIl: string | null; versatoUnica: number | null }; return o.versatoUnica ? `${fmtEuro(o.versatoUnica)}${o.pagataIl ? ` il ${fmtData(o.pagataIl)}` : ' (da completare)'}` : '—' }
   if (campo === 'importi' && Array.isArray(v)) { const r = (v as number[]).flatMap((x, k) => (x ? [`${MESI[k]} ${fmtEuro(x)}`] : [])); return r.length ? r.join(' · ') : 'nessuno' }
   if (campo === 'versatoUnica') return fmtEuro(Number(v))
+  // 0028: stato della quota col suo motivo
+  if (campo === 'dovuta') { const o = v as { stato: string; motivo?: string }; return `${({ DOVUTA: 'Dovuta', ESENTE: 'Esente', NON_DOVUTA: 'Non dovuta' } as Record<string, string>)[o.stato] ?? o.stato}${o.motivo ? `: ${o.motivo}` : ''}` }
   if (campo === 'tipo' && typeof v === 'string' && v in TIPOLOGIE) return TIPOLOGIE[v as keyof typeof TIPOLOGIE][0]
   if (campo === 'modo' && typeof v === 'string' && v in MODI_QUOTA) return MODI_QUOTA[v as keyof typeof MODI_QUOTA]
   if (campo === 'mesi' && Array.isArray(v)) { const m = (v as boolean[]).flatMap((x, k) => (x ? [MESI[k]] : [])); return m.length ? m.join(' ') : 'nessuno' }

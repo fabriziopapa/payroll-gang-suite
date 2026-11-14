@@ -1386,4 +1386,7 @@ export const cralApi = {
     apiFetch<{ quota: QuotaSocio }>(`/cral/quote/${anno}/${enc(socio)}`, corpo('PATCH', p)),
   trattenuta: (anno: number, mese: number, soci: string[]) =>
     apiFetch<{ fatte: number }>(`/cral/quote/${anno}/trattenuta`, corpo('POST', { mese, soci })),
+  /** «Allinea soci» (0028): quota dovuta, esente o non dovuta per i soci indicati; esente e non dovuta col motivo. */
+  allineaQuote: (anno: number, voci: Array<{ socio: string; stato: 'DOVUTA' | 'ESENTE' | 'NON_DOVUTA'; motivo: string }>) =>
+    apiFetch<{ fatte: number }>(`/cral/quote/${anno}/allinea`, corpo('POST', { voci })),
 }

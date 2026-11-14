@@ -12,7 +12,7 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import * as schema from '../schema.js'
 import type {
   ICralRepository, CralModelloExport, CralPatchContatti, CralStato, CralSedeRow, CralTipoRow, CralTipologiaRow, CralParametriRow, CralTesseraParam,
-  CralSocioRow, CralIniziativaRow, CralCaricoRow, CralRichiestaRow, CralQuotaRow, CralAnagraficaRow,
+  CralSocioRow, CralIniziativaRow, CralCaricoRow, CralRichiestaRow, CralQuotaRow, CralStatoQuota, CralVoceAllinea, CralAnagraficaRow,
   CralNuovaPersona, CralModificaPersona, CralOperazioneImport, CralEsitoImport, CralErrore, CralAzioneStato,
   CralLottoRow, CralVariazioneRow, CralEsitoApplica,
 } from '../IRepository.js'
@@ -683,11 +683,13 @@ export class PgCralRepository implements ICralRepository {
       .onConflictDoUpdate({ target: schema.cralQuoteAnno.anno, set: { importoCent: importo, updatedBy: userId, updatedAt: new Date() } })
   }
 
-  async salvaQuota(anno: number, socio: string, patch: Partial<CralQuotaRow>, modoPredefinito: CralQuotaRow['modo'], userId: string | null): Promise<CralQuotaRow | null> {
+  async salvaQuota(anno: number, socio: string, patch: Partial<CralQuotaRow>, modoPredefinito: CralQuotaRow['modo'], userId: string | null): Promise<CralQuotaRow | 'QUOTA_NON_DOVUTA' | null> {
     return this.db.transaction(async tx => {
       const [a] = await tx.select({ imp: schema.cralQuoteAnno.importoCent }).from(schema.cralQuoteAnno).where(eq(schema.cralQuoteAnno.anno, anno))
       if (!a) return null
       const [cur] = await tx.select().from(schema.cralQuote).where(and(eq(schema.cralQuote.anno, anno), eq(schema.cralQuote.socioId, socio))).for('update')
+      // 0028: su una quota esente o non dovuta si corregge solo la nota; i pagamenti tornano con «Torna dovuta»
+      if (cur && cur.stato !== 'DOVUTA' && (patch.mesi !== undefined || patch.importi !== undefined || patch.pagataIl !== undefined)) return 'QUOTA_NON_DOVUTA'
       const base = cur ? toQuota(cur) : quotaVuota(modoPredefinito)
       const q = quotaDopoModifica(base, patch, a.imp)
       const valori = { modo: q.modo, mesi: q.mesi, importi: q.importi, pagataIl: q.pagataIl, versatoUnica: q.versatoUnica, note: q.note, updatedBy: userId, updatedAt: new Date() }
@@ -709,8 +711,46 @@ export class PgCralRepository implements ICralRepository {
         .onConflictDoNothing()
       const r = await tx.execute(sql`
         UPDATE cral_quote SET mesi[${mese}] = true, importi[${mese}] = GREATEST(importi[${mese}], ${rata}::int), updated_by = ${userId}, updated_at = now()
-        WHERE anno = ${anno} AND socio_id IN ${soci} AND modo = 'TRATTENUTA' RETURNING socio_id`)
+        WHERE anno = ${anno} AND socio_id IN ${soci} AND modo = 'TRATTENUTA' AND stato = 'DOVUTA' RETURNING socio_id`)
       return (r as unknown as unknown[]).length
+    })
+  }
+
+  /**
+   * «Allinea soci» (0028). Tutto o niente: se l'anno non e' impostato o un ID non e' di un socio
+   * (dipendente o esterno) non si scrive nulla. Chi non ha ancora la riga della quota la prende con la
+   * modalita' predefinita; i versamenti gia' registrati non si toccano. Ritorna i soli cambi veri.
+   */
+  async allineaQuote(anno: number, voci: CralVoceAllinea[], userId: string | null): Promise<'ANNO_NON_IMPOSTATO' | 'SOCIO_NON_VALIDO' | Array<{ socio: string; prima: CralStatoQuota; dopo: CralStatoQuota }>> {
+    if (!voci.length) return []
+    return this.db.transaction(async tx => {
+      const [a] = await tx.select({ anno: schema.cralQuoteAnno.anno }).from(schema.cralQuoteAnno).where(eq(schema.cralQuoteAnno.anno, anno))
+      if (!a) return 'ANNO_NON_IMPOSTATO'
+      const ids = voci.map(v => v.socio)
+      const soci = await tx.select({ id: schema.cralSoci.id, tipo: schema.cralSoci.tipo, matricola: schema.cralSoci.matricola })
+        .from(schema.cralSoci).where(inArray(schema.cralSoci.id, ids))
+      const perId = new Map(soci.map(s => [s.id, s]))
+      if (ids.some(id => { const s = perId.get(id); return !s || (s.tipo !== 'SD' && s.tipo !== 'SE') })) return 'SOCIO_NON_VALIDO'
+      const righe = await tx.select({ socio: schema.cralQuote.socioId, stato: schema.cralQuote.stato }).from(schema.cralQuote)
+        .where(and(eq(schema.cralQuote.anno, anno), inArray(schema.cralQuote.socioId, ids))).for('update')
+      const prima = new Map(righe.map(r => [r.socio, r.stato as CralStatoQuota]))
+      const cambi: Array<{ socio: string; prima: CralStatoQuota; dopo: CralStatoQuota }> = []
+      for (const v of voci) {
+        const p = prima.get(v.socio) ?? 'DOVUTA'
+        if (p === v.stato) continue
+        const motivo = v.stato === 'DOVUTA' ? '' : v.motivo
+        if (prima.has(v.socio)) {
+          await tx.update(schema.cralQuote).set({ stato: v.stato, motivo, updatedBy: userId, updatedAt: new Date() })
+            .where(and(eq(schema.cralQuote.anno, anno), eq(schema.cralQuote.socioId, v.socio)))
+        } else {
+          await tx.insert(schema.cralQuote).values({
+            anno, socioId: v.socio, modo: perId.get(v.socio)!.matricola ? 'TRATTENUTA' : 'UNICA', mesi: Array<boolean>(12).fill(false),
+            stato: v.stato, motivo, updatedBy: userId,
+          })
+        }
+        cambi.push({ socio: v.socio, prima: p, dopo: v.stato })
+      }
+      return cambi
     })
   }
 
@@ -1108,18 +1148,21 @@ export class PgCralRepository implements ICralRepository {
     if (tipo !== 'MODIFICA') {
       if (cur) throw new Salta('la quota c\'è già: reimporta per vedere le differenze')
       await tx.insert(schema.cralQuote).values({
-        anno: q.anno, socioId: socio, modo: modo(q.modo), mesi: q.mesi, importi: q.importi, pagataIl: q.pagataIl, versatoUnica: q.versatoUnica, note: q.note, updatedBy: c.userId,
+        anno: q.anno, socioId: socio, modo: modo(q.modo), mesi: q.mesi, importi: q.importi, pagataIl: q.pagataIl, versatoUnica: q.versatoUnica, note: q.note,
+        stato: q.stato ?? 'DOVUTA', motivo: (q.stato ?? 'DOVUTA') === 'DOVUTA' ? '' : (q.motivo ?? ''), updatedBy: c.userId,
       })
       return { fatti: 1, saltati }
     }
     if (!cur) throw new Salta('la quota non c\'è più')
     const qc = toQuota(cur)
     // T7: i versamenti (mesi + importi) e l'unica soluzione (data + importo) vanno a coppie
-    const attuale = { ...qc, versamenti: { mesi: qc.mesi, importi: qc.importi }, unica: { pagataIl: qc.pagataIl, versatoUnica: qc.versatoUnica } }
+    // 0028: stato e motivo della quota vanno insieme (campo «dovuta»)
+    const attuale = { ...qc, versamenti: { mesi: qc.mesi, importi: qc.importi }, unica: { pagataIl: qc.pagataIl, versatoUnica: qc.versatoUnica }, dovuta: { stato: qc.stato, motivo: qc.motivo } }
     const r = await this.aggiornaCampi(campi, attuale as unknown as Record<string, unknown>, set => {
       if (set['modo']) set['modo'] = modo(set['modo'] as string)
       if (set['versamenti']) { Object.assign(set, set['versamenti']); delete set['versamenti'] }
       if (set['unica']) { Object.assign(set, set['unica']); delete set['unica'] }
+      if (set['dovuta']) { Object.assign(set, set['dovuta']); delete set['dovuta'] }
       return tx.update(schema.cralQuote).set({ ...set, updatedBy: c.userId, updatedAt: new Date() }).where(and(eq(schema.cralQuote.anno, q.anno), eq(schema.cralQuote.socioId, socio)))
     })
     return { fatti: r.fatti, saltati: [...r.saltati, ...saltati] }
@@ -1315,10 +1358,13 @@ function toRichiesta(r: typeof schema.cralRichieste.$inferSelect, _u: Map<string
   }
 }
 function toQuota(r: typeof schema.cralQuote.$inferSelect): CralQuotaRow {
-  return { modo: r.modo as CralQuotaRow['modo'], mesi: r.mesi, pagataIl: r.pagataIl, note: r.note, importi: r.importi ?? Array<number>(12).fill(0), versatoUnica: r.versatoUnica ?? null }
+  return {
+    modo: r.modo as CralQuotaRow['modo'], mesi: r.mesi, pagataIl: r.pagataIl, note: r.note, importi: r.importi ?? Array<number>(12).fill(0), versatoUnica: r.versatoUnica ?? null,
+    stato: (r.stato ?? 'DOVUTA') as CralStatoQuota, motivo: r.motivo ?? '',
+  }
 }
 const quotaVuota = (modo: CralQuotaRow['modo']): CralQuotaRow =>
-  ({ modo, mesi: Array<boolean>(12).fill(false), importi: Array<number>(12).fill(0), pagataIl: null, versatoUnica: null, note: '' })
+  ({ modo, mesi: Array<boolean>(12).fill(false), importi: Array<number>(12).fill(0), pagataIl: null, versatoUnica: null, note: '', stato: 'DOVUTA', motivo: '' })
 function toIniz(
   i: RigaIniz, part: Array<typeof schema.cralIniziativePartecipanti.$inferSelect>, sce: Array<typeof schema.cralScelte.$inferSelect>,
   car: Array<typeof schema.cralCarichi.$inferSelect>, ric: Array<typeof schema.cralRichieste.$inferSelect>, utenti: Map<string, string>,
