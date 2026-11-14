@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import type { Db, Iniziativa, Persona } from './tipi.ts'
 import { ALIMENTARI_VUOTI, CONTATTI_VUOTI } from './contatti.ts'
 import {
-  applicaSconto, codaRichieste, contiMagazzino, contiOrdine, destinatari, dovutoTurni, eta, importoRichiesta, leggiData,
+  aggiunti, applicaSconto, codaRichieste, contiMagazzino, contiOrdine, descrPart, destinatari, dovutoTurni, eta, importoRichiesta, leggiData,
   nettoSocio, parseEuro, quotaDi, quotaDopoModifica, rataMese, rifDi, risolvi, riepilogo, simNome, spezzaNominativo, tenutoQuota, tesseraRiammissione, versatoQuota,
 } from './logica.ts'
 import { costruisciReport, testoPdf, type CfgReport } from './report.ts'
@@ -61,6 +61,35 @@ test('partecipanti: gruppi, sedi, familiari solo con socio attivo', () => {
   // il figlio del socio cessato non partecipa
   assert.deepEqual(destinatari(d, evento({ gruppi: ['FAM'] })).map(s => s.id), ['FAM-0001', 'FAM-0002'])
   assert.deepEqual(destinatari(d, evento({ modoPart: 'SINGOLI', partecipanti: ['EXT-0002', 'FAM-0003'] })).map(s => s.id), ['EXT-0002'])
+})
+
+test('evento per gruppi: persone aggiunte a mano (26.11.14.2)', () => {
+  const d = db()
+  const ids = (xs: Persona[]) => xs.map(s => s.id)
+  // un esterno aggiunto a un evento per soci: partecipa e resta esterno
+  const e = evento({ gruppi: ['SD', 'SE'], partecipanti: ['EXT-0002'] })
+  assert.deepEqual(ids(destinatari(d, e)), ['090001', '090002', 'EXT-0001', 'EXT-0002'])
+  assert.deepEqual(aggiunti(d, e).map(s => `${s.id} ${s.tipo}`), ['EXT-0002 EST'])
+  // non passa dal filtro delle sedi: l'evento è solo per la sede S2, l'aggiunto è in S1
+  const s2 = evento({ gruppi: ['SD'], sedi: ['S2'], partecipanti: ['EXT-0002', '090001'] })
+  assert.deepEqual(ids(destinatari(d, s2)), ['090001', '090002', 'EXT-0002'])
+  assert.deepEqual(ids(aggiunti(d, s2)), ['090001', 'EXT-0002'], 'anche un socio di un\'altra sede è un aggiunto')
+  // chi è già nei gruppi conta una volta sola e non è un «aggiunto»
+  const doppio = evento({ gruppi: ['SD', 'SE'], partecipanti: ['090001', 'EXT-0002'] })
+  assert.equal(destinatari(d, doppio).length, 4)
+  assert.deepEqual(ids(aggiunti(d, doppio)), ['EXT-0002'])
+  // fuori chi non è attivo: cessato, familiare senza socio attivo, da validare
+  assert.deepEqual(aggiunti(d, evento({ partecipanti: ['090004', 'FAM-0003'] })), [])
+  const daVal = [...SOCI, P('EXT-0009', 'EST', 'COLOMBO', 'Ida', { stato: 'DA_VALIDARE' })]
+  const dv = db({ soci: daVal, perId: new Map(daVal.map(s => [s.id, s])) })
+  assert.deepEqual(aggiunti(dv, evento({ partecipanti: ['EXT-0009'] })), [], 'entra solo dopo la validazione')
+  // negli eventi «Singoli» non c'è distinzione: l'elenco è tutto a mano
+  assert.deepEqual(aggiunti(d, evento({ modoPart: 'SINGOLI', gruppi: [], partecipanti: ['EXT-0002'] })), [])
+  // riepilogo per sede e descrizione seguono
+  assert.equal(riepilogo(d, e, false).dest.length, 4)
+  assert.equal(descrPart(e), 'soci dipendenti + soci esterni · tutte le sedi')
+  assert.equal(descrPart(e, 1), 'soci dipendenti + soci esterni · tutte le sedi · + 1 aggiunto')
+  assert.equal(descrPart(s2, 2), 'soci dipendenti · 1 sedi · + 2 aggiunti')
 })
 
 test('riepilogo per sede con la predefinita per chi non sceglie', () => {

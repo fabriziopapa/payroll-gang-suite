@@ -10,7 +10,7 @@ import { useState, type ReactNode } from 'react'
 import { cralApi, type CralIniziativaBody } from '../../api/endpoints'
 import type { Gruppo, Iniziativa, Modalita, Persona, Prodotto, PatchScelta } from './tipi'
 import {
-  GRUPPI, GRUPPI_EVENTO, NOMI_GRUPPO, catPersona, gruppoDi, contiMagazzino, contiOrdine, contiTurni, descrPart, destinatari, etichettaPers, fmtData, fmtEuro, fmtImp,
+  GRUPPI, GRUPPI_EVENTO, NOMI_GRUPPO, catPersona, gruppoDi, contiMagazzino, contiOrdine, contiTurni, aggiunti, descrPart, destinatari, nelGruppo, etichettaPers, fmtData, fmtEuro, fmtImp,
   fmtQ, generaSettimane, gruppiProdotti, haOrdinato, nettoSocio, nominativo, norm, parseEuro, partecipantiEffettivi, riepilogoAlimentare, perUnita, persDi, prodLabel, qta, regolaCat,
   riassuntoSconti, riepilogo, righeOrdiniPerSede, sedeBreve, sedeNome, tipNome, totaleSocio,
 } from './logica'
@@ -60,7 +60,7 @@ export function IniziativeTab() {
             <button key={i.id} onClick={() => setAperta(i.id)} className={`${cardCls} p-5 text-left hover:border-slate-700 transition-colors flex flex-col gap-3`}>
               <div className="flex items-center gap-2"><TipoChip db={db} id={i.tipo} /><span className="ml-auto flex gap-1.5">{i.archiviata && <Pill>Archiviato</Pill>}<Pill tono={st}>{sl}</Pill></span></div>
               <div><p className="text-white font-semibold">{i.titolo}</p>
-                <p className="text-xs text-slate-500 mt-0.5 tabular-nums">{fmtData(i.data)}{i.scadenza ? ` · entro ${fmtData(i.scadenza)}` : ''} · {descrPart(i)}</p></div>
+                <p className="text-xs text-slate-500 mt-0.5 tabular-nums">{fmtData(i.data)}{i.scadenza ? ` · entro ${fmtData(i.scadenza)}` : ''} · {descrPart(i, aggiunti(db, i).length)}</p></div>
               <div className="flex flex-wrap gap-1.5">
                 {mod === 'SCELTA' && i.opzioni.map(o => <span key={o.id} className={`text-[11px] px-2 py-0.5 rounded-md border ${o.id === i.predefinita ? 'border-indigo-700 text-indigo-300' : 'border-slate-700 text-slate-400'}`}>{o.etichetta}</span>)}
                 {mod === 'NESSUNA' && <span className="text-[11px] px-2 py-0.5 rounded-md border border-slate-700 text-slate-400">Nessuna scelta · solo consegna</span>}
@@ -125,6 +125,8 @@ function IniziativaModal({ id, onClose, onCreata }: { id: string | null; onClose
   const turOk = mod !== 'TURNI' || (f.periodi.length >= 1 && f.periodi.every(p => p.nome.trim() && p.dal && p.al && p.al >= p.dal && (!p.postiTxt || /^\d+$/.test(p.postiTxt))) && (parseEuro(f.quotaTxt) ?? 0) > 0)
   const magOk = mod !== 'MAGAZZINO' || (f.articoli.length >= 1 && f.articoli.every(a => a.nome.trim() && parseEuro(a.prezzoTxt || '0') !== null))
   const ok = !!f.titolo.trim() && !!f.data && opzOk && prodOk && turOk && magOk && scontiTxtOk(f.scontiTxt) && (f.modoPart === 'SINGOLI' || f.gruppi.length > 0) && !salvo
+  // 26.11.14.2: persone aggiunte a mano a un evento per gruppi, contate con i gruppi e le sedi scelti qui
+  const nAgg = esistente ? aggiunti(db, { ...esistente, modoPart: 'GRUPPI', gruppi: f.gruppi, sedi: f.sedi }).length : 0
   const setOpz = (k: string, v: string) => setF({ ...f, opzioni: f.opzioni.map(o => o.id === k ? { ...o, etichetta: v } : o) })
   const setProd = (k: string, p: Partial<ProdTxt>) => setF({ ...f, prodotti: f.prodotti.map(x => x.id === k ? { ...x, ...p } : x) })
   const prodVuoto = (): ProdTxt => ({ id: nuovoId('P'), tipologia: db.tipologie.find(t => t.attiva)?.id ?? '', nome: '', prezzo: 0, unita: 'pz', contenuto: null, contenutoUm: 'lt', max: null, prezzoTxt: '', maxTxt: '', contTxt: '' })
@@ -270,6 +272,7 @@ function IniziativaModal({ id, onClose, onCreata }: { id: string | null; onClose
                 <button onClick={() => setF({ ...f, sedi: [] })} className={chipCls(!f.sedi.length)}>Tutte</button>
                 {db.sedi.filter(s => s.attiva || f.sedi.includes(s.id)).map(s => { const on = f.sedi.includes(s.id); return <button key={s.id} onClick={() => setF({ ...f, sedi: on ? f.sedi.filter(x => x !== s.id) : [...f.sedi, s.id] })} className={chipCls(on)}>{sedeBreve(s.nome)}</button> })}
               </div></div>
+            <p className="text-xs text-slate-500">{nAgg ? `${nAgg} ${nAgg === 1 ? 'persona aggiunta a mano resta' : 'persone aggiunte a mano restano'} nell'evento anche se fuori da questi gruppi e sedi: si tolgono dalla pagina dell'evento.` : "Chi è fuori dai gruppi (es. un esterno a cui fare un omaggio) si aggiunge dalla pagina dell'evento con «Aggiungi persona»: resta della sua tipologia."}</p>
           </> : <p className="text-xs text-slate-500">{esistente?.partecipanti.length ? `${esistente.partecipanti.length} partecipanti già caricati.` : "Dopo il salvataggio, nella pagina dell'evento: «Importa partecipanti» (file) oppure «Nuovo partecipante» (uno alla volta, anche persone nuove di qualunque tipologia)."}</p>}
         </div>
         <Campo label="Note"><textarea rows={2} maxLength={1000} className={inputCls} value={f.note} onChange={e => setF({ ...f, note: e.target.value })} /></Campo>
@@ -325,18 +328,19 @@ function AggiungiPartecipanteModal({ ini, onClose }: { ini: Iniziativa; onClose:
   const [q, setQ] = useState('')
   const [nuovo, setNuovo] = useState(false)
   const gia = new Set(ini.partecipanti)
+  const perGruppi = ini.modoPart === 'GRUPPI'
   const n = norm(q)
-  const ris = n.length < 2 ? [] : db.soci.filter(s => !gia.has(s.id) && (s.stato === 'ATTIVO' || s.stato === 'DA_VALIDARE') && norm(`${nominativo(s)} ${s.id} ${s.tessera}`).includes(n)).slice(0, 10)
+  const ris = n.length < 2 ? [] : db.soci.filter(s => !gia.has(s.id) && !nelGruppo(db, ini, s) && (s.stato === 'ATTIVO' || s.stato === 'DA_VALIDARE') && norm(`${nominativo(s)} ${s.id} ${s.tessera}`).includes(n)).slice(0, 10)
   const aggiungi = (s: Persona) => { void esegui(() => cralApi.partecipanti(ini.id, [s.id]), `${nominativo(s)} aggiunto all'evento`).then(r => { if (r) setQ('') }) }
   if (nuovo) return <NuovoSocioModal perIniziativa={ini.id} onClose={onClose} tipoIniziale="EST" />
   return (
-    <Modale titolo="Nuovo partecipante" sotto={`A «${ini.titolo}»: chiunque sia già nel CRAL, di qualunque tipologia`} onClose={onClose} piedi={<><button className={btnSecondario} onClick={onClose}>Fatto</button><button className={btnPrimario} onClick={() => setNuovo(true)}><Ico d={D.plus} />Persona nuova</button></>}>
+    <Modale titolo={perGruppi ? 'Aggiungi persona' : 'Nuovo partecipante'} sotto={perGruppi ? `A «${ini.titolo}»: chi è fuori dai gruppi dell'evento. Resta della sua tipologia` : `A «${ini.titolo}»: chiunque sia già nel CRAL, di qualunque tipologia`} onClose={onClose} piedi={<><button className={btnSecondario} onClick={onClose}>Fatto</button><button className={btnPrimario} onClick={() => setNuovo(true)}><Ico d={D.plus} />Persona nuova</button></>}>
       <div className="flex flex-col gap-2">
         <div className="relative"><span className="absolute left-3 top-2.5 text-slate-500"><Ico d={D.search} /></span>
           <input autoFocus className={inputCls + ' pl-9'} placeholder="Cognome, ID o tessera: soci dipendenti, soci esterni, esterni, familiari" value={q} onChange={e => setQ(e.target.value)} /></div>
         {n.length >= 2 && <div className="border border-slate-800 rounded-lg divide-y divide-slate-800 max-h-72 overflow-y-auto pgs-discreto">
           {ris.map(s => <button key={s.id} onClick={() => aggiungi(s)} className="w-full text-left px-3 py-2 hover:bg-slate-800 flex items-center gap-3 text-sm"><span className="font-mono text-xs text-slate-400 w-20">{s.id}</span><span className="text-slate-100 flex-1">{nominativo(s)}{s.tipo === 'FAM' && <span className="block"><DiChi db={db} s={s} /></span>}</span>{s.stato === 'DA_VALIDARE' && <Pill tono="warn">da validare</Pill>}<Origine s={s} /><Ico d={D.plus} cls="w-3.5 h-3.5 text-indigo-400" /></button>)}
-          {!ris.length && <p className="px-3 py-3 text-sm text-slate-500">Nessuno. Se è una persona nuova usa «Persona nuova».</p>}
+          {!ris.length && <p className="px-3 py-3 text-sm text-slate-500">{perGruppi ? "Nessuno fuori dai gruppi dell'evento: chi ne fa già parte non compare. Se è una persona nuova usa «Persona nuova»." : 'Nessuno. Se è una persona nuova usa «Persona nuova».'}</p>}
         </div>}
         <p className="text-xs text-slate-500">Si possono aggiungere più persone di seguito. Chi è «da validare» entra in elenco ma partecipa solo dopo la validazione.</p>
       </div>
@@ -385,7 +389,9 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
   if (!ini) return null
   const mod = ini.modalita
   const singoli = ini.modoPart === 'SINGOLI'
-  const partSet = new Set(singoli ? ini.partecipanti : [])
+  const partSet = new Set(ini.partecipanti)
+  // 26.11.14.2: evento per gruppi, chi è stato aggiunto a mano (segno «aggiunto» e «x» per toglierlo)
+  const agg = new Set(aggiunti(db, ini).map(s => s.id))
   const posSede = (s: Persona) => { const k = db.sedi.findIndex(x => x.id === s.sede); return k < 0 ? 99 : k }
   const CHIAVI_ORD: Record<string, [string, (s: Persona) => string | number]> = {
     nom: ['Nominativo', s => nominativo(s)], sede: ['Sede, poi nominativo', posSede], tip: ['Tipologia, poi nominativo', s => GRUPPI.indexOf(s.tipo)],
@@ -411,7 +417,7 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
   }
   const lista = dest.filter(s => (!q || norm(`${nominativo(s)} ${s.tessera} ${s.id}`).includes(q)) && (!sede || s.sede === sede) && (!tipF || gruppoDi(db, s) === tipF) && filtroSolo(s)).sort(confronta)
   const mancanti = dest.filter(s => !ini.scelte[s.id]?.opz).length
-  const esclusi = db.soci.filter(s => s.stato === 'DA_VALIDARE' && (singoli ? partSet.has(s.id) : ini.gruppi.includes(gruppoDi(db, s)))).length
+  const esclusi = db.soci.filter(s => s.stato === 'DA_VALIDARE' && (partSet.has(s.id) || (!singoli && ini.gruppi.includes(gruppoDi(db, s))))).length
   const chiusa = ini.stato === 'CHIUSA' || ini.archiviata
   const archivia = (v: boolean) => { void esegui(() => cralApi.archivia(id, v), v ? 'Evento archiviato' : 'Evento ripristinato').then(r => { if (r && v) onBack() }) }
   // la fonte («modulo», «predef.») resta finché non si cambia a mano la scelta o le quantità
@@ -424,7 +430,7 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
   const togliPart = (sid: string) => { void esegui(() => cralApi.partecipanti(id, [], [sid]), 'Tolto dall\'evento', 'info') }
   const [sl, st] = STATI_INI[ini.stato]
   const conti = mod === 'ORDINE' ? contiOrdine(db, ini) : null
-  const nomeCella: NomeCella = (s, o = {}) => <td className={`${o.rientro ? 'pl-10' : 'pl-5'} pr-3 py-2 whitespace-nowrap`}><span className="inline-flex items-center gap-1.5">{o.rientro && <span className="text-slate-600 -ml-4 mr-0.5">↳</span>}<span className="text-slate-100">{nominativo(s)}</span>{s.tipo !== 'SD' && <Origine s={s} />}{singoli && !chiusa && <button title="Togli dall'evento" className="text-slate-500 hover:text-red-400" onClick={() => togliPart(s.id)}><Ico d={D.x} cls="w-3.5 h-3.5" /></button>}</span>{s.tipo === 'FAM' && !o.sotto && <div><DiChi db={db} s={s} /></div>}{o.sotto}</td>
+  const nomeCella: NomeCella = (s, o = {}) => <td className={`${o.rientro ? 'pl-10' : 'pl-5'} pr-3 py-2 whitespace-nowrap`}><span className="inline-flex items-center gap-1.5">{o.rientro && <span className="text-slate-600 -ml-4 mr-0.5">↳</span>}<span className="text-slate-100">{nominativo(s)}</span>{s.tipo !== 'SD' && <Origine s={s} />}{agg.has(s.id) && <Pill tratteggio title="Aggiunto a mano: non rientra nei gruppi o nelle sedi dell'evento">aggiunto</Pill>}{(singoli || agg.has(s.id)) && !chiusa && <button title="Togli dall'evento" className="text-slate-500 hover:text-red-400" onClick={() => togliPart(s.id)}><Ico d={D.x} cls="w-3.5 h-3.5" /></button>}</span>{s.tipo === 'FAM' && !o.sotto && <div><DiChi db={db} s={s} /></div>}{o.sotto}</td>
   const nomePred = ini.opzioni.find(o => o.id === ini.predefinita)?.etichetta
   return (
     <div className="flex flex-col gap-4">
@@ -432,6 +438,7 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
         <button className={btnPiccoloSec} onClick={onBack}><Ico d={D.back} cls="w-3.5 h-3.5" />Eventi</button>
         <TipoChip db={db} id={ini.tipo} /><Pill tono={st}>{sl}</Pill>{ini.archiviata && <Pill>Archiviato</Pill>}
         <div className="ml-auto flex flex-wrap gap-2">
+          {!singoli && !chiusa && <button className={btnSecondario} onClick={() => setAddPar(true)} title="Fa entrare chi è fuori dai gruppi dell'evento, es. un esterno a cui fare un omaggio: resta della sua tipologia"><Ico d={D.plus} />Aggiungi persona</button>}
           {singoli && !chiusa && <><button className={btnSecondario} onClick={() => setImpPar(true)}><Ico d={D.upload} />Importa partecipanti</button><button className={btnSecondario} onClick={() => setAddPar(true)}><Ico d={D.plus} />Nuovo partecipante</button></>}
           {(mod === 'SCELTA' || mod === 'ORDINE' || mod === 'TURNI') && !chiusa && <button className={btnSecondario} onClick={() => setModulo(true)}><Ico d={D.upload} />{mod === 'ORDINE' ? 'Importa ordini' : mod === 'TURNI' ? 'Importa iscrizioni' : 'Importa risposte modulo'}</button>}
           <button className={btnSecondario} onClick={() => setEsporta(true)} title="Lista WhatsApp, rubrica, esigenze alimentari: scegli colonne e formato"><Ico d={D.download} />Esporta elenco</button>
@@ -443,7 +450,7 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
       <EsigenzeEvento ini={ini} />
       {ini.archiviata && <div className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-2.5 text-sm text-slate-400">Evento archiviato il {fmtData(ini.archiviataIl)}{ini.archiviataDa ? ` da ${ini.archiviataDa}` : ''}: sola lettura. «Ripristina» lo riporta tra gli eventi attivi.</div>}
       <div><h3 className="text-lg font-semibold text-white">{ini.titolo}</h3>
-        <p className="text-sm text-slate-400 tabular-nums">{fmtData(ini.data)}{ini.scadenza ? ` · ${({ ORDINE: 'ordini', TURNI: 'iscrizioni', MAGAZZINO: 'richieste' } as Record<string, string>)[mod] ?? 'scelte'} entro ${fmtData(ini.scadenza)}` : ''} · {dest.length} partecipanti ({descrPart(ini)}){ini.fornitore ? ` · Fornitore: ${ini.fornitore}` : ''}{ini.pagamento ? ` · Pagamento: ${ini.pagamento}` : ''}{ini.note ? ` · ${ini.note}` : ''}</p>
+        <p className="text-sm text-slate-400 tabular-nums">{fmtData(ini.data)}{ini.scadenza ? ` · ${({ ORDINE: 'ordini', TURNI: 'iscrizioni', MAGAZZINO: 'richieste' } as Record<string, string>)[mod] ?? 'scelte'} entro ${fmtData(ini.scadenza)}` : ''} · {dest.length} partecipanti ({descrPart(ini, agg.size)}){ini.fornitore ? ` · Fornitore: ${ini.fornitore}` : ''}{ini.pagamento ? ` · Pagamento: ${ini.pagamento}` : ''}{ini.note ? ` · ${ini.note}` : ''}</p>
         {esclusi > 0 && <p className="text-xs text-amber-400 mt-1">{esclusi === 1 ? '1 persona in attesa di validazione non è' : `${esclusi} persone in attesa di validazione non sono`} tra i partecipanti: lo diventano appena validate.</p>}
         {ini.stato === 'BOZZA' && <p className="text-xs text-slate-500 mt-1">In bozza le consegne non si registrano: passa a «Raccolta aperta» con «Modifica».</p>}</div>
 

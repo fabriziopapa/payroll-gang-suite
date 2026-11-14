@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.11.14.1-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.11.14.2-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -423,6 +423,18 @@ Il foglio *LIBRO SOCI* va al server, che lo legge (`.xlsx`, `.xls`, `.csv`, max 
 
 Cinque modalita': **Scelta** di un'opzione (con opzione predefinita per chi non risponde, da contare nel riepilogo o da assegnare alla chiusura), **Nessuna scelta** (solo consegna), **Ordine a pagamento** (prodotti per tipologia con prezzo, vendita al pezzo, a cassetta o al kg, contenuto lt/kg, massimo a testa; quantita' per sede, ordine al fornitore con subtotali), **Turni a quota fissa** (campi estivi: settimane *Prenotata / Frequentata / Tolta*, quota piena a settimana, versato e saldo; prima il socio o dipendente di riferimento, sotto i suoi iscritti, con il totale della famiglia) e **Magazzino** (biglietti cinema: carichi con data, richieste con data servite in ordine, consegna a mano o via email che scala la giacenza, registro di magazzino). Partecipanti **per gruppi** (tipologie e sedi) o **singoli** (da file o uno per uno, anche persone nuove). Un evento si archivia (si chiude e diventa di sola lettura) e si ripristina.
 
+**Persone aggiunte a un evento per gruppi** (dalla 26.11.14.2): nella pagina dell'evento **«Aggiungi persona»** fa entrare anche chi e' fuori dai gruppi o dalle sedi scelte (es. un esterno a cui fare un omaggio in un evento per soci dipendenti e soci esterni). La persona **resta della sua tipologia** in elenco, report ed esportazioni, ha il segno «aggiunto» e si toglie con la «x»; chi e' «da validare» entra solo dopo la validazione. Gli aggiunti stanno in `cral_iniziative_partecipanti`, la stessa tabella degli eventi *Singoli*. Per vedere quali eventi per gruppi hanno persone in quella tabella (da lanciare come superutente del database, prima di passare alla 26.11.14.2):
+
+```sql
+SELECT i.titolo, count(*) AS aggiunti
+FROM cral_iniziative i
+JOIN cral_iniziative_partecipanti p ON p.iniziativa_id = i.id
+WHERE i.partecipanti = 'GRUPPI'
+GROUP BY i.titolo;
+```
+
+Nessuna riga: nessun evento ne ha. Se ne escono, sono persone rimaste da quando l'evento era *Singoli*: dalla 26.11.14.2 compaiono con il segno «aggiunto» e, se non servono, si tolgono con la «x».
+
 **Sconti** in ogni attivita' con un prezzo: regola per tipologia (soci dipendenti, soci esterni, dipendenti non soci, esterni, familiari; percentuale o euro a ordine / a settimana / a biglietto) e **sconto personale** sulla persona o sulla richiesta (percentuale, importo fisso o «nessuno», con il motivo), che sostituisce la regola. Nei campi conta la persona di riferimento, con la categoria **bloccata il giorno dell'iscrizione**. Nell'import ordini l'importo del file e' solo un controllo: se e' piu' basso, la differenza diventa uno sconto personale.
 
 ### Quote associative
@@ -606,6 +618,17 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.11.14.2
+**Modulo CRAL: persone aggiunte a mano negli eventi per gruppi**
+
+- **«Aggiungi persona»** nella pagina di un evento *Per gruppi*: fa entrare anche chi e' fuori dai gruppi o dalle sedi scelte, per esempio un esterno a cui fare un omaggio in un evento per soci dipendenti e soci esterni. Si cerca fra chi e' gia' nel CRAL o si crea una persona nuova. Prima un evento era o *Per gruppi* o *Singoli*: per un solo esterno bisognava accendere tutto il gruppo «Esterni».
+- **La persona resta della sua tipologia**: «Esterno» in elenco, nei report e nelle esportazioni, con il segno tratteggiato **«aggiunto»** e la «x» per toglierla. Non passa dal filtro delle sedi dell'evento; chi e' «da validare» entra solo dopo la validazione; chi rientra gia' nei gruppi conta una volta sola. Negli eventi a pagamento vale la regola di sconto della sua tipologia, con lo sconto personale per le eccezioni.
+- Intestazione dell'evento ed elenco eventi: «… tutte le sedi · + 2 aggiunti». Nella maschera dell'evento il conteggio delle persone aggiunte a mano, calcolato sui gruppi e sulle sedi scelti in quel momento. Voce nelle *Guide*.
+- Riepilogo per sede, report, «Esporta elenco», importazioni e scheda della persona seguono da soli: passano tutti da `destinatari()` (`client/src/components/cral/logica.ts`), che ora conta i gruppi piu' gli aggiunti; nuovi `nelGruppo()` e `aggiunti()`. Gli eventi *Singoli* non cambiano.
+- **Solo client**: nessuna migrazione, nessuna modifica al server. La tabella `cral_iniziative_partecipanti` e la rotta `POST /api/v1/cral/iniziative/:id/partecipanti` c'erano gia' e non guardano la modalita'.
+- **Da controllare prima del rilascio**: un evento passato da *Singoli* a *Per gruppi* puo' avere righe rimaste in `cral_iniziative_partecipanti`, che ora ricompaiono come «aggiunti» (si tolgono con la «x»). La query di controllo e' in *Sezione Modulo CRAL › Eventi*.
+- Test: server 162 (+1 saltato), client 131; typecheck e build. Pagina dell'evento resa con dati inventati: per gruppi con e senza aggiunti, aggiunto ancora da validare, *Singoli*, evento chiuso, elenco eventi. Da provare nel browser, in pre-produzione: «Aggiungi persona» (ricerca e persona nuova) e la «x».
 
 ### 26.11.14.1
 **Banner d'ambiente piu' discreto**

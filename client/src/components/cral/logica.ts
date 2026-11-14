@@ -99,18 +99,24 @@ export const nomeTipologia = (db: Db | null | undefined, s: Persona): string => 
 
 // ── Partecipanti e riepiloghi ────────────────────────────────
 /**
- * GRUPPI: tutte le persone attive delle tipologie scelte, nelle sedi coinvolte;
+ * GRUPPI: tutte le persone attive delle tipologie scelte, nelle sedi coinvolte,
+ *   più quelle aggiunte una per una (26.11.14.2), che restano della loro
+ *   tipologia e non passano dal filtro delle sedi;
  * SINGOLI: solo le persone aggiunte una per una (a mano o da file).
  */
+export const nelGruppo = (db: Db, ini: Iniziativa, s: Persona): boolean =>
+  ini.modoPart !== 'SINGOLI' && ini.gruppi.includes(gruppoDi(db, s)) && (!ini.sedi.length || (s.sede !== null && ini.sedi.includes(s.sede)))
 export function destinatari(db: Db, ini: Iniziativa): Persona[] {
-  const part = ini.modoPart === 'SINGOLI' ? new Set(ini.partecipanti) : null
-  return db.soci.filter(s => s.stato === 'ATTIVO' && rifAttivo(db, s) && (
-    part ? part.has(s.id) : ini.gruppi.includes(gruppoDi(db, s)) && (!ini.sedi.length || (s.sede !== null && ini.sedi.includes(s.sede)))))
+  const part = new Set(ini.partecipanti)
+  return db.soci.filter(s => s.stato === 'ATTIVO' && rifAttivo(db, s) && (part.has(s.id) || nelGruppo(db, ini, s)))
 }
+/** Evento per gruppi: chi partecipa solo perché aggiunto a mano (fuori dai gruppi o dalle sedi dell'evento). */
+export const aggiunti = (db: Db, ini: Iniziativa): Persona[] =>
+  ini.modoPart === 'SINGOLI' ? [] : destinatari(db, ini).filter(s => !nelGruppo(db, ini, s))
 const NOMI_GRUPPI: Record<Gruppo, string> = { SD: 'soci dipendenti', SE: 'soci esterni', EST: 'esterni', FAM: 'familiari dei soci', FEX: 'familiari di esterni' }
-export const descrPart = (ini: Iniziativa): string => ini.modoPart === 'SINGOLI'
+export const descrPart = (ini: Iniziativa, nAggiunti = 0): string => ini.modoPart === 'SINGOLI'
   ? `${ini.partecipanti.length} partecipanti singoli`
-  : `${ini.gruppi.map(g => NOMI_GRUPPI[g]).join(' + ')} · ${ini.sedi.length ? `${ini.sedi.length} sedi` : 'tutte le sedi'}`
+  : `${ini.gruppi.map(g => NOMI_GRUPPI[g]).join(' + ')} · ${ini.sedi.length ? `${ini.sedi.length} sedi` : 'tutte le sedi'}${nAggiunti ? ` · + ${nAggiunti} ${nAggiunti === 1 ? 'aggiunto' : 'aggiunti'}` : ''}`
 
 export interface Riepilogo { colonne: string[]; righe: Array<[string, Record<string, number>]>; dest: Persona[] }
 /** Pivot sede × scelta (o destinatari, senza scelta), nell'ordine delle sedi. */
