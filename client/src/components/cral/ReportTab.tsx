@@ -6,7 +6,7 @@
 
 import { Fragment, useMemo, useState } from 'react'
 import type { Richiesta } from './tipi'
-import { GRUPPI, TIPOLOGIE, creaCsv, fmtData, oggi, sedeBreve, statoDi } from './logica'
+import { GRUPPI, TIPOLOGIE, conLuogo, consegnaAltrove, creaCsv, destinatari, fmtData, oggi, sedeBreve, statoDi } from './logica'
 import { MODI_QUOTA, STATI_RIC_ETICH, conProgressivo, costruisciReport, creaPdf, tipiAmmessi, type CfgReport } from './report'
 
 // 26.11.23: il numero progressivo si ricorda in questo browser
@@ -42,6 +42,8 @@ export function ReportTab() {
   const ord = ini?.modalita === 'ORDINE'
   const modR = ini?.modalita
   const turniMag = !senzaIni && (modR === 'TURNI' || modR === 'MAGAZZINO')
+  // 26.11.23.1: quanti in questo evento ritirano in una sede diversa dalla loro sede di lavoro
+  const altrove = !senzaIni && ini && conLuogo(ini.modalita) ? destinatari(db, ini).filter(s => consegnaAltrove(ini, s)).length : 0
   const TIPI_REP = tipiAmmessi(ini)
   const csv = () => creaCsv(rep.intest, rep.righe)
   async function pdf() {
@@ -57,7 +59,7 @@ export function ReportTab() {
         <div className="flex flex-col gap-2"><span className={etichettaCls}>Report</span>
           {TIPI_REP.map(([k, t, d]) => <button key={k} onClick={() => set({ tipo: k })} className={sceltaCls(cfg.tipo === k)}><p className="text-sm font-medium text-white">{t}</p><p className="text-xs text-slate-500">{d}</p></button>)}</div>
         {!senzaIni && <Campo label="Evento"><select className={inputCls} value={cfg.ini} onChange={e => { const n = db.iniziative.find(i => i.id === e.target.value); const ammessi = tipiAmmessi(n).map(x => x[0]); set({ ini: e.target.value, tipo: ammessi.includes(cfg.tipo) ? cfg.tipo : 'riepilogo' }) }}>{db.iniziative.map(i => <option key={i.id} value={i.id}>{i.titolo}{i.archiviata ? ' (archiviato)' : ''}</option>)}</select></Campo>}
-        {!turniMag && <div><span className={etichettaCls}>Sedi</span>
+        {!turniMag && <div><span className={etichettaCls}>{senzaIni ? 'Sedi di lavoro' : 'Sedi di consegna'}</span>
           <div className="flex flex-wrap gap-1.5 mt-2">
             <button onClick={() => set({ sedi: [] })} className={chipCls(!cfg.sedi.length)}>Tutte</button>
             {db.sedi.map(s => { const on = cfg.sedi.includes(s.id); return <button key={s.id} onClick={() => set({ sedi: on ? cfg.sedi.filter(x => x !== s.id) : [...cfg.sedi, s.id] })} className={chipCls(on)}>{sedeBreve(s.nome)}</button> })}
@@ -102,10 +104,11 @@ export function ReportTab() {
           </>}
           {(cfg.tipo === 'soci' || cfg.tipo === 'scelte') && <span className={etichettaCls + ' pt-1'}>Colonne</span>}
           {cfg.tipo === 'soci' && <>
-            <Interruttore on={cfg.colSoci.sede} onChange={v => set({ colSoci: { ...cfg.colSoci, sede: v } })} label="Sede (raggruppa per sede, poi ordina)" />
+            <Interruttore on={cfg.colSoci.sede} onChange={v => set({ colSoci: { ...cfg.colSoci, sede: v } })} label="Sede di lavoro (raggruppa per sede, poi ordina)" />
             <Interruttore on={cfg.colSoci.id} onChange={v => set({ colSoci: { ...cfg.colSoci, id: v } })} label="ID socio" />
           </>}
-          {cfg.tipo === 'scelte' && <Interruttore on={cfg.sedeScelte} onChange={v => set({ sedeScelte: v })} label="Sede (raggruppa per sede, poi ordina)" />}
+          {cfg.tipo === 'scelte' && <Interruttore on={cfg.sedeScelte} onChange={v => set({ sedeScelte: v })} label="Sede di consegna (raggruppa per sede, poi ordina)" />}
+          {cfg.tipo === 'scelte' && altrove > 0 && <Interruttore on={cfg.sedeAltra !== false} onChange={v => set({ sedeAltra: v })} label={`${cfg.sedeScelte ? 'Sede di lavoro accanto' : 'Colonna sede di consegna'} (${altrove} ${altrove === 1 ? 'ritira' : 'ritirano'} altrove)`} />}
           {(cfg.tipo === 'soci' || cfg.tipo === 'scelte') && <Interruttore on={cfg.tessera} onChange={v => set({ tessera: v })} label="Tessera" />}
           {cfg.tipo === 'soci' && <Interruttore on={cfg.colSoci.nom} onChange={v => set({ colSoci: { ...cfg.colSoci, nom: v } })} label="Nominativo" />}
           {cfg.tipo === 'scelte' && ord && <Interruttore on={cfg.pagato} onChange={v => set({ pagato: v })} label="Pagato (Sì/No)" />}

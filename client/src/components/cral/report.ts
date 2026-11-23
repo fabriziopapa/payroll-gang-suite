@@ -6,7 +6,7 @@
 // ============================================================
 
 import { nomiEsigenze } from './contatti'
-import { annullato, partecipantiEffettivi, riepilogoAlimentare } from './logica'
+import { annullato, conLuogo, consegnaAltrove, partecipantiEffettivi, riepilogoAlimentare, sedeConsegna } from './logica'
 import type { Db, Iniziativa, Persona, QuotaSocio, Richiesta, StatoPeriodo } from './tipi'
 import {
   CAT_SCONTO_1, GRUPPI, MESI, nomeTipologia, MODI_QUOTA, TIPOLOGIE, aCaricoDi, catSconto, conScontiIni, contenutoTot, contiMagazzino, descrScontoPers,
@@ -27,6 +27,8 @@ export interface CfgReport {
   anno: number; qmodo: '' | QuotaSocio['modo']; mesi: boolean; statoRic: '' | Richiesta['stato']
   /** 26.11.23: numero progressivo (1, 2, 3…) come prima colonna; con il raggruppamento, ricomincia in ogni gruppo */
   numero?: boolean; numeroPerGruppo?: boolean
+  /** 26.11.23.1: per chi ritira altrove, l'altra sede accanto (la sede di lavoro se si raggruppa, se no quella di consegna). */
+  sedeAltra?: boolean
 }
 export type Cella = string | number
 export interface Report {
@@ -75,12 +77,15 @@ export function costruisciReport(db: Db, cfg: CfgReport, oggiIso: string): Repor
 
 function costruisciBase(db: Db, cfg: CfgReport, oggiIso: string): Report {
   const ini = db.iniziative.find(i => i.id === cfg.ini)
-  const sediOk = (s: Persona) => !cfg.sedi.length || cfg.sedi.includes(s.sede ?? '__NOSEDE')
+  // 26.11.23.1: nei report di un evento conta la sede di consegna (se c'è), negli altri la sede di lavoro
+  const evRep = !!ini && cfg.tipo !== 'soci' && cfg.tipo !== 'quote'
+  const sedeDi = (s: Persona): string | null => (evRep && ini ? sedeConsegna(ini, s) : s.sede)
+  const sediOk = (s: Persona) => !cfg.sedi.length || cfg.sedi.includes(sedeDi(s) ?? '__NOSEDE')
   const tipOk = (s: Persona) => !cfg.origine || s.tipo === cfg.origine
   // Ordinamento delle persone (dentro ogni sede, se si raggruppa): nominativo, tessera, ID o tipologia
   const chiaveP = (s: Persona) => cfg.ordinaPer === 'tessera' ? (s.tessera || '~') : cfg.ordinaPer === 'id' ? s.id : cfg.ordinaPer === 'tip' ? `${GRUPPI.indexOf(s.tipo)} ${nominativo(s)}` : nominativo(s)
   const cmp = (a: Persona, b: Persona) => chiaveP(a).localeCompare(chiaveP(b)) || nominativo(a).localeCompare(nominativo(b))
-  const posSede = (s: Persona) => { const k = db.sedi.findIndex(x => x.id === s.sede); return k < 0 ? 99 : k }
+  const posSede = (s: Persona) => { const k = db.sedi.findIndex(x => x.id === sedeDi(s)); return k < 0 ? 99 : k }
   const ordinaSoci = (arr: Persona[]) => arr.sort((a, b) => posSede(a) - posSede(b) || cmp(a, b))
   const perNome = (arr: Persona[]) => arr.sort(cmp)
   const etaDi = (s: Persona | undefined, al: string): Cella => eta(s?.nascita, al)
@@ -90,11 +95,11 @@ function costruisciBase(db: Db, cfg: CfgReport, oggiIso: string): Report {
     const perSede = cfg.colSoci.sede
     const soci = perSede ? ordinaSoci(filtrati) : perNome(filtrati)
     const col: Array<[string, string, (s: Persona) => Cella]> = ([
-      ['sede', 'Sede', s => sedeNome(db, s.sede)], ['id', 'ID socio', s => s.id], ['tessera', 'Tessera', s => s.tessera], ['nom', 'Nominativo', s => nominativo(s)],
+      ['sede', 'Sede di lavoro', s => sedeNome(db, s.sede)], ['id', 'ID socio', s => s.id], ['tessera', 'Tessera', s => s.tessera], ['nom', 'Nominativo', s => nominativo(s)],
       ['eta', 'Età', s => etaDi(s, oggiIso)], ['firma', 'Firma', () => ''],
     ] as Array<[string, string, (s: Persona) => Cella]>).filter(([k]) => k === 'tessera' ? cfg.tessera : k === 'firma' ? cfg.firma : k === 'eta' ? cfg.eta : cfg.colSoci[k as 'sede' | 'id' | 'nom'])
     if (!col.length || (perSede && col.length === 1)) return { titolo: 'Elenco soci', intest: [], righe: [], vuoto: 'Accendi almeno una colonna oltre alla sede.' }
-    return { titolo: perSede ? 'Elenco soci per sede' : 'Elenco soci', intest: col.map(c => c[1]), gruppi: perSede, righe: soci.map(s => col.map(c => c[2](s))) }
+    return { titolo: perSede ? 'Elenco soci per sede di lavoro' : 'Elenco soci', intest: col.map(c => c[1]), gruppi: perSede, righe: soci.map(s => col.map(c => c[2](s))) }
   }
   if (cfg.tipo === 'quote') {
     const anno = cfg.anno, imp = quotaAnno(db, anno)
@@ -102,7 +107,7 @@ function costruisciBase(db: Db, cfg: CfgReport, oggiIso: string): Report {
     const esente = (s: Persona) => statoQuota(db, anno, s) === 'ESENTE'
     const dov = (s: Persona) => (esente(s) ? 0 : imp)
     const lista = perNome(sociQuota(db, anno).filter(s => sediOk(s) && tipOk(s)).filter(s => !cfg.qmodo || quotaSocio(db, anno, s).modo === cfg.qmodo).filter(s => !cfg.soloSaldo || versatoQuota(db, anno, s) < dov(s)))
-    const pre = ['Sede', ...(cfg.tessera ? ['Tessera'] : []), 'Nominativo', ...(cfg.eta ? ['Età'] : []), 'Tipologia', 'Modalità']
+    const pre = ['Sede di lavoro', ...(cfg.tessera ? ['Tessera'] : []), 'Nominativo', ...(cfg.eta ? ['Età'] : []), 'Tipologia', 'Modalità']
     const intest = [...pre, ...(cfg.mesi ? MESI : []), 'Dovuto €', 'Versato €', 'Saldo €', ...(cfg.note ? ['Note'] : []), ...(cfg.firma ? ['Firma'] : [])]
     let tv = 0, td = 0
     const righe: Cella[][] = lista.map(s => {
@@ -120,8 +125,8 @@ function costruisciBase(db: Db, cfg: CfgReport, oggiIso: string): Report {
     const r = riepilogoAlimentare(partecipantiEffettivi(db, ini).filter(s => sediOk(s) && tipOk(s)))
     const totali = [...r.conteggi.map(([n, k]) => `${n} ${k}`), ...(r.allergie ? [`con allergie ${r.allergie}`] : [])].join(' · ')
     return {
-      titolo: `${ini.titolo} · esigenze alimentari${totali ? ` (${totali})` : ''}`, intest: ['Nominativo', 'Sede', 'Esigenze', 'Allergie'],
-      righe: perNome(r.conDati).map(s => [nominativo(s), sedeNome(db, s.sede), nomiEsigenze(s.alimentari.esigenze), s.alimentari.allergie]),
+      titolo: `${ini.titolo} · esigenze alimentari${totali ? ` (${totali})` : ''}`, intest: ['Nominativo', conLuogo(ini.modalita) ? 'Sede di consegna' : 'Sede di lavoro', 'Esigenze', 'Allergie'],
+      righe: perNome(r.conDati).map(s => [nominativo(s), sedeNome(db, sedeDi(s)), nomiEsigenze(s.alimentari.esigenze), s.alimentari.allergie]),
       vuoto: 'Nessun partecipante ha indicato esigenze alimentari o allergie (si registrano solo con il consenso).',
     }
   }
@@ -230,7 +235,8 @@ function costruisciBase(db: Db, cfg: CfgReport, oggiIso: string): Report {
       let soci = destinatari(db, ini).filter(s => sediOk(s) && tipOk(s))
       soci = soci.filter(s => cfg.inclusiVuoti || haOrdinato(ini, s.id)).filter(s => !cfg.soloDaPagare || (haOrdinato(ini, s.id) && !ini.scelte[s.id]?.pagato))
       soci = perSede ? ordinaSoci(soci) : perNome(soci)
-      const pre = [...(perSede ? ['Sede'] : []), ...(cfg.tessera ? ['Tessera'] : []), 'Nominativo', ...(cfg.eta ? ['Età'] : [])]
+      const altra = cfg.sedeAltra !== false && soci.some(s => consegnaAltrove(ini, s))
+      const pre = [...(perSede ? ['Sede di consegna'] : []), ...(cfg.tessera ? ['Tessera'] : []), 'Nominativo', ...(altra ? [perSede ? 'Sede di lavoro' : 'Sede di consegna'] : []), ...(cfg.eta ? ['Età'] : [])]
       const cs = conScontiIni(ini)
       const post = [...(cs ? ['Lordo €', 'Sconto'] : []), 'Totale €', ...(cfg.pagato ? ['Pagato'] : []), ...(cfg.consegnato ? ['Consegnato'] : []), ...(cfg.note ? ['Note'] : []), ...(cfg.firma ? ['Firma per ritiro'] : [])]
       const intest = [...pre, ...ini.prodotti.map(p => `${tipNome(db, p.tipologia)} · ${p.nome}`), ...post]
@@ -238,7 +244,7 @@ function costruisciBase(db: Db, cfg: CfgReport, oggiIso: string): Report {
       const breve = [...pre, ...ini.prodotti.map(p => p.nome), ...post]
       const righe: Cella[][] = soci.map(s => {
         const o = haOrdinato(ini, s.id), sc = ini.scelte[s.id], pp = persDi(ini, s.id)
-        return [...(perSede ? [sedeNome(db, s.sede)] : []), ...(cfg.tessera ? [s.tessera] : []), nominativo(s), ...(cfg.eta ? [etaDi(s, ini.data)] : []),
+        return [...(perSede ? [sedeNome(db, sedeDi(s))] : []), ...(cfg.tessera ? [s.tessera] : []), nominativo(s), ...(altra ? [sedeNome(db, perSede ? s.sede : sedeDi(s))] : []), ...(cfg.eta ? [etaDi(s, ini.data)] : []),
           ...ini.prodotti.map(p => qta(ini, s.id, p.id) ? fmtQ(qta(ini, s.id, p.id)) : ''),
           ...(cs ? [o ? fmtImp(totaleSocio(ini, s.id)) : '', o ? (pp ? descrScontoPers(pp) : fmtSconto(scontoOrdine(db, ini, s.id))) : ''] : []),
           o ? fmtImp(nettoSocio(db, ini, s.id)) : '', ...(cfg.pagato ? [o ? (sc?.pagato ? 'Sì' : 'No') : ''] : []), ...(cfg.consegnato ? [o ? (sc?.consegnato ? 'Sì' : 'No') : ''] : []),
@@ -250,8 +256,8 @@ function costruisciBase(db: Db, cfg: CfgReport, oggiIso: string): Report {
     const out: Cella[][] = righeS.map(([k, r]) => [k === '__NOSEDE' ? 'Sede non indicata' : sedeNome(db, k), r.n, ...ini.prodotti.map(p => fmtQ(r.q[p.id] ?? 0)), fmtImp(r.eur)])
     if (out.length) out.push(['Totale complessivo', righeS.reduce((a, [, r]) => a + r.n, 0), ...ini.prodotti.map(p => fmtQ(righeS.reduce((a, [, r]) => a + (r.q[p.id] ?? 0), 0))), fmtImp(righeS.reduce((a, [, r]) => a + r.eur, 0))])
     return {
-      titolo: `${ini.titolo} · quantità per sede`, intest: ['Sede', 'Ordini', ...ini.prodotti.map(p => `${tipNome(db, p.tipologia)} · ${p.nome}`), 'Importo €'],
-      sopra: ['', '', ...ini.prodotti.map(p => tipNome(db, p.tipologia)), ''], breve: ['Sede', 'Ordini', ...ini.prodotti.map(p => p.nome), 'Importo €'], totale: true, righe: out,
+      titolo: `${ini.titolo} · quantità per sede di consegna`, intest: ['Sede di consegna', 'Ordini', ...ini.prodotti.map(p => `${tipNome(db, p.tipologia)} · ${p.nome}`), 'Importo €'],
+      sopra: ['', '', ...ini.prodotti.map(p => tipNome(db, p.tipologia)), ''], breve: ['Sede di consegna', 'Ordini', ...ini.prodotti.map(p => p.nome), 'Importo €'], totale: true, righe: out,
     }
   }
 
@@ -262,10 +268,11 @@ function costruisciBase(db: Db, cfg: CfgReport, oggiIso: string): Report {
     soci = perSede ? ordinaSoci(soci) : perNome(soci)
     const conScelta = mod === 'SCELTA'
     const scelta = (s: Persona) => { const o = ini.scelte[s.id]?.opz || (cfg.pred ? ini.predefinita : null); return o ? ini.opzioni.find(x => x.id === o)?.etichetta ?? o : 'Non indicata' }
-    const intest = [...(perSede ? ['Sede'] : []), ...(cfg.tessera ? ['Tessera'] : []), 'Nominativo', ...(cfg.eta ? ['Età'] : []), ...(conScelta ? ['Scelta'] : []), ...(cfg.consegnato ? ['Consegnato'] : []), ...(cfg.firma ? ['Firma per ritiro'] : [])]
+    const altra = cfg.sedeAltra !== false && soci.some(s => consegnaAltrove(ini, s))
+    const intest = [...(perSede ? ['Sede di consegna'] : []), ...(cfg.tessera ? ['Tessera'] : []), 'Nominativo', ...(altra ? [perSede ? 'Sede di lavoro' : 'Sede di consegna'] : []), ...(cfg.eta ? ['Età'] : []), ...(conScelta ? ['Scelta'] : []), ...(cfg.consegnato ? ['Consegnato'] : []), ...(cfg.firma ? ['Firma per ritiro'] : [])]
     return {
-      titolo: `${ini.titolo} · ${conScelta ? 'scelte' : 'consegne'} ${perSede ? 'per sede' : 'per persona'}`, intest, gruppi: perSede,
-      righe: soci.map(s => [...(perSede ? [sedeNome(db, s.sede)] : []), ...(cfg.tessera ? [s.tessera] : []), nominativo(s), ...(cfg.eta ? [etaDi(s, ini.data)] : []), ...(conScelta ? [scelta(s)] : []), ...(cfg.consegnato ? [ini.scelte[s.id]?.consegnato ? 'Sì' : 'No'] : []), ...(cfg.firma ? [''] : [])]),
+      titolo: `${ini.titolo} · ${conScelta ? 'scelte' : 'consegne'} ${perSede ? 'per sede di consegna' : 'per persona'}`, intest, gruppi: perSede,
+      righe: soci.map(s => [...(perSede ? [sedeNome(db, sedeDi(s))] : []), ...(cfg.tessera ? [s.tessera] : []), nominativo(s), ...(altra ? [sedeNome(db, perSede ? s.sede : sedeDi(s))] : []), ...(cfg.eta ? [etaDi(s, ini.data)] : []), ...(conScelta ? [scelta(s)] : []), ...(cfg.consegnato ? [ini.scelte[s.id]?.consegnato ? 'Sì' : 'No'] : []), ...(cfg.firma ? [''] : [])]),
     }
   }
   const { colonne, righe } = riepilogo(db, ini, cfg.pred)
@@ -274,7 +281,7 @@ function costruisciBase(db: Db, cfg: CfgReport, oggiIso: string): Report {
   const col = colonne.filter(c => c !== '__NONE' || ok.some(([, r]) => r['__NONE']))
   const out: Cella[][] = ok.map(([k, r]) => [k === '__NOSEDE' ? 'Sede non indicata' : sedeNome(db, k), ...col.map(c => r[c] ?? 0), col.reduce((a, c) => a + (r[c] ?? 0), 0)])
   if (out.length) out.push(['Totale complessivo', ...col.map((_, j) => out.reduce((a, r) => a + Number(r[j + 1]), 0)), out.reduce((a, r) => a + Number(r[r.length - 1]), 0)])
-  return { titolo: `${ini.titolo} · quantità per sede`, intest: ['Sede', ...col.map(etich), 'Totale'], totale: true, righe: out }
+  return { titolo: `${ini.titolo} · quantità per sede di consegna`, intest: ['Sede di consegna', ...col.map(etich), 'Totale'], totale: true, righe: out }
 }
 
 /** Tipi di report ammessi per un evento (o senza evento). */
@@ -284,14 +291,14 @@ export function tipiAmmessi(ini: Iniziativa | undefined): Array<[TipoReport, str
   return ini && ini.modalita !== 'MAGAZZINO' ? [...base, ['alimentari', 'Esigenze alimentari', 'Chi ha esigenze o allergie (solo chi ha dato il consenso), con i totali: per chi prepara']] : base
 }
 function tipiBase(ini: Iniziativa | undefined): Array<[TipoReport, string, string]> {
-  const SOCI: [TipoReport, string, string] = ['soci', 'Elenco soci', 'Nominativi per sede di consegna, senza evento']
+  const SOCI: [TipoReport, string, string] = ['soci', 'Elenco soci', 'Nominativi per sede di lavoro, senza evento']
   const QUOTE: [TipoReport, string, string] = ['quote', 'Quote associative', 'Per anno solare: modalità, mesi pagati, dovuto, versato, saldo']
   const m = ini?.modalita
   if (m === 'TURNI') return [['riepilogo', 'Iscritti per settimana', 'Prenotate, frequentate, tolte, posti e importo'], ['scelte', 'Quote per famiglia', 'Prima il socio o dipendente, sotto i figli: quota, sconto, dovuto, versato, saldo'], ['settimane', 'Elenco per settimana', "Chi c'è settimana per settimana: anche come foglio presenze"], SOCI, QUOTE]
   if (m === 'MAGAZZINO') return [['riepilogo', 'Giacenze', 'Caricati, consegnati, in giacenza e in attesa per articolo'], ['scelte', 'Richieste', 'Chi ha chiesto cosa, quando e se è stato consegnato'], ['movimenti', 'Registro di magazzino', 'Carichi e consegne in ordine di data, con la giacenza'], SOCI, QUOTE]
   const ord = m === 'ORDINE'
   return [
-    ['riepilogo', 'Quantità per sede', ord ? 'Pezzi per prodotto e importo, sede per sede' : "Pivot sede × scelta, con totale: l'ordine al fornitore"],
+    ['riepilogo', 'Quantità per sede', ord ? 'Pezzi per prodotto e importo, sede di consegna per sede' : "Pivot sede di consegna × scelta, con totale: l'ordine al fornitore"],
     ['scelte', ord ? 'Ordini per persona' : m === 'NESSUNA' ? 'Consegne per persona' : 'Scelte per persona', ord ? 'Quantità, totale €, pagato, note: il foglio degli ordini' : 'Nominativo, sede e scelta: la lista di consegna'],
     ...(ord ? [['fornitore', 'Ordine al fornitore', 'Per prodotto: prezzo, quantità, importo e litri/kg, con subtotali per tipologia'] as [TipoReport, string, string]] : []),
     SOCI, QUOTE,

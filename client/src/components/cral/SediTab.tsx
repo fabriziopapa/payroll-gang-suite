@@ -16,7 +16,7 @@ export function SediTab() {
   const [dest, setDest] = useState('')
   const [cerca, setCerca] = useState('')
   const scegli = (id: string) => { setSel(id); setSpunte(new Set()); setCerca('') }
-  const nomeSel = sel === '__NOSEDE' ? 'Senza sede di consegna' : sedeNome(db, sel)
+  const nomeSel = sel === '__NOSEDE' ? 'Senza sede di lavoro' : sedeNome(db, sel)
   const membri = vivi.filter(s => (sel === '__NOSEDE' ? !s.sede : s.sede === sel)).sort((a, b) => nominativo(a).localeCompare(nominativo(b)))
   const n = norm(cerca)
   const aggiungibili = n.length < 2 ? [] : vivi.filter(s => (sel === '__NOSEDE' ? !!s.sede : s.sede !== sel) && norm(`${nominativo(s)} ${s.id} ${s.tessera}`).includes(n)).slice(0, 8)
@@ -27,11 +27,11 @@ export function SediTab() {
   }
   const conta = (id: string) => vivi.filter(s => (id === '__NOSEDE' ? !s.sede : s.sede === id)).length
   const tutti = membri.length > 0 && membri.every(s => spunte.has(s.id))
-  const voci: Array<[string, string, boolean]> = [...db.sedi.map(s => [s.id, s.nome, s.attiva] as [string, string, boolean]), ['__NOSEDE', 'Senza sede di consegna', true]]
+  const voci: Array<[string, string, boolean]> = [...db.sedi.map(s => [s.id, s.nome, s.attiva] as [string, string, boolean]), ['__NOSEDE', 'Senza sede di lavoro', true]]
   return (
     <div className="grid lg:grid-cols-[280px_minmax(0,1fr)] gap-4 items-start">
       <div className={`${cardCls} overflow-hidden`}>
-        <div className="px-4 py-3 border-b border-slate-800 flex items-center"><p className="text-sm font-medium text-white flex-1">Sedi di consegna</p><button className="text-xs text-indigo-400 hover:text-indigo-300" onClick={() => vaiA('parametri')}>Aggiungi o rinomina</button></div>
+        <div className="px-4 py-3 border-b border-slate-800 flex items-center"><p className="text-sm font-medium text-white flex-1">Sedi di lavoro</p><button className="text-xs text-indigo-400 hover:text-indigo-300" onClick={() => vaiA('parametri')}>Aggiungi o rinomina</button></div>
         <div className="p-2 flex flex-col gap-0.5">
           {voci.map(([id, nome, attiva]) => (
             <button key={id} onClick={() => scegli(id)} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-colors ${sel === id ? 'bg-indigo-600/20 text-indigo-300' : 'text-slate-300 hover:bg-slate-800'}`}>

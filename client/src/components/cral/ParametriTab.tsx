@@ -1,6 +1,6 @@
 // ============================================================
 // PAYROLL GANG SUITE — Modulo CRAL · scheda Parametri
-// Sedi di consegna, quota associativa per anno, tipi di evento,
+// Sedi, quota associativa per anno, tipi di evento,
 // tipologie di prodotto, numerazione della tessera.
 // ============================================================
 
@@ -189,7 +189,7 @@ export function ParametriTab() {
   return (
     <div className="grid lg:grid-cols-2 gap-4 items-start">
       <div className="flex flex-col gap-4">
-        <ListaParametri titolo="Sedi di consegna" sotto="«Esterni» è una sede di consegna come le altre. Una sede non attiva resta sui soci che ce l'hanno ma non si propone più."
+        <ListaParametri titolo="Sedi" sotto="La sede di lavoro delle persone e, negli eventi, la sede di consegna. «Esterni» è una sede come le altre. Una sede non attiva resta dove è già usata ma non si propone più."
           voci={db.sedi.map(s => ({ id: s.id, nome: s.nome, flag: s.attiva }))} segnaposto="Nuova sede…" flagLabel="attiva"
           usi={id => db.soci.filter(s => s.sede === id && s.stato === 'ATTIVO').length}
           onRinomina={(id, nome) => void esegui(() => cralApi.aggiornaSede(id, { nome }), 'Sede rinominata')}

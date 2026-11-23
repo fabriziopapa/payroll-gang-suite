@@ -66,8 +66,11 @@ export function foglioSoci(soci: CralSocioRow[], familiari: CralSocioRow[], sedi
 // e' nel client (components/cral/Esporta.tsx).
 export interface ColonnaElenco {
   id: string; nome: string; larghezza: number; dato?: 'telefono' | 'alimentari'
-  val: (s: CralSocioRow, c: { sede: Map<string, string>; persone: Map<string, CralSocioRow> }) => string
+  val: (s: CralSocioRow, c: CtxElenco) => string
 }
+/** `luoghi`: dall'esportazione di un evento, le sedi di consegna di chi ne ha una (26.11.23.1). */
+export interface CtxElenco { sede: Map<string, string>; persone: Map<string, CralSocioRow>; luoghi?: Map<string, string> }
+const sedeConsegna = (s: CralSocioRow, c: CtxElenco) => c.luoghi?.get(s.id) ?? s.sede
 const tel = (f: (s: CralSocioRow) => string) => (s: CralSocioRow) => (contattabile(s.contatti) ? f(s) : '')
 export const COLONNE_ELENCO: ColonnaElenco[] = [
   // 26.11.23: numero progressivo (1, 2, 3…) nell'ordine dell'elenco; il valore lo mette elencoSoci
@@ -82,8 +85,11 @@ export const COLONNE_ELENCO: ColonnaElenco[] = [
   { id: 'nominativo', nome: 'Nominativo', larghezza: 30, val: s => `${s.cognome} ${s.nome}`.trim() },
   { id: 'nascita', nome: 'Data di nascita', larghezza: 12, val: s => gma(s.nascita) },
   { id: 'email', nome: 'Email', larghezza: 28, val: s => s.email },
-  { id: 'sede', nome: 'Sede', larghezza: 7, val: s => s.sede ?? '' },
-  { id: 'sedeNome', nome: 'Sede (nome)', larghezza: 30, val: (s, c) => (s.sede ? c.sede.get(s.sede) ?? '' : '') },
+  { id: 'sede', nome: 'Sede di lavoro', larghezza: 7, val: s => s.sede ?? '' },
+  { id: 'sedeNome', nome: 'Sede di lavoro (nome)', larghezza: 30, val: (s, c) => (s.sede ? c.sede.get(s.sede) ?? '' : '') },
+  // 26.11.23.1: nell'esportazione di un evento la sede di consegna, se c'e', altrimenti la sede di lavoro
+  { id: 'sedeConsegna', nome: 'Sede di consegna', larghezza: 7, val: (s, c) => sedeConsegna(s, c) ?? '' },
+  { id: 'sedeConsegnaNome', nome: 'Sede di consegna (nome)', larghezza: 30, val: (s, c) => { const k = sedeConsegna(s, c); return k ? c.sede.get(k) ?? '' : '' } },
   { id: 'iscrittoIl', nome: 'Iscritto il', larghezza: 11, val: s => gma(s.iscrittoIl) },
   { id: 'familiareDi', nome: 'Familiare di', larghezza: 30, val: (s, c) => s.legami.map(l => { const p = c.persone.get(l.socio); return p ? `${p.cognome} ${p.nome}`.trim() : l.socio }).join(', ') },
   { id: 'note', nome: 'Note', larghezza: 30, val: s => s.note },
@@ -100,8 +106,8 @@ export const COLONNE_ELENCO: ColonnaElenco[] = [
 /** Anti formula-injection nei CSV/Excel: un testo che inizia per = + - @ diventa testo. Il «+» dei numeri di telefono resta. */
 const sicuro = (v: string, eTelefono: boolean) => (/^[=\-@\t\r]/.test(v) || (!eTelefono && v.startsWith('+')) ? `'${v}` : v)
 
-export function elencoSoci(soci: CralSocioRow[], colonne: ColonnaElenco[], st: Pick<CralStato, 'sedi' | 'soci'>, formato: 'xlsx' | 'csv', separatore: ';' | ',', titolo: string): Buffer {
-  const c = { sede: new Map(st.sedi.map(x => [x.id, x.nome])), persone: new Map(st.soci.map(x => [x.id, x])) }
+export function elencoSoci(soci: CralSocioRow[], colonne: ColonnaElenco[], st: Pick<CralStato, 'sedi' | 'soci'>, formato: 'xlsx' | 'csv', separatore: ';' | ',', titolo: string, luoghi?: Map<string, string>): Buffer {
+  const c: CtxElenco = { sede: new Map(st.sedi.map(x => [x.id, x.nome])), persone: new Map(st.soci.map(x => [x.id, x])), ...(luoghi ? { luoghi } : {}) }
   const righe = [...soci].sort((a, b) => `${a.cognome} ${a.nome}`.localeCompare(`${b.cognome} ${b.nome}`, 'it'))
     .map((s, i) => colonne.map(k => (k.id === 'numero' ? String(i + 1) : sicuro(k.val(s, c), k.id === 'telefono' || k.id === 'telefonoLeggibile'))))
   if (formato === 'csv') {

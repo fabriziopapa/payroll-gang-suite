@@ -191,7 +191,7 @@ test('report: elenco soci per sede ed età solo se richiesta', () => {
     soloDaPagare: false, soloSaldo: false, includiTolte: false, presenze: true, aCarico: true, perRif: true, eta: false, anno: 2026, qmodo: '', mesi: true, statoRic: '',
   }
   const r = costruisciReport(db(), cfg, '2026-10-28')
-  assert.deepEqual(r.intest, ['Sede', 'Tessera', 'Nominativo'])
+  assert.deepEqual(r.intest, ['Sede di lavoro', 'Tessera', 'Nominativo'])
   assert.deepEqual(r.righe.map(x => x[2]), ['ROSSI Luca', 'VERDI Carla', 'BIANCHI Giulia'])
   const e = costruisciReport(db(), { ...cfg, eta: true }, '2026-10-28')
   assert.equal(e.righe[0]?.[3], 46)
@@ -409,4 +409,54 @@ test('report (26.11.23): numero progressivo, anche per gruppo, senza contare tot
   const stati = [...STATI_DI_BASE, { id: 'ANN', nome: 'Annullato', colore: '#DC2626', regola: 'ANNULLATO' as const, attivo: true, ordine: 9 }]
   const dA = db({ stati, iniziative: [evento({ id: 'e9', titolo: 'Gita', stato: 'ANN', modalita: 'NESSUNA' })] })
   assert.match(costruisciReport(dA, { ...cfg, tipo: 'scelte', ini: 'e9', numero: false } as CfgReport, '2026-11-23').titolo, /· ANNULLATO$/)
+})
+
+test('sede di consegna (26.11.23.1): riepiloghi, report e copia', () => {
+  // Rossi (S1) e Verdi (S1) ritirano alla Sede Due; Bianchi è già in S2
+  const ini = evento({ id: 'e1', modalita: 'SCELTA', gruppi: ['SD', 'SE'], opzioni: [{ id: 'O1', etichetta: 'Tradizionale' }],
+    scelte: { '090001': { opz: 'O1', luogo: 'S2' }, '090002': { opz: 'O1' }, 'EXT-0001': { luogo: 'S2' } } })
+  const d = db({ iniziative: [ini] })
+  const r = (id: string) => d.perId.get(id)!
+  assert.deepEqual(['090001', '090002', 'EXT-0001'].map(id => L.sedeConsegna(ini, r(id))), ['S2', 'S2', 'S2'])
+  assert.deepEqual(['090001', '090002'].map(id => L.consegnaAltrove(ini, r(id))), [true, false])
+  // il riepilogo per sede conta dove si ritira: tutti e tre alla Sede Due
+  assert.deepEqual(L.riepilogo(d, ini, false).righe.map(([k, x]) => [k, x['O1'], x['__NONE']]), [['S2', 2, 1]])
+  // nei campi estivi la sede di consegna non conta
+  const campo = { ...ini, modalita: 'TURNI' as const }
+  assert.equal(L.sedeConsegna(campo, r('090001')), 'S1')
+  // ordine: quantità per sede di consegna
+  const ord = evento({ id: 'e2', modalita: 'ORDINE', gruppi: ['SD'], prodotti: [{ id: 'P1', tipologia: 'TER', nome: 'Olio', prezzo: 1000, unita: 'pz', contenuto: null, contenutoUm: 'lt', max: null }],
+    scelte: { '090001': { q: { P1: 2 }, luogo: 'S2' }, '090002': { q: { P1: 1 } } } })
+  assert.deepEqual(L.righeOrdiniPerSede(db({ iniziative: [ord] }), ord).map(([k, x]) => [k, x.q['P1'], x.n]), [['S2', 3, 2]])
+
+  // report «scelte per persona» raggruppato: gruppo = sede di consegna, accanto la sede di lavoro
+  const cfg = { tipo: 'scelte', ini: 'e1', sedi: [], origine: '', ordinaPer: 'nom', tessera: false, colSoci: { sede: true, id: false, nom: true }, sedeScelte: true,
+    pred: false, consegnato: false, firma: false, eta: false, soloMancanti: false } as unknown as CfgReport
+  const rp = costruisciReport(d, cfg, '2026-11-23')
+  assert.deepEqual(rp.intest, ['Sede di consegna', 'Nominativo', 'Sede di lavoro', 'Scelta'])
+  assert.deepEqual(rp.righe.map(x => [x[0], x[1], x[2]]), [['Sede Due', 'BIANCHI Giulia', 'Sede Due'], ['Sede Due', 'ROSSI Luca', 'Sede Uno'], ['Sede Due', 'VERDI Carla', 'Sede Uno']])
+  // senza raggruppare: la colonna è la sede di consegna; spenta, nessuna colonna
+  assert.deepEqual(costruisciReport(d, { ...cfg, sedeScelte: false }, '2026-11-23').intest, ['Nominativo', 'Sede di consegna', 'Scelta'])
+  assert.deepEqual(costruisciReport(d, { ...cfg, sedeScelte: false, sedeAltra: false }, '2026-11-23').intest, ['Nominativo', 'Scelta'])
+  // il filtro delle sedi lavora sulla sede di consegna: in S1 non ritira nessuno
+  assert.equal(costruisciReport(d, { ...cfg, sedi: ['S1'] }, '2026-11-23').righe.length, 0)
+  assert.equal(costruisciReport(d, { ...cfg, tipo: 'riepilogo' }, '2026-11-23').intest[0], 'Sede di consegna')
+  // senza sedi di consegna nessuna colonna in più
+  const pulito = { ...ini, scelte: { '090001': { opz: 'O1' } } }
+  assert.deepEqual(costruisciReport(db({ iniziative: [pulito] }), cfg, '2026-11-23').intest, ['Sede di consegna', 'Nominativo', 'Scelta'])
+
+  // copia: come nell'evento di prima, solo per chi entra e verso una sede attiva
+  const base = { tipo: 'X', modalita: 'SCELTA' as const, stato: 'BOZZA', titolo: 'Copia', spostamento: { tipo: 'NO' as const },
+    imp: { config: true, predefinita: false, sconti: false, fornitore: false, quota: false, note: false, sedi: false }, part: 'LISTA' as const, filtro: 'scelto' as const, scelte: false, mappa: {} }
+  const lc = L.luoghiCopia(d, ini, 'LISTA', 'scelto')
+  assert.deepEqual([lc.voci.length, lc.prima, lc.fuori], [2, 2, 0])
+  assert.deepEqual(L.preparaCopia(d, ini, base).scelte, [], 'di partenza: sede di lavoro di ciascuno')
+  const conL = L.preparaCopia(d, ini, { ...base, luoghi: true, scelte: true, mappa: { O1: 'O1' } }).scelte.sort((a, b) => a.socio.localeCompare(b.socio))
+  assert.deepEqual(conL, [{ socio: '090001', opz: 'O1', luogo: 'S2' }, { socio: '090002', opz: 'O1' }, { socio: 'EXT-0001', luogo: 'S2' }])
+  // chi non entra (solo chi ha ricevuto: nessuno) e una sede disattivata non si riportano
+  assert.deepEqual(L.luoghiCopia(d, ini, 'PARTE', 'consegnato').fuori, 2)
+  const spenta = db({ iniziative: [ini], sedi: [{ id: 'S1', nome: 'Sede Uno', attiva: true, ordine: 1 }, { id: 'S2', nome: 'Sede Due', attiva: false, ordine: 2 }] })
+  assert.deepEqual(L.luoghiCopia(spenta, ini, 'LISTA', 'scelto').voci, [])
+  // verso i campi estivi le sedi di consegna non vanno
+  assert.deepEqual(L.preparaCopia(d, ini, { ...base, modalita: 'TURNI', luoghi: true }).scelte, [])
 })

@@ -369,9 +369,12 @@ export function confrontaArchivio(src: Archivio, dst: Archivio, sezioni: Sezione
     const tipoNoto = (t: string) => tipiDst.has(t) || tipiInArrivo.has(t)
     const statoNoto = (s: string) => statiDst.has(s) || statiInArrivo.has(s) || (!dst.tabelle?.stati && ['BOZZA', 'APERTA', 'CHIUSA'].includes(s))
     for (const e0 of src.eventi ?? []) {
-      const e: EventoArch = { ...e0, sedi: e0.sedi.map(x => sedeQui(x) ?? x) }
+      // 26.11.23.1: anche le sedi di consegna delle persone si ritrovano per codice o per nome
+      const scelte = e0.scelte.map(x => (x.dati.luogo ? { ...x, dati: { ...x.dati, luogo: sedeQui(x.dati.luogo) ?? x.dati.luogo } } : x))
+      const e: EventoArch = { ...e0, sedi: e0.sedi.map(x => sedeQui(x) ?? x), scelte }
       const d = eDst.get(e.id)
-      out.push(...(d ? confrontaEvento(e, d, personaNota, statoNoto) : [nuovoEvento(e, tipoNoto, personaNota, statoNoto)]))
+      const luogoNoto = (id: string) => sedeNota(id)
+      out.push(...(d ? confrontaEvento(e, d, personaNota, statoNoto, luogoNoto) : [nuovoEvento(e, tipoNoto, personaNota, statoNoto, luogoNoto)]))
     }
   }
   return { variazioni: out.map(conBlocchi), sediTradotte, daRimappare: [...identita].filter(([, e]) => e === 'altroId').map(([id]) => id) }
@@ -494,13 +497,14 @@ function nuovaPersona(
 }
 
 /** Le scelte valide per la config: le altre si contano e si lasciano fuori. */
-function scelteValide(e: Pick<EventoArch, 'scelte' | 'config'>): EventoArch['scelte'] {
-  return e.scelte.filter(x => !erroreDati(x.dati, e.config as ConfigEvento))
+function scelteValide(e: Pick<EventoArch, 'scelte' | 'config'>, luogoNoto: (id: string) => boolean = () => true): EventoArch['scelte'] {
+  // 26.11.23.1: una sede di consegna che qui non c'e' (ne' arriva) lascia fuori la scelta
+  return e.scelte.filter(x => !erroreDati(x.dati, e.config as ConfigEvento) && (!x.dati.luogo || luogoNoto(x.dati.luogo)))
 }
 
-function nuovoEvento(e: EventoArch, tipoNoto: (t: string) => boolean, personaNota: (id: string) => boolean, statoNoto: (s: string) => boolean = () => true): Variazione {
+function nuovoEvento(e: EventoArch, tipoNoto: (t: string) => boolean, personaNota: (id: string) => boolean, statoNoto: (s: string) => boolean = () => true, luogoNoto: (id: string) => boolean = () => true): Variazione {
   const part = e.partecipanti.filter(personaNota)
-  const sce = scelteValide(e).filter(x => personaNota(x.socio))
+  const sce = scelteValide(e, luogoNoto).filter(x => personaNota(x.socio))
   const ric = e.richieste.filter(r => personaNota(r.persona))
   const fuori = e.partecipanti.length - part.length + e.scelte.length - sce.length + e.richieste.length - ric.length
   const err = erroreIniziativa(e)
@@ -516,7 +520,7 @@ function nuovoEvento(e: EventoArch, tipoNoto: (t: string) => boolean, personaNot
       { campo: 'carichi', etichetta: 'Carichi di magazzino', prima: null, dopo: e.carichi.length },
       { campo: 'richieste', etichetta: 'Richieste di biglietti', prima: null, dopo: ric.length },
     ],
-    ...(fuori ? { avviso: `${fuori} righe (partecipanti, scelte o richieste) riguardano persone che non ci sono qui né nell'archivio, o dati non validi: restano fuori.` } : {}),
+    ...(fuori ? { avviso: `${fuori} righe (partecipanti, scelte o richieste) riguardano persone che non ci sono qui né nell'archivio, sedi di consegna che qui non ci sono o dati non validi: restano fuori.` } : {}),
     record: { ...e, partecipanti: part, scelte: sce, richieste: ric },
   }
 }
@@ -527,7 +531,7 @@ const CAMPI_EVENTO: Record<string, string> = {
   quota: 'Quota', archiviata: 'Archiviato',
 }
 
-function confrontaEvento(e: EventoArch, d: EventoArch, personaNota: (id: string) => boolean, statoNoto: (s: string) => boolean = () => true): Variazione[] {
+function confrontaEvento(e: EventoArch, d: EventoArch, personaNota: (id: string) => boolean, statoNoto: (s: string) => boolean = () => true, luogoNoto: (id: string) => boolean = () => true): Variazione[] {
   const campi = campiDiversi(d as unknown as Record<string, unknown>, e as unknown as Record<string, unknown>, CAMPI_EVENTO)
   for (const c of campi) if (c.campo === 'stato' && !statoNoto(e.stato)) c.blocco = `lo stato ${e.stato} non c'è qui`
   const dati = d.scelte.length || d.richieste.length || d.carichi.length
@@ -541,7 +545,7 @@ function confrontaEvento(e: EventoArch, d: EventoArch, personaNota: (id: string)
   const part = e.partecipanti.filter(p => !d.partecipanti.includes(p) && personaNota(p))
   if (part.length) campi.push({ campo: 'partecipanti', etichetta: 'Partecipanti singoli', prima: d.partecipanti.length, dopo: d.partecipanti.length + part.length })
   const scD = new Map(d.scelte.map(x => [x.socio, x]))
-  const sce = scelteValide(e).filter(x => personaNota(x.socio) && !uguale(scD.get(x.socio)?.dati, x.dati))
+  const sce = scelteValide(e, luogoNoto).filter(x => personaNota(x.socio) && !uguale(scD.get(x.socio)?.dati, x.dati))
   if (sce.length) campi.push({ campo: 'scelte', etichetta: 'Scelte e ordini', prima: `${d.scelte.length}`, dopo: `${sce.filter(x => !scD.has(x.socio)).length} nuove, ${sce.filter(x => scD.has(x.socio)).length} diverse` })
   const carD = new Set(d.carichi.map(c => c.id))
   const car = e.carichi.filter(c => !carD.has(c.id))

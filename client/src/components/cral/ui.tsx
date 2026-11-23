@@ -165,6 +165,8 @@ const ERRORI: Record<string, string> = {
   MATRICOLA_GIA_SOCIO: 'Questa matricola è già nel CRAL.',
   SOCIO_NON_TROVATO: 'Persona non trovata: ricarica la pagina.',
   SEDE_SCONOSCIUTA: 'Sede sconosciuta.',
+  SEDE_NON_ATTIVA: 'Quella sede non è attiva: scegline un\'altra (Parametri › Sedi).',
+  LUOGO_NON_AMMESSO: 'In questo tipo di evento non si consegna per sede.',
   LEGAME_NON_VALIDO: 'Un familiare va legato a soci dipendenti o soci esterni.',
   STATO_NON_VALIDO: 'Operazione non ammessa in questo stato.',
   SUFFISSI_ESAURITI: 'Suffissi esauriti: serve un nuovo numero di tessera.',

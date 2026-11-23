@@ -17,7 +17,7 @@ import type {
   CralLottoRow, CralVariazioneRow, CralEsitoApplica, CralEsitoProva, CralOrigineLotto,
 } from '../IRepository.js'
 import { ALIMENTARI_VUOTI, CONTATTI_VUOTI, alimentariDopo, contattiDopo, type Alimentari, type Contatti } from '../../lib/cralContatti.js'
-import { baseTessera, erroreDati, prossimoDopo, quotaDopoModifica, rataMese, tesseraNelFormato, tesseraRiammissione, usiTolti, type ConfigEvento } from '../../lib/cral.js'
+import { MODALITA_CON_LUOGO, baseTessera, erroreDati, prossimoDopo, quotaDopoModifica, rataMese, tesseraNelFormato, tesseraRiammissione, usiTolti, type ConfigEvento } from '../../lib/cral.js'
 import {
   ORDINE_SEZIONI, anniEsentiDopoRipristino, personaDaRiga, statoDi, uguale, valorePersona,
   type CampoVar, type EventoArch, type PersonaArch, type QuotaArch, type SedeArch, type StatoComposto, type StatoEventoArch, type TipoArch, type TipologiaArch,
@@ -668,8 +668,8 @@ export class PgCralRepository implements ICralRepository {
 
   async copiaIniziativa(
     da: string, i: Omit<CralIniziativaRow, 'id' | 'archiviata' | 'archiviataDa' | 'archiviataIl' | 'partecipanti' | 'scelte' | 'carichi' | 'richieste' | 'copiatoDa'>,
-    partecipanti: string[], scelte: Array<{ socio: string; opz: string }>, userId: string | null,
-  ): Promise<{ iniziativa: CralIniziativaRow; partecipanti: number; scelte: number } | 'EVENTO_NON_TROVATO' | 'TIPO_SCONOSCIUTO' | 'STATO_SCONOSCIUTO'> {
+    partecipanti: string[], scelte: Array<{ socio: string; opz?: string; luogo?: string }>, userId: string | null,
+  ): Promise<{ iniziativa: CralIniziativaRow; partecipanti: number; scelte: number; luoghi: number } | 'EVENTO_NON_TROVATO' | 'TIPO_SCONOSCIUTO' | 'STATO_SCONOSCIUTO'> {
     const r = await this.db.transaction(async tx => {
       const [o] = await tx.select({ id: schema.cralIniziative.id }).from(schema.cralIniziative).where(eq(schema.cralIniziative.id, da))
       if (!o) return 'EVENTO_NON_TROVATO' as const
@@ -687,14 +687,30 @@ export class PgCralRepository implements ICralRepository {
       const esistono = new Set(ids.length ? (await tx.select({ id: schema.cralSoci.id }).from(schema.cralSoci).where(inArray(schema.cralSoci.id, ids))).map(x => x.id) : [])
       const part = [...new Set(partecipanti)].filter(x => esistono.has(x))
       if (part.length) await tx.insert(schema.cralIniziativePartecipanti).values(part.map(socioId => ({ iniziativaId: n!.id, socioId })))
+      // la scelta solo se l'opzione c'e' ancora; la sede di consegna (26.11.23.1) solo se e' una sede attiva
       const opz = new Set((i.config as ConfigEvento).opzioni?.map(x => x.id) ?? [])
+      const conLuogo = MODALITA_CON_LUOGO.includes(i.modalita as never)
+      const attive = new Set(conLuogo && scelte.some(x => x.luogo) ? (await tx.select({ id: schema.cralSedi.id }).from(schema.cralSedi).where(eq(schema.cralSedi.attiva, true))).map(x => x.id) : [])
       const visti = new Set<string>()
-      const sce = i.modalita === 'SCELTA' ? scelte.filter(x => esistono.has(x.socio) && opz.has(x.opz) && !visti.has(x.socio) && visti.add(x.socio)) : []
-      if (sce.length) await this.salvaScelte(n!.id, sce.map(x => ({ socio: x.socio, dati: { opz: x.opz }, fonte: 'copia' })), userId, tx)
-      return { id: n!.id, partecipanti: part.length, scelte: sce.length }
+      let nScelte = 0, nLuoghi = 0
+      const voci: Array<{ socio: string; dati: Record<string, unknown>; fonte: string }> = []
+      for (const x of scelte) {
+        if (!esistono.has(x.socio) || visti.has(x.socio)) continue
+        visti.add(x.socio)
+        const dati: Record<string, unknown> = {}
+        if (i.modalita === 'SCELTA' && x.opz && opz.has(x.opz)) { dati['opz'] = x.opz; nScelte++ }
+        if (x.luogo && attive.has(x.luogo)) { dati['luogo'] = x.luogo; nLuoghi++ }
+        if (Object.keys(dati).length) voci.push({ socio: x.socio, dati, fonte: 'copia' })
+      }
+      if (voci.length) await this.salvaScelte(n!.id, voci, userId, tx)
+      return { id: n!.id, partecipanti: part.length, scelte: nScelte, luoghi: nLuoghi }
     })
     if (typeof r === 'string') return r
-    return { iniziativa: (await this.iniziativa(r.id))!, partecipanti: r.partecipanti, scelte: r.scelte }
+    return { iniziativa: (await this.iniziativa(r.id))!, partecipanti: r.partecipanti, scelte: r.scelte, luoghi: r.luoghi }
+  }
+
+  async sediElenco(): Promise<Array<{ id: string; attiva: boolean }>> {
+    return this.db.select({ id: schema.cralSedi.id, attiva: schema.cralSedi.attiva }).from(schema.cralSedi)
   }
 
   async partecipanti(id: string, aggiungi: string[], togli: string[]): Promise<number> {
@@ -1405,8 +1421,9 @@ export class PgCralRepository implements ICralRepository {
     }
     if (accetta.has('scelte') && e.scelte.length) {
       const ok = await presenti(e.scelte.map(x => mappa(x.socio)))
+      const sediQui = e.scelte.some(x => x.dati.luogo) ? new Set((await tx.select({ id: schema.cralSedi.id }).from(schema.cralSedi)).map(x => x.id)) : new Set<string>()
       const voci = e.scelte.map(x => ({ ...x, socio: mappa(x.socio), dati: x.dati.rif ? { ...x.dati, rif: mappa(x.dati.rif) || null } : x.dati }))
-        .filter(x => ok.has(x.socio) && !erroreDati(x.dati, config))
+        .filter(x => ok.has(x.socio) && !erroreDati(x.dati, config) && (!x.dati.luogo || sediQui.has(x.dati.luogo)))
       if (voci.length < e.scelte.length) saltati.push(`${e.scelte.length - voci.length} scelte non applicabili`)
       if (voci.length) await this.salvaScelte(e.id, voci.map(x => ({ socio: x.socio, dati: x.dati as Record<string, unknown>, fonte: x.fonte })), c.userId, tx)
       n++

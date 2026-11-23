@@ -85,7 +85,7 @@ function SezioneValidazione({ tipo, titolo, spiega, onCollega, onRifiuta }: {
       <Scorrevole><table className="w-full text-sm">
         <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 bg-slate-900/60">
           <th className="pl-5 pr-2 py-2.5"><input type="checkbox" className="accent-indigo-500" checked={tutti} onChange={() => setSel(tutti ? new Set() : new Set(lista.map(s => s.id)))} aria-label="Seleziona tutti" /></th>
-          <th className={thCls}>Nominativo</th><th className={thCls}>Tipologia</th><th className={thCls}>Sede</th>{socio && <th className={thCls}>Tessera</th>}<th className="px-5 py-2.5 font-semibold text-right">Azioni</th></tr></thead>
+          <th className={thCls}>Nominativo</th><th className={thCls}>Tipologia</th><th className={thCls}>Sede di lavoro</th>{socio && <th className={thCls}>Tessera</th>}<th className="px-5 py-2.5 font-semibold text-right">Azioni</th></tr></thead>
         <tbody className="divide-y divide-slate-800/70">
           {lista.map(s => {
             const tv = tTxt[s.id] ?? s.tessera
@@ -141,7 +141,7 @@ function ModificaDaValidare({ s, onClose }: { s: Persona; onClose: () => void })
           <Campo label="Data di nascita" hint="Al posto del codice fiscale"><input type="date" className={inputCls} value={f.nascita} onChange={e => setF({ ...f, nascita: e.target.value })} /></Campo>
           <Campo label="Email"><input className={inputCls} value={f.email} onChange={e => setF({ ...f, email: e.target.value })} /></Campo>
           <Campo label="Tipologia" hint={f.tipo === 'EST' ? 'Esterno: non è socio, niente tessera.' : "Socio esterno: entra nell'elenco soci con la sua tessera."}><select className={inputCls} value={f.tipo} onChange={e => setF({ ...f, tipo: e.target.value as 'SE' | 'EST' })}><option value="SE">Socio esterno</option><option value="EST">Esterno</option></select></Campo>
-          <Campo label="Sede di consegna"><select className={inputCls} value={f.sede} onChange={e => setF({ ...f, sede: e.target.value })}><option value="">— Da indicare</option>{db.sedi.filter(x => x.attiva || x.id === f.sede).map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}</select></Campo>
+          <Campo label="Sede di lavoro"><select className={inputCls} value={f.sede} onChange={e => setF({ ...f, sede: e.target.value })}><option value="">— Da indicare</option>{db.sedi.filter(x => x.attiva || x.id === f.sede).map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}</select></Campo>
           {f.tipo === 'SE' && <Campo label="Tessera (N.ISCR.SOCIO del libro soci)" hint={dop ? <span className="text-red-400">Già assegnata a un altro socio.</span> : tes && tes !== f.tessera.trim() ? `Diventa ${tes}` : 'Facoltativa: si può aggiungere dopo'}><input className={inputCls + ' font-mono'} value={f.tessera} onChange={e => setF({ ...f, tessera: e.target.value })} /></Campo>}
         </div>
         <Campo label="Note"><input className={inputCls} value={f.note} onChange={e => setF({ ...f, note: e.target.value })} /></Campo>

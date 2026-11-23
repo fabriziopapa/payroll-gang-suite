@@ -21,7 +21,9 @@ export const COLONNE: Array<{ id: string; nome: string; gruppo: Gruppo }> = [
   { id: 'email', nome: 'Email', gruppo: 'Persona' }, { id: 'familiareDi', nome: 'Familiare di', gruppo: 'Persona' }, { id: 'note', nome: 'Note', gruppo: 'Persona' },
   { id: 'id', nome: 'ID', gruppo: 'Iscrizione' }, { id: 'matricola', nome: 'Matricola', gruppo: 'Iscrizione' }, { id: 'tessera', nome: 'Tessera', gruppo: 'Iscrizione' },
   { id: 'tipologia', nome: 'Tipologia', gruppo: 'Iscrizione' }, { id: 'stato', nome: 'Stato', gruppo: 'Iscrizione' },
-  { id: 'sede', nome: 'Sede', gruppo: 'Iscrizione' }, { id: 'sedeNome', nome: 'Sede (nome)', gruppo: 'Iscrizione' }, { id: 'iscrittoIl', nome: 'Iscritto il', gruppo: 'Iscrizione' },
+  { id: 'sede', nome: 'Sede di lavoro', gruppo: 'Iscrizione' }, { id: 'sedeNome', nome: 'Sede di lavoro (nome)', gruppo: 'Iscrizione' },
+  // 26.11.23.1: solo nell'esportazione dai partecipanti di un evento
+  { id: 'sedeConsegna', nome: 'Sede di consegna', gruppo: 'Iscrizione' }, { id: 'sedeConsegnaNome', nome: 'Sede di consegna (nome)', gruppo: 'Iscrizione' }, { id: 'iscrittoIl', nome: 'Iscritto il', gruppo: 'Iscrizione' },
   { id: 'waId', nome: 'wa_id', gruppo: 'Telefono e WhatsApp' }, { id: 'telefono', nome: 'Telefono', gruppo: 'Telefono e WhatsApp' },
   { id: 'telefonoLeggibile', nome: 'Telefono (leggibile)', gruppo: 'Telefono e WhatsApp' }, { id: 'whatsapp', nome: 'WhatsApp', gruppo: 'Telefono e WhatsApp' },
   { id: 'consensoIl', nome: 'Data consenso', gruppo: 'Telefono e WhatsApp' }, { id: 'consensoOrigine', nome: 'Origine consenso', gruppo: 'Telefono e WhatsApp' },
@@ -44,7 +46,7 @@ const SOLO: Record<ModelloExport['solo'], string> = {
 }
 
 /** `ids`: le persone da cui partire (l'elenco filtrato, i selezionati, i partecipanti di un evento). */
-export function EsportaElenco({ ids, familiari = [], titolo, onClose, iniziale = 'pronto-whatsapp' }: { ids: string[]; familiari?: string[]; titolo: string; onClose: () => void; iniziale?: string }) {
+export function EsportaElenco({ ids, familiari = [], titolo, onClose, iniziale = 'pronto-whatsapp', iniziativa }: { ids: string[]; familiari?: string[]; titolo: string; onClose: () => void; iniziale?: string; iniziativa?: string }) {
   const { db, esegui } = useCral()
   const modelli = [...MODELLI_PRONTI, ...db.modelliExport]
   const [m, setM] = useState<ModelloExport>(() => ({ ...(modelli.find(x => x.id === iniziale) ?? MODELLI_PRONTI[0]!) }))
@@ -60,7 +62,7 @@ export function EsportaElenco({ ids, familiari = [], titolo, onClose, iniziale =
   async function scaricaFile() {
     setLavoro(true)
     try {
-      const r = await cralApi.esportaElenco({ ids: pers.map(p => p.id), colonne: m.colonne, solo: m.solo, formato: m.formato, separatore: m.separatore, titolo: (m.nome || titolo).slice(0, 60) })
+      const r = await cralApi.esportaElenco({ ids: pers.map(p => p.id), colonne: m.colonne, solo: m.solo, formato: m.formato, separatore: m.separatore, titolo: (m.nome || titolo).slice(0, 60), ...(iniziativa ? { iniziativa } : {}) })
       const base = `cral-${(m.nome || titolo).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'elenco'}`
       scaricaBase64(`${base}_${new Date().toISOString().slice(0, 10)}.${m.formato}`, r.base64, m.formato === 'csv' ? 'text/csv;charset=utf-8' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
       avviso(`Esportate ${r.righe} persone. Il file contiene dati personali: usalo solo per lo scopo per cui è stato dato il consenso.`, 'info')
@@ -90,7 +92,7 @@ export function EsportaElenco({ ids, familiari = [], titolo, onClose, iniziale =
           <div><p className={etichettaCls + ' mb-2'}>Colonne disponibili</p>
             <div className="flex flex-col gap-2.5">{GRUPPI.map(g => (
               <div key={g}><p className="text-[11px] text-slate-500 mb-1">{g}{g === 'Telefono e WhatsApp' ? ' — solo per chi ha dato il consenso' : g === 'Alimentari' ? ' — esistono solo col consenso' : ''}</p>
-                <div className="flex flex-wrap gap-1.5">{COLONNE.filter(c => c.gruppo === g).map(c => { const on = m.colonne.includes(c.id); return (
+                <div className="flex flex-wrap gap-1.5">{COLONNE.filter(c => c.gruppo === g && (!!iniziativa || !c.id.startsWith('sedeConsegna'))).map(c => { const on = m.colonne.includes(c.id); return (
                   <button key={c.id} aria-pressed={on} className={chipCls(on)} onClick={() => setM({ ...m, id: m.id.startsWith('pronto-') ? 'libero' : m.id, colonne: on ? m.colonne.filter(x => x !== c.id) : [...m.colonne, c.id] })}>{c.nome}</button>) })}</div></div>))}</div></div>
           <div><p className={etichettaCls + ' mb-2'}>Nel file, in quest'ordine ({m.colonne.length})</p>
             {m.colonne.length ? <ol className="rounded-lg border border-slate-800 divide-y divide-slate-800">{m.colonne.map((c, i) => (

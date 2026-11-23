@@ -62,3 +62,14 @@ test('Esporta elenco (26.11.23): numero progressivo nell\'ordine dell\'elenco', 
   const ws = XLSX.read(xlsx, { type: 'buffer' }).Sheets['Prova']!
   assert.deepEqual([ws['A2']?.t, ws['A2']?.v, ws['B2']?.t, ws['B2']?.v], ['n', 1, 's', 'EXT-0001'])
 })
+
+test('Esporta elenco (26.11.23.1): sede di lavoro e sede di consegna dell\'evento', async () => {
+  const { COLONNE_ELENCO, elencoSoci } = await import('./esporta.js')
+  const col = (ids: string[]) => ids.map(id => COLONNE_ELENCO.find(c => c.id === id)!)
+  const p = [{ id: '090001', cognome: 'ROSSI', nome: 'Maria', sede: 'S1' }, { id: '090002', cognome: 'VERDI', nome: 'Luca', sede: 'S1' }] as CralSocioRow[]
+  const st = { sedi: [{ id: 'S1', nome: 'Sede Uno' }, { id: 'S2', nome: 'Sede Due' }], soci: p } as unknown as Pick<CralStato, 'sedi' | 'soci'>
+  const csv = elencoSoci(p, col(['cognome', 'sedeNome', 'sedeConsegnaNome']), st, 'csv', ';', 'Prova', new Map([['090002', 'S2']])).toString('utf8')
+  assert.equal(csv, '\uFEFFCognome;Sede di lavoro (nome);Sede di consegna (nome)\r\nROSSI;Sede Uno;Sede Uno\r\nVERDI;Sede Uno;Sede Due\r\n')
+  // fuori da un evento la sede di consegna è la sede di lavoro
+  assert.match(elencoSoci(p, col(['sedeConsegna']), st, 'csv', ';', 'Prova').toString('utf8'), /\r\nS1\r\nS1\r\n$/)
+})

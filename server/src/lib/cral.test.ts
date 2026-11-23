@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  abbina, allineaQuoteSchema, applicaSconto, azioneVietata, azioniScelta, baseTessera, copiaEventoSchema, PERMESSI_REGOLA, statoEventoSchema, configSchema, erroreAllinea, erroreDati, erroreIniziativa, formatTessera, iniziativaSchema,
+  abbina, allineaQuoteSchema, applicaSconto, azioneVietata, azioniScelta, baseTessera, copiaEventoSchema, erroreLuogo, PERMESSI_REGOLA, statoEventoSchema, configSchema, erroreAllinea, erroreDati, erroreIniziativa, formatTessera, iniziativaSchema,
   numeroTessera, prossimoDopo, quotaDopoModifica, rataMese, sceltaSchema, versato, spezzaNominativo, tesseraDaFile, tesseraNelFormato, tesseraRiammissione, unisciDati, usiTolti,
   type AnagraficaCral, type ParametriTessera,
 } from './cral.js'
@@ -218,4 +218,26 @@ test('stati (0030): schema di uno stato e della copia', () => {
   assert.ok(!copiaEventoSchema.safeParse({ da: 'non-un-uuid', evento }).success)
   assert.ok(!copiaEventoSchema.safeParse({ da: '8b0f6c1e-5d2a-4c3b-9a1e-0f2d3c4b5a69', evento: { ...evento, stato: 'bozza' } }).success)
   assert.ok(!copiaEventoSchema.safeParse({ da: '8b0f6c1e-5d2a-4c3b-9a1e-0f2d3c4b5a69', evento, scelte: [{ socio: '090001', opz: 'O2', pagato: true }] }).success, 'dalla copia arriva solo l\'opzione')
+})
+
+test('sede di consegna (26.11.23.1): una sede dell\'elenco, attiva, solo dove si consegna per sede; conta come gestione', () => {
+  const sedi = [{ id: 'S1', attiva: true }, { id: 'S2', attiva: false }]
+  assert.equal(erroreLuogo('S1', undefined, 'SCELTA', sedi), null)
+  assert.equal(erroreLuogo(undefined, 'S1', 'ORDINE', sedi), null, 'togliere si può sempre')
+  assert.equal(erroreLuogo('S9', undefined, 'NESSUNA', sedi), 'SEDE_SCONOSCIUTA')
+  assert.equal(erroreLuogo('S2', undefined, 'SCELTA', sedi), 'SEDE_NON_ATTIVA')
+  assert.equal(erroreLuogo('S2', 'S2', 'SCELTA', sedi), null, 'chi ce l\'ha già la tiene anche se la sede è stata disattivata')
+  assert.equal(erroreLuogo('S1', undefined, 'TURNI', sedi), 'LUOGO_NON_AMMESSO')
+  assert.equal(erroreLuogo('S1', undefined, 'MAGAZZINO', sedi), 'LUOGO_NON_AMMESSO')
+  assert.ok(sceltaSchema.safeParse({ luogo: 'S1' }).success); assert.ok(!sceltaSchema.safeParse({ luogo: 's 1' }).success); assert.ok(sceltaSchema.safeParse({ luogo: null }).success)
+  // cambiarla è come pagamenti e note: si fa anche a raccolta chiusa, non da sospeso
+  assert.deepEqual([...azioniScelta({ opz: 'O1' }, { opz: 'O1', luogo: 'S1' })], ['gestione'])
+  assert.deepEqual([...azioniScelta({ luogo: 'S1' }, {})], ['gestione'])
+  assert.equal(azioneVietata('RACCOLTA_CHIUSA', ['gestione']), null)
+  assert.ok(azioneVietata('SOSPESO', ['gestione']))
+  // copia: per persona la scelta, la sede o tutte e due; mai nessuna delle due
+  const ev = { tipo: 'PAN', titolo: 'X', anno: 2026, data: '2026-12-18', scadenza: null, stato: 'BOZZA', modalita: 'SCELTA', modoPart: 'SINGOLI', gruppi: [], sedi: [], predefinita: null, fornitore: '', pagamento: '', note: '', quota: 0, config: { opzioni: [{ id: 'O1', etichetta: 'A' }, { id: 'O2', etichetta: 'B' }] } }
+  const da = '11111111-1111-4111-8111-111111111111'
+  assert.ok(copiaEventoSchema.safeParse({ da, evento: ev, scelte: [{ socio: '090001', luogo: 'S1' }, { socio: '090002', opz: 'O1' }, { socio: '090003', opz: 'O1', luogo: 'S1' }] }).success)
+  assert.ok(!copiaEventoSchema.safeParse({ da, evento: ev, scelte: [{ socio: '090001' }] }).success)
 })

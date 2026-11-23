@@ -28,7 +28,7 @@ const RUOLI_COL: Array<[string, string, RegExp]> = [
   ['cognome', 'Cognome', /^cognome$/i],
   ['nome', 'Nome', /^nome$/i],
   ['matricola', 'Matricola PGS', /matricola/i],
-  ['sede', 'Sede di consegna', /sede/i],
+  ['sede', 'Sede di lavoro', /sede/i],
   ['email', 'Email', /mail/i],
   ['telefono', 'Telefono', /^((n|num|numero|recapito)\.?( di)? )?(tel|telefono|telefonico|cell|cellulare|mobile)\.?$/i],
   ['nascita', 'Data di nascita', /nasc/i],

@@ -1350,7 +1350,7 @@ export const cralApi = {
     apiFetch<{ fatte: number; saltate: number }>('/cral/soci/contatti', corpo('POST', { ids, ...b })),
   salvaPrefissoTel: (prefissoTel: string) => apiFetch<unknown>('/cral/parametri/contatti', corpo('PUT', { prefissoTel })),
   salvaModelliExport: (modelli: ModelloExport[]) => apiFetch<unknown>('/cral/parametri/modelli-export', corpo('PUT', { modelli })),
-  esportaElenco: (b: { ids: string[]; colonne: string[]; solo: ModelloExport['solo']; formato: 'xlsx' | 'csv'; separatore: ';' | ','; titolo: string }) =>
+  esportaElenco: (b: { ids: string[]; colonne: string[]; solo: ModelloExport['solo']; formato: 'xlsx' | 'csv'; separatore: ';' | ','; titolo: string; iniziativa?: string }) =>
     apiFetch<{ righe: number; base64: string }>('/cral/export/elenco', corpo('POST', b), 60_000),
   modello: (b: { tracciato: 'T1' | 'T2' | 'T3' | 'T4' | 'T5' | 'T6' | 'T7' | 'T7V'; iniziativa?: string; ids?: string[]; anno?: number }) =>
     apiFetch<{ file: string; base64: string }>('/cral/export/modello', corpo('POST', b), 60_000),
@@ -1377,13 +1377,13 @@ export const cralApi = {
   salvaIniziativa: (id: string, b: CralIniziativaBody) => apiFetch<{ iniziativa: { id: string } }>(`/cral/iniziative/${enc(id)}`, corpo('PUT', b)),
   archivia: (id: string, archiviata: boolean) => apiFetch<{ ok: true }>(`/cral/iniziative/${enc(id)}/archivia`, corpo('POST', { archiviata })),
   /** 26.11.23: copia di un evento, con partecipanti e scelte riportate, in una sola operazione */
-  copiaIniziativa: (b: { da: string; evento: CralIniziativaBody; partecipanti: string[]; scelte: Array<{ socio: string; opz: string }> }) =>
-    apiFetch<{ iniziativa: { id: string }; partecipanti: number; scelte: number }>('/cral/iniziative/copia', corpo('POST', b), 60_000),
+  copiaIniziativa: (b: { da: string; evento: CralIniziativaBody; partecipanti: string[]; scelte: Array<{ socio: string; opz?: string; luogo?: string }> }) =>
+    apiFetch<{ iniziativa: { id: string }; partecipanti: number; scelte: number; luoghi: number }>('/cral/iniziative/copia', corpo('POST', b), 60_000),
   partecipanti: (id: string, aggiungi: string[], togli: string[] = []) =>
     apiFetch<{ fatte: number }>(`/cral/iniziative/${enc(id)}/partecipanti`, corpo('POST', { aggiungi, togli })),
   scelta: (id: string, socio: string, dati: PatchScelta, fonte: 'manuale' | 'modulo' | 'predefinita' | 'copia' = 'manuale') =>
     apiFetch<{ dati: Record<string, unknown> }>(`/cral/iniziative/${enc(id)}/scelte/${enc(socio)}`, corpo('PATCH', { dati, fonte })),
-  scelteInBlocco: (id: string, voci: Array<{ socio: string; dati: PatchScelta; sostituisci?: boolean }>, fonte: 'manuale' | 'modulo' | 'predefinita') =>
+  scelteInBlocco: (id: string, voci: Array<{ socio: string; dati: PatchScelta; sostituisci?: boolean }>, fonte: 'manuale' | 'modulo' | 'predefinita' | 'copia') =>
     apiFetch<{ fatte: number }>(`/cral/iniziative/${enc(id)}/scelte`, corpo('POST', { voci, fonte }), 60_000),
   carico: (id: string, c: Omit<Carico, 'id'>) => apiFetch<{ carico: Carico }>(`/cral/iniziative/${enc(id)}/carichi`, corpo('POST', c)),
   richiesta: (id: string, r: Pick<Richiesta, 'persona' | 'art' | 'qta' | 'dataRich' | 'modo' | 'note'>) =>

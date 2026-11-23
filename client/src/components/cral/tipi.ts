@@ -65,6 +65,8 @@ export interface Scelta {
   /** Categoria per lo sconto bloccata all'iscrizione. */
   iscr?: { data: string; cat: Exclude<CatSconto, 'FAM'> }
   scontoPers?: ScontoPers
+  /** 26.11.23.1: sede di consegna per questo evento; assente = la sede di lavoro della persona. */
+  luogo?: string
   fonte?: 'manuale' | 'modulo' | 'predefinita' | 'copia'
 }
 /** Modifica di una scelta: null toglie la chiave (stessa regola del server). */

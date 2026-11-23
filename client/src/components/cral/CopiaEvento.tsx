@@ -14,7 +14,7 @@
 import { useState } from 'react'
 import type { Iniziativa, Modalita } from './tipi'
 import {
-  NOMI_FILTRO, REGOLE, aggiunti, ancoraAttive, descrPart, destinatari, filtriCopia, fmtData, personeDellEvento, personeFiltro, preparaCopia, sposta, titoloCopia,
+  NOMI_FILTRO, REGOLE, aggiunti, ancoraAttive, conLuogo, luoghiCopia, descrPart, destinatari, filtriCopia, fmtData, personeDellEvento, personeFiltro, preparaCopia, sposta, titoloCopia,
   type CopiaPronta, type FiltroCopia, type ImpostCopia, type PartCopia, type Spostamento,
 } from './logica'
 import { Campo, Interruttore, Modale, btnPrimario, btnSecondario, etichettaCls, inputCls, sceltaCls, useCral } from './ui'
@@ -39,6 +39,8 @@ export function CopiaEventoModal({ ini, onClose, onAvanti }: { ini: Iniziativa; 
   const [filtro, setFiltro] = useState<FiltroCopia>(filtri[0]!)
   const [conScelte, setConScelte] = useState(false)
   const [mappa, setMappa] = useState<Record<string, string>>(() => Object.fromEntries(ini.opzioni.map(o => [o.id, o.id])))
+  // 26.11.23.1: sedi di consegna di quell'evento, o la sede di lavoro di ciascuno (di partenza)
+  const [luoghi, setLuoghi] = useState(false)
 
   const stessa = modalita === ini.modalita
   const tp = db.tipi.find(t => t.id === tipo)
@@ -54,7 +56,9 @@ export function CopiaEventoModal({ ini, onClose, onAvanti }: { ini: Iniziativa; 
   const nScelte = Object.values(ini.scelte).filter(s => s.opz).length
   const puoScelte = ini.modalita === 'SCELTA' && modalita === 'SCELTA' && imp.config && nScelte > 0
   const opzioniCopia: ImpostCopia = { ...imp, config: stessa && imp.config }
-  const o = { tipo, modalita, stato, titolo: titolo ?? titoloAuto, spostamento, imp: opzioniCopia, part, filtro, scelte: puoScelte && conScelte, mappa }
+  const lc = luoghiCopia(db, ini, part, filtro)
+  const puoLuoghi = lc.prima > 0 && conLuogo(modalita)
+  const o = { tipo, modalita, stato, titolo: titolo ?? titoloAuto, spostamento, imp: opzioniCopia, part, filtro, scelte: puoScelte && conScelte, mappa, luoghi: puoLuoghi && luoghi }
   const pronta = preparaCopia(db, ini, o)
   const ok = !!(titolo ?? titoloAuto).trim() && !!tp && db.stati.some(s => s.id === stato) && (spTipo !== 'GIORNI' || /^-?\d{1,4}$/.test(giorni.trim()))
   const voce = (k: keyof ImpostCopia, label: string, quando = true) => quando && <Interruttore key={k} on={imp[k]} onChange={v => setImp({ ...imp, [k]: v })} label={label} />
@@ -122,6 +126,16 @@ export function CopiaEventoModal({ ini, onClose, onAvanti }: { ini: Iniziativa; 
                 <select className={inputCls + ' sm:w-64'} value={mappa[x.id] ?? ''} onChange={e => setMappa({ ...mappa, [x.id]: e.target.value })}><option value="">nessuna (la persona sceglie da capo)</option>{ini.opzioni.map(y => <option key={y.id} value={y.id}>{y.etichetta}</option>)}</select></div>) })}
             <p className="text-xs text-slate-400 tabular-nums">Scelte che arrivano: {pronta.scelte.length}</p>
           </div>}
+        </div>}
+
+        {lc.prima > 0 && <div className="flex flex-col gap-2 rounded-lg border border-slate-800 p-4">
+          <span className={etichettaCls}>Sede di consegna</span>
+          <div className="grid sm:grid-cols-2 gap-2">
+            {([[false, 'Sede di lavoro di ciascuno', 'Nel nuovo evento nessuna sede di consegna'],
+              [true, "Come nell'evento di prima", `${lc.voci.length} ${lc.voci.length === 1 ? 'persona' : 'persone'} con sede di consegna${lc.fuori ? ` · ${lc.fuori} non riportabili` : ''}`]] as Array<[boolean, string, string]>).map(([k, t, d]) => (
+              <button key={String(k)} type="button" disabled={k && !puoLuoghi} onClick={() => setLuoghi(k)} className={sceltaCls((puoLuoghi && luoghi) === k) + ' disabled:opacity-40'}><p className="text-sm font-medium text-white">{t}</p><p className="text-xs text-slate-500 tabular-nums">{d}</p></button>))}
+          </div>
+          <p className="text-xs text-slate-500">{!conLuogo(modalita) ? 'Con questa modalità non si consegna per sede.' : lc.fuori ? "Non si riportano le sedi di chi non entra nel nuovo evento o di una sede nel frattempo disattivata: per loro vale la sede di lavoro." : 'Nel nuovo evento si correggono come le altre, una per una o con «Sede di consegna…».'}</p>
         </div>}
 
         <p className="text-xs text-slate-500">Non si copiano mai: consegne, pagamenti, versamenti, note e sconti delle persone, iscrizioni alle settimane, carichi e richieste del magazzino.</p>

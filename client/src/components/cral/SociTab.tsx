@@ -79,10 +79,10 @@ export function SociTab() {
             {k === 'SOCI' && <p className="text-[11px] text-slate-500">dipendenti + esterni, attivi</p>}</button>
         ))}
       </div>
-      {senzaSede > 0 && <p className="text-xs text-amber-400 -mt-1">{senzaSede === 1 ? '1 socio attivo' : `${senzaSede} soci attivi`} senza sede di consegna.</p>}
+      {senzaSede > 0 && <p className="text-xs text-amber-400 -mt-1">{senzaSede === 1 ? '1 socio attivo' : `${senzaSede} soci attivi`} senza sede di lavoro.</p>}
       <div className={`${cardCls} p-4 flex flex-wrap gap-3 items-end`}>
         <div className="flex-1 min-w-[200px]"><Campo label="Cerca"><input className={inputCls} placeholder="Nominativo, ID, tessera, email, telefono… anche di un familiare" value={cerca} onChange={e => setCerca(e.target.value)} /></Campo></div>
-        <div className="w-full sm:w-56"><Campo label="Sede di consegna"><select className={inputCls} value={sede} onChange={e => setSede(e.target.value)}><option value="">Tutte</option>{db.sedi.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}<option value="__NOSEDE">— Non indicata</option></select></Campo></div>
+        <div className="w-full sm:w-56"><Campo label="Sede di lavoro"><select className={inputCls} value={sede} onChange={e => setSede(e.target.value)}><option value="">Tutte</option>{db.sedi.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}<option value="__NOSEDE">— Non indicata</option></select></Campo></div>
         <div className="w-[calc(50%-6px)] sm:w-48"><Campo label="Tipologia"><select className={inputCls} value={tip} onChange={e => setTip(e.target.value)}><option value="">Tutte</option><option value="SOCI">Soci (dipendenti ed esterni)</option><option value="SD">Soci dipendenti</option><option value="SE">Soci esterni</option><option value="EST">Esterni</option><option value="CONFAM">Soci con familiari</option></select></Campo></div>
         <div className="w-[calc(50%-6px)] sm:w-40"><Campo label="Stato"><select className={inputCls} value={stato} onChange={e => setStato(e.target.value)}><option value="">Tutti</option><option value="ATTIVO">Attivi</option><option value="DA_VALIDARE">Da validare</option><option value="CESSATO">Cessati</option><option value="RIFIUTATO">Rifiutati</option><option value="ELIMINATO">Eliminati</option></select></Campo></div>
         <div className="w-full sm:w-56"><Campo label="Contatti ed esigenze"><select className={inputCls} value={cont} onChange={e => setCont(e.target.value)}><option value="">Tutti</option><option value="WA">Con WhatsApp e consenso</option><option value="TEL">Con telefono e consenso</option><option value="NOCONS">Telefono senza consenso</option><option value="NOTEL">Senza telefono</option><option value="ALIM">Con esigenze alimentari</option></select></Campo></div>
@@ -99,7 +99,7 @@ export function SociTab() {
         <Scorrevole adatta><table className="w-full text-sm">
           <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 bg-slate-900/60">
             <th className="pl-5 pr-1 py-2.5"><input type="checkbox" className="accent-indigo-500" aria-label="Seleziona tutti" checked={lista.length > 0 && lista.every(s => sel.has(s.id))} onChange={() => setSel(lista.every(s => sel.has(s.id)) ? new Set() : new Set(lista.map(s => s.id)))} /></th>
-            <th className="px-2 py-2.5 font-semibold">ID</th><th className={thCls}>Nominativo</th><th className={thCls + ' pgs-p2'}>Tipologia</th><th className={thCls}>Tessera CRAL</th><th className={thCls}>Sede di consegna</th><th className={thCls}>Contatti</th><th className={thCls}>Stato</th><th className="px-5 py-2.5 font-semibold pgs-p3">Dal</th>
+            <th className="px-2 py-2.5 font-semibold">ID</th><th className={thCls}>Nominativo</th><th className={thCls + ' pgs-p2'}>Tipologia</th><th className={thCls}>Tessera CRAL</th><th className={thCls}>Sede di lavoro</th><th className={thCls}>Contatti</th><th className={thCls}>Stato</th><th className="px-5 py-2.5 font-semibold pgs-p3">Dal</th>
           </tr></thead>
           <tbody className="divide-y divide-slate-800/70">
             {lista.map(s => {
@@ -168,7 +168,7 @@ function AzioniInBlocco({ ids, onFatto }: { ids: string[]; onFatto: () => void }
   return (
     <div className="px-5 py-3 border-b border-slate-800 bg-indigo-950/20 flex flex-wrap items-center gap-3 text-sm">
       <span className="text-indigo-200 font-medium">{ids.length} selezionati</span>
-      <div className="flex items-center gap-1.5"><select className={inputW + ' py-1 text-xs w-48'} value={sede} onChange={e => setSede(e.target.value)}><option value="">Sede di consegna…</option><option value="__NESSUNA">— Da indicare</option>{db.sedi.filter(x => x.attiva).map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}</select>
+      <div className="flex items-center gap-1.5"><select className={inputW + ' py-1 text-xs w-48'} value={sede} onChange={e => setSede(e.target.value)}><option value="">Sede di lavoro…</option><option value="__NESSUNA">— Da indicare</option>{db.sedi.filter(x => x.attiva).map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}</select>
         <button className={btnPiccoloSec} disabled={!sede} onClick={() => void esegui(() => cralApi.sposta(ids, sede === '__NESSUNA' ? null : sede), r => `Sede aggiornata per ${r.fatte} persone`).then(fine)}>Applica</button></div>
       <div className="flex items-center gap-1.5"><select className={inputW + ' py-1 text-xs w-40'} value={tipo} onChange={e => setTipo(e.target.value)}><option value="">Tipologia…</option><option value="SD">Socio dipendente</option><option value="SE">Socio esterno</option><option value="EST">Esterno</option></select>
         <button className={btnPiccoloSec} disabled={!tipo} title="Con la matricola: socio dipendente o esterno; senza: socio esterno o esterno. Gli altri si saltano." onClick={() => void esegui(() => cralApi.tipologia(ids, tipo as 'SD' | 'SE' | 'EST'), r => `Tipologia cambiata per ${r.fatte} di ${ids.length}${r.fatte < ids.length ? ' (gli altri non possono)' : ''}`).then(fine)}>Applica</button></div>
@@ -358,7 +358,7 @@ function SocioModal({ id, onClose, onApri }: { id: string; onClose: () => void; 
             <div className="flex gap-2"><input className={inputCls + ' font-mono'} value={f.tessera} onChange={e => setF({ ...f, tessera: e.target.value })} onBlur={() => { if (!tes.errore && tes.tessera !== f.tessera) setF({ ...f, tessera: tes.tessera }) }} placeholder="Nessuna" />
               {!f.tessera && <button type="button" className={btnPiccoloSec + ' whitespace-nowrap'} onClick={() => setF({ ...f, tessera: prossimaTessera(db.tessera) })}>Assegna</button>}</div>
           </Campo>}
-          <Campo label="Sede di consegna" hint={s.tipo === 'FAM' ? 'Di norma quella del socio' : undefined}><select className={inputCls} value={f.sede} onChange={e => setF({ ...f, sede: e.target.value })}><option value="">— Da indicare</option>{db.sedi.filter(x => x.attiva || x.id === f.sede).map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}</select></Campo>
+          <Campo label="Sede di lavoro" hint={s.tipo === 'FAM' ? 'Di norma quella del socio' : undefined}><select className={inputCls} value={f.sede} onChange={e => setF({ ...f, sede: e.target.value })}><option value="">— Da indicare</option>{db.sedi.filter(x => x.attiva || x.id === f.sede).map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}</select></Campo>
           <Campo label="Email" hint={notaEmail ? <span className="text-sky-300">{notaEmail}</span> : 'Serve ad agganciare le risposte del modulo'}>
             <input className={inputCls} value={f.email} onChange={e => { setF({ ...f, email: e.target.value }); setNotaEmail('') }} />
             {!f.email.trim() && s.tipo !== 'FAM' && <CercaRubrica query={{ socio: s.id }} onEmail={(email, nota) => { setF(x => ({ ...x, email })); setNotaEmail(nota) }} />}
@@ -538,7 +538,7 @@ export function NuovoSocioModal({ onClose, perIniziativa, tipoIniziale }: { onCl
         </div>}
         {daAnagrafica && scelto && <p className="text-xs text-slate-500">Data di nascita dall'anagrafica PGS: <span className="text-slate-300 tabular-nums">{fmtData(scelto.nascita)}</span>. Il codice fiscale non si raccoglie.</p>}
         <div className="grid sm:grid-cols-2 gap-4">
-          <Campo label="Sede di consegna"><select className={inputCls} value={f.sede} onChange={e => setF({ ...f, sede: e.target.value })}><option value="">— Da indicare</option>{db.sedi.filter(x => x.attiva).map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}</select></Campo>
+          <Campo label="Sede di lavoro"><select className={inputCls} value={f.sede} onChange={e => setF({ ...f, sede: e.target.value })}><option value="">— Da indicare</option>{db.sedi.filter(x => x.attiva).map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}</select></Campo>
           {conTessera && <Campo label="Tessera CRAL" hint={tes.errore ? <span className="text-red-400">{tes.errore}</span> : doppia ? <span className="text-red-400">Tessera già assegnata.</span> : undefined}>
             <div className="flex gap-2"><input className={inputCls + ' font-mono'} value={f.tessera} placeholder={tipo === 'SE' ? 'Anche alla validazione' : 'Facoltativa'} onChange={e => setF({ ...f, tessera: e.target.value })} onBlur={() => { if (!tes.errore && tes.tessera !== f.tessera) setF({ ...f, tessera: tes.tessera }) }} />
               <button type="button" className={btnPiccoloSec + ' whitespace-nowrap'} onClick={() => setF({ ...f, tessera: prossimaTessera(db.tessera) })}>{prossimaTessera(db.tessera)}</button></div>

@@ -14,6 +14,7 @@ import {
   fmtQ, generaSettimane, gruppiProdotti, haOrdinato, nettoSocio, nominativo, norm, parseEuro, partecipantiEffettivi, riepilogoAlimentare, perUnita, persDi, prodLabel, qta, regolaCat,
   riassuntoSconti, riepilogo, righeOrdiniPerSede, sedeBreve, sedeNome, tipNome, totaleSocio,
   REGOLE, annullato, frasePermessi, permessi, statoDi, type CopiaPronta,
+  conLuogo, consegnaAltrove, sedeConsegna,
 } from './logica'
 import { CopiaEventoModal } from './CopiaEvento'
 import { ScontiTipologia, ScontoPersonaleModal, scontiDaTxt, scontiInTxt, scontiTxtOk, type ScontiTxt } from './Sconti'
@@ -171,11 +172,15 @@ function IniziativaModal({ id, onClose, onCreata, copia }: { id: string | null; 
     setSalvo(true)
     // copia: le scelte riportate valgono solo per le opzioni che l'evento nuovo ha ancora
     const opzFinali = new Set(body.config.opzioni.map(o => o.id))
-    const scelteCopia = copia && mod === 'SCELTA' ? copia.scelte.filter(x => opzFinali.has(x.opz)) : []
+    // 26.11.23.1: e le sedi di consegna solo se l'evento nuovo consegna per sede
+    const scelteCopia = (copia?.scelte ?? []).flatMap(x => {
+      const v = { socio: x.socio, ...(mod === 'SCELTA' && x.opz && opzFinali.has(x.opz) ? { opz: x.opz } : {}), ...(conLuogo(mod) && x.luogo ? { luogo: x.luogo } : {}) }
+      return v.opz || v.luogo ? [v] : []
+    })
     const r = await esegui(() => esistente ? cralApi.salvaIniziativa(esistente.id, body)
       : copia ? cralApi.copiaIniziativa({ da: copia.da.id, evento: body, partecipanti: copia.partecipanti, scelte: scelteCopia })
         : cralApi.creaIniziativa(body),
-    x => esistente ? 'Evento salvato' : copia ? `Evento copiato${'partecipanti' in x && x.partecipanti ? ` · ${x.partecipanti} partecipanti` : ''}${'scelte' in x && x.scelte ? ` · ${x.scelte} scelte riportate` : ''}` : 'Evento creato')
+    x => esistente ? 'Evento salvato' : copia ? `Evento copiato${'partecipanti' in x && x.partecipanti ? ` · ${x.partecipanti} partecipanti` : ''}${'scelte' in x && x.scelte ? ` · ${x.scelte} scelte riportate` : ''}${'luoghi' in x && x.luoghi ? ` · ${x.luoghi} sedi di consegna` : ''}` : 'Evento creato')
     setSalvo(false)
     if (r) { onClose(); if (!esistente) onCreata?.(r.iniziativa.id) }
   }
@@ -284,7 +289,7 @@ function IniziativaModal({ id, onClose, onCreata, copia }: { id: string | null; 
               </div>
               {!f.gruppi.length && <p className="text-xs text-red-300 mt-1.5">Scegli almeno un gruppo.</p>}
               {(f.gruppi.includes('FAM') || f.gruppi.includes('FEX')) && <p className="text-xs text-slate-500 mt-1.5">I familiari partecipano finché almeno una delle loro persone di riferimento è attiva.{f.gruppi.includes('FEX') ? ' I familiari di esterni hanno la categoria di sconto del loro esterno.' : ''}</p>}</div>
-            <div><p className="text-xs text-slate-400 mb-1.5">Sedi coinvolte</p>
+            <div><p className="text-xs text-slate-400 mb-1.5">Sedi coinvolte (sede di lavoro di chi partecipa)</p>
               <div className="flex flex-wrap gap-1.5">
                 <button onClick={() => setF({ ...f, sedi: [] })} className={chipCls(!f.sedi.length)}>Tutte</button>
                 {db.sedi.filter(s => s.attiva || f.sedi.includes(s.id)).map(s => { const on = f.sedi.includes(s.id); return <button key={s.id} onClick={() => setF({ ...f, sedi: on ? f.sedi.filter(x => x !== s.id) : [...f.sedi, s.id] })} className={chipCls(on)}>{sedeBreve(s.nome)}</button> })}
@@ -309,7 +314,7 @@ function TabellaRiepilogo({ ini, mancantiComePred }: { ini: Iniziativa; mancanti
   return (
     <Scorrevole><table className="w-full text-sm">
       <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 bg-slate-900/60">
-        <th className="px-5 py-2.5 font-semibold">Sede</th>{vis.map(c => <th key={c} className={`${thCls} text-right ${c === '__NONE' ? 'text-amber-500/80' : ''}`}>{etich(c).split(' - ')[0]}</th>)}<th className="px-5 py-2.5 font-semibold text-right">Totale</th></tr></thead>
+        <th className="px-5 py-2.5 font-semibold">Sede di consegna</th>{vis.map(c => <th key={c} className={`${thCls} text-right ${c === '__NONE' ? 'text-amber-500/80' : ''}`}>{etich(c).split(' - ')[0]}</th>)}<th className="px-5 py-2.5 font-semibold text-right">Totale</th></tr></thead>
       <tbody className="divide-y divide-slate-800/70 tabular-nums">
         {righe.map(([k, r]) => <tr key={k}><td className="px-5 py-2 text-slate-200 whitespace-nowrap">{k === '__NOSEDE' ? <span className="text-amber-400">Sede non indicata</span> : sedeNome(db, k)}</td>
           {vis.map(c => <td key={c} className={`px-3 py-2 text-right ${r[c] ? (c === '__NONE' ? 'text-amber-400' : 'text-slate-200') : 'text-slate-600'}`}>{r[c] ?? 0}</td>)}
@@ -329,7 +334,7 @@ function TabellaOrdini({ ini }: { ini: Iniziativa }) {
   return (
     <Scorrevole><table className="w-full text-sm">
       <thead className="text-[11px] uppercase tracking-wider text-slate-500 bg-slate-900/60">
-        <tr><th rowSpan={2} className="px-5 py-2 font-semibold text-left align-bottom">Sede</th><th rowSpan={2} className={thCls + ' text-right align-bottom'}>Ordini</th>{gruppiProdotti(ini).map(g => <th key={g.tip} colSpan={g.prod.length} className="px-3 pt-2 pb-1 font-semibold text-center text-pink-300/90 border-b border-slate-800">{tipNome(db, g.tip)}</th>)}<th rowSpan={2} className="px-5 py-2 font-semibold text-right align-bottom">Importo</th></tr>
+        <tr><th rowSpan={2} className="px-5 py-2 font-semibold text-left align-bottom">Sede di consegna</th><th rowSpan={2} className={thCls + ' text-right align-bottom'}>Ordini</th>{gruppiProdotti(ini).map(g => <th key={g.tip} colSpan={g.prod.length} className="px-3 pt-2 pb-1 font-semibold text-center text-pink-300/90 border-b border-slate-800">{tipNome(db, g.tip)}</th>)}<th rowSpan={2} className="px-5 py-2 font-semibold text-right align-bottom">Importo</th></tr>
         <tr>{ini.prodotti.map(p => <th key={p.id} className="px-3 pb-2 pt-1 font-semibold text-right normal-case tracking-normal whitespace-nowrap">{p.nome}</th>)}</tr></thead>
       <tbody className="divide-y divide-slate-800/70 tabular-nums">
         {righe.map(([k, r]) => <tr key={k}><td className="px-5 py-2 text-slate-200 whitespace-nowrap">{k === '__NOSEDE' ? <span className="text-amber-400">Sede non indicata</span> : sedeNome(db, k)}</td><td className="px-3 py-2 text-right text-slate-400">{r.n}</td>
@@ -386,6 +391,59 @@ function EsigenzeEvento({ ini }: { ini: Iniziativa }) {
   )
 }
 
+// ── Sede di consegna (26.11.23.1) ────────────────────────────
+/** Menu della sede di consegna di una persona: vuoto = la sua sede di lavoro. Una sede disattivata resta visibile dove c'è già. */
+function SceltaLuogo({ ini, s, disabled, onChange }: { ini: Iniziativa; s: Persona; disabled: boolean; onChange: (v: string) => void }) {
+  const { db } = useCral()
+  const l = ini.scelte[s.id]?.luogo ?? ''
+  const altrove = consegnaAltrove(ini, s)
+  return (
+    <select disabled={disabled} aria-label={`Sede di consegna di ${nominativo(s)}`} title={altrove ? 'Ritira in una sede diversa dalla sua sede di lavoro' : undefined}
+      className={inputCls + ' py-1 text-xs min-w-[150px] ' + (l ? (altrove ? 'border-amber-600 text-amber-200' : 'text-slate-200') : 'text-slate-500')} value={l} onChange={e => onChange(e.target.value)}>
+      <option value="">— come la sede di lavoro</option>
+      {db.sedi.filter(x => x.attiva || x.id === l).map(x => <option key={x.id} value={x.id}>{x.nome}{x.attiva ? '' : ' (non attiva)'}</option>)}
+    </select>
+  )
+}
+
+/** Sede di consegna a tutti o all'elenco filtrato; «Togli» rimette la sede di lavoro. Le fonti delle scelte restano. */
+function SedeConsegnaModal({ ini, tutti, filtrati, onClose }: { ini: Iniziativa; tutti: Persona[]; filtrati: Persona[]; onClose: () => void }) {
+  const { db, esegui } = useCral()
+  const diversi = filtrati.length !== tutti.length
+  const [chi, setChi] = useState<'tutti' | 'filtrati'>(diversi ? 'filtrati' : 'tutti')
+  const [luogo, setLuogo] = useState(db.sedi.find(s => s.attiva)?.id ?? '')
+  const [togli, setTogli] = useState(false)
+  const persone = chi === 'tutti' ? tutti : filtrati
+  const dopo = togli ? '' : luogo
+  const cambiano = persone.filter(s => (ini.scelte[s.id]?.luogo ?? '') !== dopo)
+  async function applica() {
+    // una chiamata per fonte: «modulo», «predef.», «da copia» restano com'erano
+    const perFonte = new Map<string, Persona[]>()
+    for (const s of cambiano) { const f = ini.scelte[s.id]?.fonte ?? 'manuale'; perFonte.set(f, [...(perFonte.get(f) ?? []), s]) }
+    const r = await esegui(async () => {
+      let n = 0
+      for (const [fonte, ps] of perFonte) for (let k = 0; k < ps.length; k += 5000)
+        n += (await cralApi.scelteInBlocco(ini.id, ps.slice(k, k + 5000).map(s => ({ socio: s.id, dati: { luogo: dopo || null } })), fonte as 'manuale' | 'modulo' | 'predefinita' | 'copia')).fatte
+      return n
+    }, n => (dopo ? `Sede di consegna «${sedeNome(db, dopo)}» a ${n} persone` : `${n} persone tornano alla sede di lavoro`))
+    if (r !== null) onClose()
+  }
+  return (
+    <Modale titolo="Sede di consegna" sotto={`Dove ritirano in «${ini.titolo}». La sede di lavoro delle persone non cambia.`} onClose={onClose}
+      piedi={<><button className={btnSecondario} onClick={onClose}>Annulla</button><button className={btnPrimario} disabled={!cambiano.length || (!togli && !luogo)} onClick={() => void applica()}>{cambiano.length ? `Applica a ${cambiano.length}` : 'Nessuno da cambiare'}</button></>}>
+      <div className="flex flex-col gap-4">
+        <div className="grid sm:grid-cols-2 gap-2">
+          {([['tutti', 'Tutti i destinatari', tutti.length], ['filtrati', "L'elenco filtrato", filtrati.length]] as Array<['tutti' | 'filtrati', string, number]>).map(([k, t, n]) => (
+            <button key={k} type="button" disabled={k === 'filtrati' && !diversi} onClick={() => setChi(k)} className={sceltaCls(chi === k) + ' disabled:opacity-40'}><p className="text-sm font-medium text-white">{t}</p><p className="text-xs text-slate-500 tabular-nums">{n} persone</p></button>))}
+        </div>
+        <Campo label="Sede di consegna"><select className={inputCls} disabled={togli} value={luogo} onChange={e => setLuogo(e.target.value)}>{db.sedi.filter(s => s.attiva).map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}</select></Campo>
+        <Interruttore on={togli} onChange={setTogli} label="Togli la sede di consegna: ritirano nella loro sede di lavoro" />
+        <p className="text-xs text-slate-500 tabular-nums">Cambiano {cambiano.length} su {persone.length}. Chi entra nell'evento dopo parte dalla sua sede di lavoro.</p>
+      </div>
+    </Modale>
+  )
+}
+
 function IniziativaDettaglio({ id, onBack, onApri }: { id: string; onBack: () => void; onApri: (id: string) => void }) {
   const [esporta, setEsporta] = useState(false)
   const { db, esegui, scelta } = useCral()
@@ -405,6 +463,7 @@ function IniziativaDettaglio({ id, onBack, onApri }: { id: string; onBack: () =>
   const [confArch, setConfArch] = useState(false)
   const [copiaDa, setCopiaDa] = useState(false)
   const [copia, setCopia] = useState<CopiaPronta | null>(null)
+  const [luogoBlocco, setLuogoBlocco] = useState(false)
   if (!ini) return null
   const mod = ini.modalita
   const singoli = ini.modoPart === 'SINGOLI'
@@ -412,8 +471,10 @@ function IniziativaDettaglio({ id, onBack, onApri }: { id: string; onBack: () =>
   // 26.11.14.2: evento per gruppi, chi è stato aggiunto a mano (segno «aggiunto» e «x» per toglierlo)
   const agg = new Set(aggiunti(db, ini).map(s => s.id))
   const posSede = (s: Persona) => { const k = db.sedi.findIndex(x => x.id === s.sede); return k < 0 ? 99 : k }
+  const posConsegna = (s: Persona) => { const k = db.sedi.findIndex(x => x.id === sedeConsegna(ini, s)); return k < 0 ? 99 : k }
   const CHIAVI_ORD: Record<string, [string, (s: Persona) => string | number]> = {
-    nom: ['Nominativo', s => nominativo(s)], sede: ['Sede, poi nominativo', posSede], tip: ['Tipologia, poi nominativo', s => GRUPPI.indexOf(s.tipo)],
+    nom: ['Nominativo', s => nominativo(s)], sede: ['Sede di lavoro, poi nominativo', posSede],
+    ...(conLuogo(mod) ? { consegna: ['Sede di consegna, poi nominativo', posConsegna] as [string, (s: Persona) => number] } : {}), tip: ['Tipologia, poi nominativo', s => GRUPPI.indexOf(s.tipo)],
     tessera: ['Tessera', s => s.tessera || '~'], id: ['ID', s => s.id],
     ...(mod === 'SCELTA' ? { scelta: ['Scelta, poi nominativo', (s: Persona) => { const k = ini.opzioni.findIndex(o => o.id === ini.scelte[s.id]?.opz); return k < 0 ? 99 : k }] as [string, (s: Persona) => number] } : {}),
     ...(mod === 'ORDINE' ? { totale: ['Totale €', (s: Persona) => nettoSocio(db, ini, s.id)] as [string, (s: Persona) => number], pagato: ['Pagato, poi nominativo', (s: Persona) => ini.scelte[s.id]?.pagato ? 0 : 1] as [string, (s: Persona) => number] } : {}),
@@ -434,7 +495,7 @@ function IniziativaDettaglio({ id, onBack, onApri }: { id: string; onBack: () =>
     if (solo === 'dapagare') return haOrdinato(ini, s.id) && !ini.scelte[s.id]?.pagato
     return ini.scelte[s.id]?.opz === solo
   }
-  const lista = dest.filter(s => (!q || norm(`${nominativo(s)} ${s.tessera} ${s.id}`).includes(q)) && (!sede || s.sede === sede) && (!tipF || gruppoDi(db, s) === tipF) && filtroSolo(s)).sort(confronta)
+  const lista = dest.filter(s => (!q || norm(`${nominativo(s)} ${s.tessera} ${s.id}`).includes(q)) && (!sede || sedeConsegna(ini, s) === sede) && (!tipF || gruppoDi(db, s) === tipF) && filtroSolo(s)).sort(confronta)
   const mancanti = dest.filter(s => !ini.scelte[s.id]?.opz).length
   const esclusi = db.soci.filter(s => s.stato === 'DA_VALIDARE' && (partSet.has(s.id) || (!singoli && ini.gruppi.includes(gruppoDi(db, s))))).length
   // 0030: cosa si può fare lo decide la regola dello stato (e l'archiviazione)
@@ -468,7 +529,7 @@ function IniziativaDettaglio({ id, onBack, onApri }: { id: string; onBack: () =>
           <button className={btnSecondario} onClick={() => { if (ini.archiviata) archivia(false); else setConfArch(true) }}>{ini.archiviata ? 'Ripristina' : 'Archivia'}</button>
         </div>
       </div>
-      {esporta && <EsportaElenco ids={partecipantiEffettivi(db, ini).map(s => s.id)} titolo={ini.titolo} onClose={() => setEsporta(false)} />}
+      {esporta && <EsportaElenco ids={partecipantiEffettivi(db, ini).map(s => s.id)} titolo={ini.titolo} iniziativa={conLuogo(mod) ? ini.id : undefined} onClose={() => setEsporta(false)} />}
       <EsigenzeEvento ini={ini} />
       {ini.archiviata && <div className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-2.5 text-sm text-slate-400">Evento archiviato il {fmtData(ini.archiviataIl)}{ini.archiviataDa ? ` da ${ini.archiviataDa}` : ''}: sola lettura. «Ripristina» lo riporta tra gli eventi attivi.</div>}
       <div><h3 className="text-lg font-semibold text-white">{ini.titolo}</h3>
@@ -487,7 +548,7 @@ function IniziativaDettaglio({ id, onBack, onApri }: { id: string; onBack: () =>
 
             <div className={`${cardCls} overflow-hidden`}>
               <div className="px-5 py-3 border-b border-slate-800 flex flex-wrap gap-3 items-center">
-                <p className="text-sm font-medium text-white flex-1">{mod === 'ORDINE' ? 'Quantità per sede (ordine al fornitore)' : 'Riepilogo per sede'}</p>
+                <p className="text-sm font-medium text-white flex-1">{mod === 'ORDINE' ? 'Quantità per sede di consegna (ordine al fornitore)' : 'Riepilogo per sede di consegna'}</p>
                 {mod === 'SCELTA' && ini.predefinita && <Interruttore on={pred} onChange={setPred} label={`Conta chi non ha scelto come «${nomePred}»`} />}
               </div>
               {mod === 'ORDINE' ? <TabellaOrdini ini={ini} /> : <TabellaRiepilogo ini={ini} mancantiComePred={pred} />}
@@ -496,7 +557,7 @@ function IniziativaDettaglio({ id, onBack, onApri }: { id: string; onBack: () =>
             <div className={`${cardCls} overflow-hidden`}>
               <div className="px-5 py-3 border-b border-slate-800 flex flex-wrap gap-3 items-end">
                 <div className="flex-1 min-w-[180px]"><input className={inputCls} placeholder="Cerca persona o tessera…" value={cerca} onChange={e => setCerca(e.target.value)} /></div>
-                <select className={inputCls + ' sm:w-56'} value={sede} onChange={e => setSede(e.target.value)}><option value="">Tutte le sedi</option>{db.sedi.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}</select>
+                <select className={inputCls + ' sm:w-56'} value={sede} onChange={e => setSede(e.target.value)}><option value="">Tutte le sedi di consegna</option>{db.sedi.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}</select>
                 <select className={inputCls + ' sm:w-56'} value={solo} onChange={e => setSolo(e.target.value)}>
                   <option value="">Tutti i destinatari</option>
                   {mod === 'SCELTA' && <option value="mancanti">Senza scelta ({mancanti})</option>}
@@ -507,12 +568,13 @@ function IniziativaDettaglio({ id, onBack, onApri }: { id: string; onBack: () =>
                 <div className="flex gap-1 items-center"><select className={inputCls + ' sm:w-56'} value={ord.k} onChange={e => setOrd({ k: e.target.value, dir: 1 })} title="Ordina per">{Object.entries(CHIAVI_ORD).map(([k, [l]]) => <option key={k} value={k}>Ordina: {l}</option>)}</select>
                   <button className={btnPiccoloSec + ' h-[38px]'} title={ord.dir > 0 ? 'Crescente' : 'Decrescente'} onClick={() => setOrd({ ...ord, dir: ord.dir === 1 ? -1 : 1 })}>{ord.dir > 0 ? 'A→Z' : 'Z→A'}</button></div>
                 {mod === 'SCELTA' && ini.predefinita && mancanti > 0 && perm.gestione && <button className={btnPiccoloSec} onClick={() => setConfPred(true)}>Assegna la predefinita ai {mancanti} senza scelta</button>}
+                {perm.gestione && <button className={btnPiccoloSec} onClick={() => setLuogoBlocco(true)} title="Dove ritirano in questo evento: a tutti o a chi è nell'elenco filtrato">Sede di consegna…</button>}
               </div>
               <Scorrevole className="max-h-[560px]"><table className="w-full text-sm">
                 <thead className="sticky top-0 bg-slate-900 z-10 text-left text-[11px] uppercase tracking-wider text-slate-500">
-                  {mod === 'ORDINE' && <tr><th colSpan={3} />{gruppiProdotti(ini).map(g => <th key={g.tip} colSpan={g.prod.length} className="px-2 pt-2 pb-1 font-semibold text-center text-pink-300/90 border-b border-slate-800">{tipNome(db, g.tip)}</th>)}<th colSpan={4} /></tr>}
+                  {mod === 'ORDINE' && <tr><th colSpan={4} />{gruppiProdotti(ini).map(g => <th key={g.tip} colSpan={g.prod.length} className="px-2 pt-2 pb-1 font-semibold text-center text-pink-300/90 border-b border-slate-800">{tipNome(db, g.tip)}</th>)}<th colSpan={4} /></tr>}
                   <tr>
-                    <Th k="nom" cls="px-5 py-2.5 font-semibold">Persona</Th><Th k="tessera">Tessera</Th><Th k="sede">Sede</Th>
+                    <Th k="nom" cls="px-5 py-2.5 font-semibold">Persona</Th><Th k="tessera">Tessera</Th><Th k="sede">Sede di lavoro</Th><Th k="consegna">Sede di consegna</Th>
                     {mod === 'SCELTA' && <Th k="scelta">Scelta</Th>}
                     {mod === 'ORDINE' && ini.prodotti.map(p => <th key={p.id} className="px-2 py-2 font-semibold text-center normal-case tracking-normal" title={`${prodLabel(db, p)} · ${fmtEuro(p.prezzo)}${perUnita(p)}${p.max ? ` · max ${p.max}` : ''}`}>{p.nome}<div className="font-normal text-slate-600 tabular-nums">{fmtEuro(p.prezzo)}{perUnita(p)}</div></th>)}
                     {mod === 'ORDINE' && <><Th k="totale" cls={thCls + ' text-right'}>Totale</Th><Th k="pagato" cls={thCls + ' text-center'}>Pagato</Th><th className={thCls}>Note</th></>}
@@ -525,6 +587,7 @@ function IniziativaDettaglio({ id, onBack, onApri }: { id: string; onBack: () =>
                         {nomeCella(s)}
                         <td className="px-3 py-2 font-mono text-xs text-slate-400">{s.tessera || '—'}</td>
                         <td className="px-3 py-2 text-slate-400 text-xs whitespace-nowrap">{s.sede ? sedeBreve(sedeNome(db, s.sede)) : <span className="text-amber-400">non indicata</span>}</td>
+                        <td className="px-3 py-1.5"><SceltaLuogo ini={ini} s={s} disabled={!perm.gestione} onChange={v => aggiorna(s.id, { luogo: v || null })} /></td>
                         {mod === 'SCELTA' && <td className="px-3 py-1.5"><div className="flex items-center gap-2">
                           <select disabled={!perm.raccolta} className={inputCls + ' py-1 text-xs min-w-[220px]'} value={sc?.opz ?? ''} onChange={e => aggiorna(s.id, { opz: e.target.value || null })}>
                             <option value="">— Nessuna scelta</option>{ini.opzioni.map(o => <option key={o.id} value={o.id}>{o.etichetta}</option>)}</select>
@@ -547,6 +610,7 @@ function IniziativaDettaglio({ id, onBack, onApri }: { id: string; onBack: () =>
       {spOrd && <ScontoPersonaleModal titolo={`Sconto · ${nominativo(spOrd)}`} sotto="Sull'ordine intero" regola={regolaCat(ini, catPersona(spOrd, db))} valore={persDi(ini, spOrd.id)} lordo={totaleSocio(ini, spOrd.id)} onClose={() => setSpOrd(null)}
         onSalva={v => { aggiorna(spOrd.id, { scontoPers: v }); setSpOrd(null); avviso(v ? 'Sconto personale salvato' : 'Sconto automatico') }} />}
       {edit && <IniziativaModal id={id} onClose={() => setEdit(false)} />}
+      {luogoBlocco && <SedeConsegnaModal ini={ini} tutti={dest} filtrati={lista} onClose={() => setLuogoBlocco(false)} />}
       {copiaDa && <CopiaEventoModal ini={ini} onClose={() => setCopiaDa(false)} onAvanti={c => { setCopiaDa(false); setCopia(c) }} />}
       {copia && <IniziativaModal id={null} copia={copia} onClose={() => setCopia(null)} onCreata={nuovo => onApri(nuovo)} />}
       {addPar && <AggiungiPartecipanteModal ini={ini} onClose={() => setAddPar(false)} />}

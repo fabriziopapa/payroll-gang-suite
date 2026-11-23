@@ -118,15 +118,26 @@ export const descrPart = (ini: Iniziativa, nAggiunti = 0): string => ini.modoPar
   ? `${ini.partecipanti.length} partecipanti singoli`
   : `${ini.gruppi.map(g => NOMI_GRUPPI[g]).join(' + ')} · ${ini.sedi.length ? `${ini.sedi.length} sedi` : 'tutte le sedi'}${nAggiunti ? ` · + ${nAggiunti} ${nAggiunti === 1 ? 'aggiunto' : 'aggiunti'}` : ''}`
 
+// ── Sede di consegna (26.11.23.1) ────────────────────────────
+/** Le modalità in cui si consegna per sede (le stesse del server). */
+export const MODALITA_CON_LUOGO: readonly Modalita[] = ['SCELTA', 'NESSUNA', 'ORDINE']
+export const conLuogo = (m: Modalita): boolean => MODALITA_CON_LUOGO.includes(m)
+/** Dove ritira la persona in questo evento: la sede di consegna, se c'è, altrimenti la sede di lavoro. */
+export function sedeConsegna(ini: Pick<Iniziativa, 'modalita' | 'scelte'>, s: Pick<Persona, 'id' | 'sede'>): string | null {
+  return (conLuogo(ini.modalita) ? ini.scelte[s.id]?.luogo : undefined) || s.sede
+}
+/** La persona ritira in una sede diversa dalla sua sede di lavoro. */
+export const consegnaAltrove = (ini: Pick<Iniziativa, 'modalita' | 'scelte'>, s: Pick<Persona, 'id' | 'sede'>): boolean => sedeConsegna(ini, s) !== s.sede
+
 export interface Riepilogo { colonne: string[]; righe: Array<[string, Record<string, number>]>; dest: Persona[] }
-/** Pivot sede × scelta (o destinatari, senza scelta), nell'ordine delle sedi. */
+/** Pivot sede di consegna × scelta (o destinatari, senza scelta), nell'ordine delle sedi. */
 export function riepilogo(db: Db, ini: Iniziativa, mancantiComePred: boolean): Riepilogo {
   const dest = destinatari(db, ini)
   const conScelta = ini.modalita === 'SCELTA'
   const colonne = conScelta ? [...ini.opzioni.map(o => o.id), '__NONE'] : ['__ADES']
   const righe = new Map<string, Record<string, number>>()
   for (const s of dest) {
-    const k = s.sede ?? '__NOSEDE'
+    const k = sedeConsegna(ini, s) ?? '__NOSEDE'
     let r = righe.get(k)
     if (!r) { r = Object.fromEntries(colonne.map(c => [c, 0])); righe.set(k, r) }
     if (!conScelta) { r['__ADES'] = (r['__ADES'] ?? 0) + 1; continue }
@@ -214,7 +225,7 @@ export function righeOrdiniPerSede(db: Db, ini: Iniziativa): Array<[string, Riga
   const m = new Map<string, RigaSede>()
   for (const s of destinatari(db, ini)) {
     if (!haOrdinato(ini, s.id)) continue
-    const k = s.sede ?? '__NOSEDE'
+    const k = sedeConsegna(ini, s) ?? '__NOSEDE'
     let r = m.get(k)
     if (!r) { r = { q: Object.fromEntries(ini.prodotti.map(p => [p.id, 0])), eur: 0, n: 0 }; m.set(k, r) }
     for (const p of ini.prodotti) r.q[p.id] = (r.q[p.id] ?? 0) + qta(ini, s.id, p.id)
@@ -608,8 +619,30 @@ export interface OpzioniCopia {
   imp: ImpostCopia; part: PartCopia; filtro: FiltroCopia
   /** Scelte riportate (solo da Scelta a Scelta): opzione di prima → opzione nuova ('' = nessuna). */
   scelte: boolean; mappa: Record<string, string>
+  /** 26.11.23.1: riportare le sedi di consegna di quell'evento (altrimenti ognuno ritira nella sua sede di lavoro). */
+  luoghi?: boolean
 }
-export interface CopiaPronta { da: Iniziativa; base: Iniziativa; partecipanti: string[]; scelte: Array<{ socio: string; opz: string }> }
+export interface VoceCopia { socio: string; opz?: string; luogo?: string }
+export interface CopiaPronta { da: Iniziativa; base: Iniziativa; partecipanti: string[]; scelte: VoceCopia[] }
+
+/** Le persone di quell'evento che entrano nel nuovo, secondo la scelta dei partecipanti. */
+function entranoInCopia(db: Db, ini: Iniziativa, part: PartCopia, filtro: FiltroCopia): Set<string> {
+  if (part === 'NESSUNO') return new Set()
+  if (part === 'REGOLA') return new Set(ini.modoPart === 'GRUPPI' ? destinatari(db, ini).map(s => s.id) : ini.partecipanti)
+  return new Set(part === 'LISTA' ? personeDellEvento(db, ini) : personeFiltro(db, ini, filtro))
+}
+/**
+ * Sedi di consegna di quell'evento che si possono riportare: della persona che entra nel nuovo evento,
+ * verso una sede ancora attiva. `fuori`: chi ne aveva una ma non entra o ha una sede disattivata.
+ */
+export function luoghiCopia(db: Db, ini: Iniziativa, part: PartCopia, filtro: FiltroCopia): { voci: Array<{ socio: string; luogo: string }>; prima: number; fuori: number } {
+  if (!conLuogo(ini.modalita)) return { voci: [], prima: 0, fuori: 0 }
+  const entrano = entranoInCopia(db, ini, part, filtro)
+  const attive = new Set(db.sedi.filter(s => s.attiva).map(s => s.id))
+  const conL = Object.entries(ini.scelte).filter(([socio, sc]) => !!sc.luogo && db.perId.has(socio)) as Array<[string, { luogo: string }]>
+  const voci = conL.filter(([socio, sc]) => entrano.has(socio) && attive.has(sc.luogo)).map(([socio, sc]) => ({ socio, luogo: sc.luogo }))
+  return { voci, prima: conL.length, fuori: conL.length - voci.length }
+}
 /** L'evento nuovo (da rivedere nella maschera), i partecipanti e le scelte da riportare. Non si copia mai nulla di ciò che le persone hanno fatto. */
 export function preparaCopia(db: Db, ini: Iniziativa, o: OpzioniCopia): CopiaPronta {
   const stessa = o.modalita === ini.modalita
@@ -638,8 +671,13 @@ export function preparaCopia(db: Db, ini: Iniziativa, o: OpzioniCopia): CopiaPro
   } else if (o.part === 'LISTA') partecipanti = personeDellEvento(db, ini)
   else if (o.part === 'PARTE') partecipanti = personeFiltro(db, ini, o.filtro)
   const nuove = new Set(opzioni.map(x => x.id))
-  const scelte = o.scelte && ini.modalita === 'SCELTA' && o.modalita === 'SCELTA'
-    ? Object.entries(ini.scelte).flatMap(([socio, sc]) => { const n = sc.opz ? o.mappa[sc.opz] ?? '' : ''; return n && nuove.has(n) && db.perId.has(socio) ? [{ socio, opz: n }] : [] })
-    : []
-  return { da: ini, base, partecipanti, scelte }
+  const perSocio = new Map<string, VoceCopia>()
+  if (o.scelte && ini.modalita === 'SCELTA' && o.modalita === 'SCELTA') {
+    for (const [socio, sc] of Object.entries(ini.scelte)) {
+      const n = sc.opz ? o.mappa[sc.opz] ?? '' : ''
+      if (n && nuove.has(n) && db.perId.has(socio)) perSocio.set(socio, { socio, opz: n })
+    }
+  }
+  if (o.luoghi && conLuogo(o.modalita)) for (const v of luoghiCopia(db, ini, o.part, o.filtro).voci) perSocio.set(v.socio, { ...(perSocio.get(v.socio) ?? { socio: v.socio }), luogo: v.luogo })
+  return { da: ini, base, partecipanti, scelte: [...perSocio.values()] }
 }

@@ -59,9 +59,9 @@ import { PgCralRepository } from '../db/repositories/PgCralRepository.js'
 import { PgAuditRepository } from '../db/repositories/PgAuditRepository.js'
 import type { CralErrore, CralOperazioneImport, CralPatchContatti, CralQuotaRow } from '../db/IRepository.js'
 import {
-  abbina, allineaQuoteSchema, azioneVietata, azioniScelta, copiaEventoSchema, erroreAllinea, erroreDati, erroreIniziativa, iniziativaSchema, statoEventoSchema,
+  abbina, allineaQuoteSchema, azioneVietata, azioniScelta, copiaEventoSchema, erroreAllinea, erroreDati, erroreIniziativa, erroreLuogo, iniziativaSchema, statoEventoSchema,
   type AzioneEvento, parametriTesseraSchema, riga, sceltaSchema, scontoPersonale,
-  unisciDati, usiTolti, type AnagraficaCral, type DatiScelta, type ConfigEvento,
+  unisciDati, usiTolti, type AnagraficaCral, type DatiScelta, type ConfigEvento, type Modalita,
 } from '../lib/cral.js'
 import { leggiFogli, MAX_BYTE_FILE } from '../services/cral/fogli.js'
 import { MODALITA_MODELLO, TRACCIATI_MODELLO, costruisciModello, scriviModello } from '../services/cral/modelli.js'
@@ -474,6 +474,8 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     const b = z.object({
       ids: z.array(ID_PERSONA).min(1).max(50_000), colonne: MODELLO_EXPORT.shape.colonne, solo: MODELLO_EXPORT.shape.solo,
       formato: MODELLO_EXPORT.shape.formato, separatore: MODELLO_EXPORT.shape.separatore.default(';'), titolo: riga(60).default(''),
+      // 26.11.23.1: esportazione dai partecipanti di un evento (per la sede di consegna)
+      iniziativa: UUID.optional(),
     }).parse(request.body)
     const colonne = b.colonne.map(c => COLONNE_ELENCO.find(x => x.id === c))
     if (colonne.some(c => !c)) return reply.code(400).send({ error: 'COLONNA_SCONOSCIUTA' })
@@ -482,9 +484,12 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     const righe = st.soci.filter(s => scelti.has(s.id) && s.stato !== 'ELIMINATO' && (
       b.solo === 'CONTATTABILI' ? contattabile(s.contatti) : b.solo === 'WHATSAPP' ? perWhatsapp(s.contatti)
         : b.solo === 'ALIMENTARI' ? s.alimentari.esigenze.length > 0 || !!s.alimentari.allergie : true))
-    const buf = elencoSoci(righe, colonne as ColonnaElenco[], st, b.formato, b.separatore, b.titolo || 'Elenco')
+    const ev = b.iniziativa ? st.iniziative.find(i => i.id === b.iniziativa) : undefined
+    if (b.iniziativa && !ev) return reply.code(404).send({ error: 'EVENTO_NON_TROVATO' })
+    const luoghi = ev ? new Map(Object.entries(ev.scelte).flatMap(([socio, d]) => { const l = (d as { luogo?: unknown }).luogo; return typeof l === 'string' ? [[socio, l] as [string, string]] : [] })) : undefined
+    const buf = elencoSoci(righe, colonne as ColonnaElenco[], st, b.formato, b.separatore, b.titolo || 'Elenco', luoghi)
     await audit(request, 'CRAL_EXPORT_ELENCO', undefined, {
-      persone: righe.length, colonne: b.colonne, solo: b.solo, formato: b.formato,
+      persone: righe.length, colonne: b.colonne, solo: b.solo, formato: b.formato, ...(ev ? { iniziativa: ev.id } : {}),
       conTelefono: colonne.some(c => c!.dato === 'telefono'), conAlimentari: colonne.some(c => c!.dato === 'alimentari'), ambiente: ambienteDi(request),
     })
     return reply.send({ righe: righe.length, base64: buf.toString('base64') })
@@ -665,7 +670,7 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     if (err) return reply.code(400).send({ error: err })
     const r = await repo.copiaIniziativa(b.da, b.evento, b.partecipanti, b.scelte, uid(request))
     if (typeof r === 'string') return errore(reply, r)
-    await audit(request, 'CRAL_EVENTO_COPIATO', r.iniziativa.id, { da: b.da, tipo: r.iniziativa.tipo, modalita: r.iniziativa.modalita, stato: r.iniziativa.stato, partecipanti: r.partecipanti, scelte: r.scelte })
+    await audit(request, 'CRAL_EVENTO_COPIATO', r.iniziativa.id, { da: b.da, tipo: r.iniziativa.tipo, modalita: r.iniziativa.modalita, stato: r.iniziativa.stato, partecipanti: r.partecipanti, scelte: r.scelte, luoghi: r.luoghi })
     return reply.code(201).send(r)
   })
 
@@ -714,6 +719,9 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     if (!i0) return
     const d = datiValidi(i0.scelte[socio], b.dati, i0.config as ConfigEvento)
     if (typeof d === 'string') return reply.code(400).send({ error: d })
+    // 26.11.23.1: la sede di consegna e' una sede dell'elenco
+    const eL = d.luogo ? erroreLuogo(d.luogo, (i0.scelte[socio] as { luogo?: unknown } | undefined)?.luogo, i0.modalita as Modalita, await repo.sediElenco()) : null
+    if (eL) return reply.code(400).send({ error: eL })
     // 0030: la regola dello stato decide su che cosa cambia davvero (scelta, pagamento, consegna)
     if (!(await permesso(reply, i0, azioniScelta(senzaFonte(i0.scelte[socio]), d)))) return
     await repo.salvaScelte(id, [{ socio, dati: d, fonte: b.fonte }], uid(request))
@@ -731,9 +739,12 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     if (!i) return
     const voci = []
     const azioni = new Set<AzioneEvento>()
+    const sedi = b.voci.some(v => v.dati.luogo) ? await repo.sediElenco() : []
     for (const v of b.voci) {
       const d = datiValidi(v.sostituisci ? undefined : i.scelte[v.socio], v.dati, i.config as ConfigEvento)
       if (typeof d === 'string') return reply.code(400).send({ error: d, socio: v.socio })
+      const eL = d.luogo ? erroreLuogo(d.luogo, (i.scelte[v.socio] as { luogo?: unknown } | undefined)?.luogo, i.modalita as Modalita, sedi) : null
+      if (eL) return reply.code(400).send({ error: eL, socio: v.socio })
       const prima = senzaFonte(i.scelte[v.socio])
       // assegnare l'opzione predefinita a chi non ha scelto e' un'operazione di chiusura, non di raccolta
       const soloPred = b.fonte === 'predefinita' && !prima?.['opz'] && Object.keys(v.dati).every(k => k === 'opz')

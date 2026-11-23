@@ -1079,8 +1079,10 @@ export interface ICralRepository {
    * del nuovo evento). Nulla si scrive se l'origine, il tipo o lo stato non ci sono.
    */
   copiaIniziativa(da: string, i: Omit<CralIniziativaRow, 'id' | 'archiviata' | 'archiviataDa' | 'archiviataIl' | 'partecipanti' | 'scelte' | 'carichi' | 'richieste' | 'copiatoDa'>,
-    partecipanti: string[], scelte: Array<{ socio: string; opz: string }>, userId: string | null,
-  ): Promise<{ iniziativa: CralIniziativaRow; partecipanti: number; scelte: number } | 'EVENTO_NON_TROVATO' | 'TIPO_SCONOSCIUTO' | 'STATO_SCONOSCIUTO'>
+    partecipanti: string[], scelte: Array<{ socio: string; opz?: string; luogo?: string }>, userId: string | null,
+  ): Promise<{ iniziativa: CralIniziativaRow; partecipanti: number; scelte: number; luoghi: number } | 'EVENTO_NON_TROVATO' | 'TIPO_SCONOSCIUTO' | 'STATO_SCONOSCIUTO'>
+  /** 26.11.23.1: le sedi (anche non attive), per controllare le sedi di consegna. */
+  sediElenco(): Promise<Array<{ id: string; attiva: boolean }>>
   partecipanti(id: string, aggiungi: string[], togli: string[]): Promise<number>
   scelte(id: string, soci: string[]): Promise<Map<string, { dati: Record<string, unknown>; fonte: string }>>
   salvaScelte(id: string, voci: Array<{ socio: string; dati: Record<string, unknown>; fonte: string }>, userId: string | null): Promise<number>

@@ -303,3 +303,29 @@ test('stati degli eventi (0030): l\'archivio li porta; un evento con uno stato c
   assert.ok(archivioSchema.safeParse(JSON.parse(JSON.stringify(vecchio))).success)
   assert.ok(!confrontaArchivio(vecchio, A({ tabelle: tab(STATI) }), ['eventi'], new Set()).variazioni[0]!.bloccata)
 })
+
+test('sede di consegna (26.11.23.1): viaggia con la scelta, si ritrova per nome; una sede che qui non c\'è lascia fuori la scelta', () => {
+  const tab = { tipi: [{ id: 'PAN', nome: 'Panettone', colore: '#D97706', pagamento: false, modo: null, attivo: true, ordine: 1 }], tipologie: [], tessera: TESSERA, extProssimo: 1, famProssimo: 1, quoteAnno: [] }
+  const ID = '55555555-5555-4555-8555-555555555555'
+  const ev = (scelte: EventoArch['scelte']): EventoArch => ({
+    id: ID, tipo: 'PAN', titolo: 'Panettoni', anno: 2026, data: '2026-12-18', scadenza: null, stato: 'APERTA', modalita: 'NESSUNA', modoPart: 'GRUPPI',
+    gruppi: ['SD'], sedi: [], predefinita: null, fornitore: '', pagamento: '', note: '', quota: 0,
+    config: { opzioni: [], prodotti: [], periodi: [], articoli: [], sconti: {} }, archiviata: false, archiviataDa: null, archiviataIl: null,
+    partecipanti: [], scelte, carichi: [], richieste: [],
+  })
+  const soci = [P('090001', 'SD', 'ROSSI', 'Luca'), P('090002', 'SD', 'VERDI', 'Anna')]
+  // di là: CDX e NOL; qui: CD con lo stesso nome di CDX, Nola non c'è
+  const src = A({ tabelle: tab, soci, sedi: [{ id: 'CDX', nome: 'Sede del Centro Direzionale', attiva: true, ordine: 1 }, { id: 'NOL', nome: 'Sede di Nola', attiva: true, ordine: 2 }],
+    eventi: [ev([{ socio: '090001', dati: { luogo: 'CDX' }, fonte: 'manuale' }, { socio: '090002', dati: { luogo: 'NOL', consegnato: true }, fonte: 'manuale' }])] })
+  assert.ok(archivioSchema.safeParse(JSON.parse(JSON.stringify(src))).success)
+  const dst = A({ tabelle: tab, soci })
+  const solo = confrontaArchivio(src, dst, ['eventi'], new Set()).variazioni.find(v => v.chiave === ID)!
+  const rec = solo.record as EventoArch
+  assert.deepEqual(rec.scelte.map(x => [x.socio, x.dati.luogo]), [['090001', 'CD']], 'CDX è la CD di qui; Nola resta fuori')
+  assert.match(solo.avviso ?? '', /sedi di consegna che qui non ci sono/)
+  // con la sezione delle sedi Nola arriva, e la scelta con lei
+  const conSedi = confrontaArchivio(src, dst, ['sedi', 'eventi'], new Set()).variazioni.find(v => v.chiave === ID)!
+  assert.deepEqual((conSedi.record as EventoArch).scelte.map(x => [x.socio, x.dati.luogo]), [['090001', 'CD'], ['090002', 'NOL']])
+  // una sede di consegna non valida nel formato non passa dal controllo del file
+  assert.ok(!archivioSchema.safeParse(JSON.parse(JSON.stringify(A({ ...src, eventi: [ev([{ socio: '090001', dati: { luogo: 'nola!' } as never, fonte: 'manuale' }])] })))).success)
+})

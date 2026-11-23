@@ -28,6 +28,8 @@ export type Modalita = typeof MODALITA[number]
 
 const DATA     = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(s => !Number.isNaN(Date.parse(`${s}T00:00:00Z`)), 'data')
 const ID_LOC   = z.string().regex(/^[A-Za-z0-9_-]{1,30}$/)
+/** Codice di una sede (cral_sedi.id). */
+const ID_SEDE  = z.string().regex(/^[A-Z0-9]{1,12}$/)
 /** Testo su una riga, senza caratteri di controllo (finisce in audit, PDF, CSV). */
 export const riga = (max: number, min = 0) => z.string().trim().max(max).min(min)
   .refine(s => !/[\u0000-\u001f\u007f]/.test(s), 'caratteri non ammessi')
@@ -158,7 +160,7 @@ export function azioneVietata(regola: string | null, azioni: Iterable<AzioneEven
 export function azioniScelta(prima: Record<string, unknown> | undefined, dopo: Record<string, unknown>): Set<AzioneEvento> {
   const out = new Set<AzioneEvento>()
   const p = prima ?? {}
-  const CLASSE: Record<string, AzioneEvento> = { opz: 'raccolta', q: 'raccolta', rif: 'raccolta', iscr: 'raccolta', consegnato: 'consegna', pagato: 'gestione', versato: 'gestione', note: 'gestione', scontoPers: 'gestione' }
+  const CLASSE: Record<string, AzioneEvento> = { opz: 'raccolta', q: 'raccolta', rif: 'raccolta', iscr: 'raccolta', consegnato: 'consegna', pagato: 'gestione', versato: 'gestione', note: 'gestione', scontoPers: 'gestione', luogo: 'gestione' }
   const vuoto = (v: unknown) => v === undefined || v === null || v === '' || v === false || v === 0
   for (const k of new Set([...Object.keys(p), ...Object.keys(dopo)])) {
     if (k === 'fonte') continue
@@ -189,7 +191,9 @@ export const copiaEventoSchema = z.object({
   da: z.string().uuid(),
   evento: iniziativaSchema,
   partecipanti: z.array(z.string().regex(/^([0-9]{1,10}|EXT-[0-9]{4,6}|FAM-[0-9]{4,6})$/)).max(20_000).default([]),
-  scelte: z.array(z.object({ socio: z.string().regex(/^([0-9]{1,10}|EXT-[0-9]{4,6}|FAM-[0-9]{4,6})$/), opz: ID_LOC }).strict()).max(20_000).default([]),
+  // 26.11.23.1: per ogni persona la scelta, la sede di consegna o tutte e due
+  scelte: z.array(z.object({ socio: z.string().regex(/^([0-9]{1,10}|EXT-[0-9]{4,6}|FAM-[0-9]{4,6})$/), opz: ID_LOC.optional(), luogo: ID_SEDE.optional() }).strict()
+    .refine(x => !!x.opz || !!x.luogo, 'scelta o sede di consegna')).max(20_000).default([]),
 }).strict()
 export type CopiaEvento = z.infer<typeof copiaEventoSchema>
 
@@ -207,6 +211,8 @@ export const sceltaSchema = z.object({
   /** Categoria per lo sconto bloccata all'iscrizione. */
   iscr:       z.object({ data: DATA, cat: z.enum(['SD', 'SE', 'DIP', 'EST']) }).nullable().optional(),
   scontoPers: scontoPersonale.nullable().optional(),
+  /** 26.11.23.1: sede di consegna per questo evento; assente = la sede di lavoro della persona. */
+  luogo:      ID_SEDE.nullable().optional(),
 }).strict()
 export type DatiScelta = z.infer<typeof sceltaSchema>
 
@@ -234,6 +240,21 @@ export function erroreDati(d: DatiScelta, c: ConfigEvento): string | null {
   }
   for (const pid of Object.keys(d.per ?? {})) if (!c.periodi.some(x => x.id === pid)) return 'PERIODO_SCONOSCIUTO'
   return null
+}
+
+// ── Sede di consegna (26.11.23.1) ────────────────────────────
+/** Le modalita' in cui si consegna per sede: le altre non usano la sede. */
+export const MODALITA_CON_LUOGO: readonly Modalita[] = ['SCELTA', 'NESSUNA', 'ORDINE']
+/**
+ * Una sede di consegna nuova deve essere una sede dell'elenco, attiva. Quella che una persona
+ * ha gia' resta valida anche se la sede nel frattempo e' stata disattivata.
+ */
+export function erroreLuogo(nuovo: string | null | undefined, prima: unknown, modalita: Modalita, sedi: ReadonlyArray<{ id: string; attiva: boolean }>): string | null {
+  if (!nuovo || nuovo === prima) return null
+  if (!MODALITA_CON_LUOGO.includes(modalita)) return 'LUOGO_NON_AMMESSO'
+  const s = sedi.find(x => x.id === nuovo)
+  if (!s) return 'SEDE_SCONOSCIUTA'
+  return s.attiva ? null : 'SEDE_NON_ATTIVA'
 }
 
 /** Ciò che una modifica della config toglierebbe pur essendo già usato. */
