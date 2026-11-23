@@ -6,23 +6,37 @@
 
 import { Fragment, useMemo, useState } from 'react'
 import type { Richiesta } from './tipi'
-import { GRUPPI, TIPOLOGIE, creaCsv, fmtData, oggi, sedeBreve } from './logica'
-import { MODI_QUOTA, STATI_RIC_ETICH, costruisciReport, creaPdf, tipiAmmessi, type CfgReport } from './report'
+import { GRUPPI, TIPOLOGIE, creaCsv, fmtData, oggi, sedeBreve, statoDi } from './logica'
+import { MODI_QUOTA, STATI_RIC_ETICH, conProgressivo, costruisciReport, creaPdf, tipiAmmessi, type CfgReport } from './report'
+
+// 26.11.23: il numero progressivo si ricorda in questo browser
+const CHIAVE_NUM = 'pgs.cral.report.numero'
+function numeroRicordato(): { numero: boolean; numeroPerGruppo: boolean } {
+  try { const v = JSON.parse(localStorage.getItem(CHIAVE_NUM) ?? '{}') as Record<string, unknown>; return { numero: v['numero'] === true, numeroPerGruppo: v['numeroPerGruppo'] !== false } }
+  catch { return { numero: false, numeroPerGruppo: true } }
+}
+function ricordaNumero(v: { numero: boolean; numeroPerGruppo: boolean }) { try { localStorage.setItem(CHIAVE_NUM, JSON.stringify(v)) } catch { /* browser senza memoria: vale per questa volta */ } }
 import { Campo, D, Ico, Interruttore, avviso, btnPrimario, btnSecondario, cardCls, chipCls, etichettaCls, inputCls, scarica, sceltaCls, useCral, Scorrevole } from './ui'
 
 export function ReportTab() {
   const { db, utente } = useCral()
-  const prima = db.iniziative.find(i => i.stato === 'APERTA' && !i.archiviata)?.id ?? db.iniziative[0]?.id ?? ''
+  // 0030: di partenza il primo evento in raccolta
+  const prima = db.iniziative.find(i => !i.archiviata && statoDi(db, i.stato).regola === 'RACCOLTA')?.id ?? db.iniziative[0]?.id ?? ''
   const [cfg, setCfg] = useState<CfgReport>({
     tipo: 'riepilogo', ini: prima, sedi: [], origine: '', pred: true, tessera: true, consegnato: true, pagato: true, note: true, firma: false,
     colSoci: { sede: true, id: true, nom: true }, sedeScelte: true, ordinaPer: 'nom', paginaPerSede: true, soloMancanti: false, inclusiVuoti: false,
     soloDaPagare: false, soloSaldo: false, includiTolte: false, presenze: true, aCarico: true, perRif: true, eta: false, anno: +oggi().slice(0, 4), qmodo: '', mesi: true, statoRic: '',
+    ...numeroRicordato(),
   })
   const [pdfInCorso, setPdfInCorso] = useState(false)
   const oggiIso = oggi()
   const rep = useMemo(() => costruisciReport(db, cfg, oggiIso), [db, cfg, oggiIso])
   const ini = db.iniziative.find(i => i.id === cfg.ini)
-  const set = (p: Partial<CfgReport>) => setCfg({ ...cfg, ...p })
+  const set = (p: Partial<CfgReport>) => {
+    const n = { ...cfg, ...p }
+    if ('numero' in p || 'numeroPerGruppo' in p) ricordaNumero({ numero: !!n.numero, numeroPerGruppo: !!n.numeroPerGruppo })
+    setCfg(n)
+  }
   const senzaIni = cfg.tipo === 'soci' || cfg.tipo === 'quote'
   const nomeBase = `CRAL_${cfg.tipo === 'soci' ? 'soci' : cfg.tipo === 'quote' ? `quote_${cfg.anno}` : (ini?.titolo ?? '').replace(/\W+/g, '_')}_${cfg.tipo}_${oggiIso}`
   const ord = ini?.modalita === 'ORDINE'
@@ -102,6 +116,10 @@ export function ReportTab() {
         </div>}
         {(['soci', 'scelte', 'settimane', 'quote'].includes(cfg.tipo)) && <div className="flex flex-col gap-1"><Interruttore on={cfg.eta} onChange={v => set({ eta: v })} label="Colonna Età" />
           <p className="text-[11px] text-slate-500 pl-11">{senzaIni ? `Anni compiuti a oggi (${fmtData(oggiIso)})` : modR === 'MAGAZZINO' ? 'Anni compiuti alla data della richiesta' : `Anni compiuti alla data dell'evento (${fmtData(ini?.data)})`}, dalla data di nascita. Vuota se manca.</p></div>}
+        {conProgressivo(cfg) && <div className="flex flex-col gap-1">
+          <Interruttore on={!!cfg.numero} onChange={v => set({ numero: v })} label="Numero progressivo (1, 2, 3…)" />
+          {cfg.numero && rep.gruppi && <Interruttore on={!!cfg.numeroPerGruppo} onChange={v => set({ numeroPerGruppo: v })} label={`Ricomincia da 1 in ogni ${cfg.tipo === 'settimane' ? 'settimana' : modR === 'TURNI' ? 'famiglia' : 'sede'}`} />}
+          {cfg.numero && <p className="text-[11px] text-slate-500 pl-11">Colonna «N.» in anteprima, CSV e PDF. Totali e subtotali non si contano.</p>}</div>}
         <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-800">
           <button className={btnPrimario} disabled={!rep.righe.length} onClick={() => scarica(`${nomeBase}.csv`, new Blob([csv()], { type: 'text/csv;charset=utf-8' }))}><Ico d={D.download} />CSV</button>
           <button className={btnPrimario} disabled={!rep.righe.length || pdfInCorso} onClick={() => void pdf()}><Ico d={D.download} />{pdfInCorso ? 'PDF…' : 'PDF'}</button>

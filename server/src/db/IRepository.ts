@@ -889,6 +889,9 @@ export interface IVersamentiRepository {
 export interface CralSedeRow { id: string; nome: string; attiva: boolean; ordine: number }
 export interface CralTipoRow { id: string; nome: string; colore: string; pagamento: boolean; modo: string | null; attivo: boolean; ordine: number }
 export interface CralTipologiaRow { id: string; nome: string; attiva: boolean; ordine: number }
+/** 0030: stato di un evento, con la regola (fra sei fisse) che decide cosa si puo' fare. */
+export type CralRegolaStato = 'PREPARAZIONE' | 'RACCOLTA' | 'RACCOLTA_CHIUSA' | 'SOSPESO' | 'CONCLUSO' | 'ANNULLATO'
+export interface CralStatoEventoRow { id: string; nome: string; colore: string; regola: CralRegolaStato; attivo: boolean; ordine: number }
 export interface CralTesseraParam {
   formato: 'NUM' | 'PREF'; prefisso: string; cifre: number; prossimo: number
   riammissione: 'NUOVO' | 'SUFFISSO'; sepSuffisso: '' | '/' | '-' | '.'; cifreSuffisso: number
@@ -924,10 +927,13 @@ export interface CralRichiestaRow {
 }
 export interface CralIniziativaRow {
   id: string; tipo: string; titolo: string; anno: number; data: string; scadenza: string | null
-  stato: 'BOZZA' | 'APERTA' | 'CHIUSA'; modalita: 'SCELTA' | 'NESSUNA' | 'ORDINE' | 'TURNI' | 'MAGAZZINO'
+  /** 0030: codice di uno stato di cral_stati_evento */
+  stato: string; modalita: 'SCELTA' | 'NESSUNA' | 'ORDINE' | 'TURNI' | 'MAGAZZINO'
   modoPart: 'GRUPPI' | 'SINGOLI'; gruppi: string[]; sedi: string[]; predefinita: string | null
   fornitore: string; pagamento: string; note: string; quota: number; config: unknown
   archiviata: boolean; archiviataDa: string | null; archiviataIl: string | null
+  /** 0030: evento da cui e' stato copiato */
+  copiatoDa: string | null
   partecipanti: string[]
   /** socio → dati della scelta (JSON validato) + fonte */
   scelte: Record<string, Record<string, unknown>>
@@ -947,6 +953,8 @@ export interface CralQuotaRow {
 export interface CralVoceAllinea { socio: string; stato: CralStatoQuota; motivo: string }
 export interface CralStato {
   sedi: CralSedeRow[]; tipi: CralTipoRow[]; tipologie: CralTipologiaRow[]; parametri: CralParametriRow
+  /** 0030 */
+  stati: CralStatoEventoRow[]
   soci: CralSocioRow[]; iniziative: CralIniziativaRow[]
   quoteAnno: Array<{ anno: number; importo: number }>
   quote: Record<string, Record<string, CralQuotaRow>>
@@ -986,6 +994,7 @@ export type CralErrore =
   | 'LEGAME_NON_VALIDO' | 'STATO_NON_VALIDO' | 'SUFFISSI_ESAURITI' | 'NOME_GIA_USATO' | 'TIPO_SCONOSCIUTO'
   | 'LOTTO_NON_TROVATO' | 'LOTTO_CHIUSO' | 'LOTTO_SOLO_PROVA' | 'OCCUPATO'
   | 'TELEFONO_NON_VALIDO' | 'TELEFONO_MANCANTE' | 'CONSENSO_REVOCATO' | 'DATA_NON_VALIDA'
+  | 'STATO_SCONOSCIUTO' | 'EVENTO_NON_TROVATO'
 
 export type CralAzioneStato = 'valida' | 'rifiuta' | 'rimetti' | 'cessa' | 'riattiva' | 'elimina' | 'ripristina'
 
@@ -1040,6 +1049,13 @@ export interface ICralRepository {
   aggiornaTipo(id: string, patch: { nome?: string; colore?: string; pagamento?: boolean; attivo?: boolean }): Promise<CralTipoRow | null>
   creaTipologia(nome: string): Promise<CralTipologiaRow>
   aggiornaTipologia(id: string, patch: { nome?: string; attiva?: boolean }): Promise<CralTipologiaRow | null>
+  /** 0030: stati degli eventi (Parametri). Uno stato in uso non si cancella: si disattiva. */
+  creaStatoEvento(s: { nome: string; colore: string; regola: CralRegolaStato }): Promise<CralStatoEventoRow>
+  aggiornaStatoEvento(id: string, patch: { nome?: string; colore?: string; regola?: CralRegolaStato; attivo?: boolean }): Promise<CralStatoEventoRow | null>
+  /** Ordine degli stati: gli ID nell'ordine voluto (tutti). false = l'elenco non corrisponde agli stati. */
+  ordinaStatiEvento(ids: string[]): Promise<boolean>
+  /** La regola dello stato (null = stato sconosciuto). */
+  regolaStato(id: string): Promise<CralRegolaStato | null>
 
   socio(id: string): Promise<CralSocioRow | null>
   creaPersona(p: CralNuovaPersona, userId: string | null): Promise<CralSocioRow | CralErrore>
@@ -1055,8 +1071,16 @@ export interface ICralRepository {
 
   iniziativa(id: string): Promise<CralIniziativaRow | null>
   usiIniziativa(id: string): Promise<{ opz: Set<string>; prodotti: Set<string>; periodi: Set<string>; articoli: Set<string> }>
-  salvaIniziativa(id: string | null, i: Omit<CralIniziativaRow, 'id' | 'archiviata' | 'archiviataDa' | 'archiviataIl' | 'partecipanti' | 'scelte' | 'carichi' | 'richieste'>, userId: string | null): Promise<CralIniziativaRow | 'TIPO_SCONOSCIUTO' | null>
+  salvaIniziativa(id: string | null, i: Omit<CralIniziativaRow, 'id' | 'archiviata' | 'archiviataDa' | 'archiviataIl' | 'partecipanti' | 'scelte' | 'carichi' | 'richieste' | 'copiatoDa'>, userId: string | null): Promise<CralIniziativaRow | 'TIPO_SCONOSCIUTO' | 'STATO_SCONOSCIUTO' | null>
   archivia(id: string, archiviata: boolean, userId: string | null): Promise<boolean>
+  /**
+   * Copia di un evento (26.11.23), in una transazione: l'evento nuovo (con copiatoDa), i partecipanti
+   * (solo persone che esistono) e le scelte riportate (fonte 'copia': solo modalita' SCELTA e opzioni
+   * del nuovo evento). Nulla si scrive se l'origine, il tipo o lo stato non ci sono.
+   */
+  copiaIniziativa(da: string, i: Omit<CralIniziativaRow, 'id' | 'archiviata' | 'archiviataDa' | 'archiviataIl' | 'partecipanti' | 'scelte' | 'carichi' | 'richieste' | 'copiatoDa'>,
+    partecipanti: string[], scelte: Array<{ socio: string; opz: string }>, userId: string | null,
+  ): Promise<{ iniziativa: CralIniziativaRow; partecipanti: number; scelte: number } | 'EVENTO_NON_TROVATO' | 'TIPO_SCONOSCIUTO' | 'STATO_SCONOSCIUTO'>
   partecipanti(id: string, aggiungi: string[], togli: string[]): Promise<number>
   scelte(id: string, soci: string[]): Promise<Map<string, { dati: Record<string, unknown>; fonte: string }>>
   salvaScelte(id: string, voci: Array<{ socio: string; dati: Record<string, unknown>; fonte: string }>, userId: string | null): Promise<number>

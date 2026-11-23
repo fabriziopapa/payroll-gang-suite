@@ -12,6 +12,8 @@
 //   POST   /sedi | PATCH /sedi/:id             sedi di consegna
 //   POST   /tipi | PATCH /tipi/:id             tipi di evento
 //   POST   /tipologie | PATCH /tipologie/:id   tipologie di prodotto
+//   POST   /stati-evento | PATCH /stati-evento/:id   stati degli eventi (0030: nome, colore, regola, attivo)
+//   PUT    /stati-evento/ordine                { ids[] } ordine degli stati
 //   PUT    /parametri/tessera                  formato della tessera
 //   POST   /soci                               nuova persona (anche per un evento)
 //   PATCH  /soci/:id                           dati, tipologia, sede, tessera
@@ -22,6 +24,8 @@
 //   POST   /soci/sposta                        { ids, sede }
 //   POST   /iniziative | PUT /iniziative/:id   evento (config validata)
 //   POST   /iniziative/:id/archivia            { archiviata }
+//   POST   /iniziative/copia                   { da, evento, partecipanti[], scelte[] } copia di un evento (26.11.23)
+//   Le scritture sulle persone di un evento rispettano la regola del suo stato (0030): 409 STATO_NON_PERMETTE
 //   POST   /iniziative/:id/partecipanti        { aggiungi[], togli[] }
 //   PATCH  /iniziative/:id/scelte/:socio       { dati, fonte? } (unione: null toglie)
 //   POST   /iniziative/:id/scelte              { voci[] } import, predefinita
@@ -55,7 +59,8 @@ import { PgCralRepository } from '../db/repositories/PgCralRepository.js'
 import { PgAuditRepository } from '../db/repositories/PgAuditRepository.js'
 import type { CralErrore, CralOperazioneImport, CralPatchContatti, CralQuotaRow } from '../db/IRepository.js'
 import {
-  abbina, allineaQuoteSchema, erroreAllinea, erroreDati, erroreIniziativa, iniziativaSchema, parametriTesseraSchema, riga, sceltaSchema, scontoPersonale,
+  abbina, allineaQuoteSchema, azioneVietata, azioniScelta, copiaEventoSchema, erroreAllinea, erroreDati, erroreIniziativa, iniziativaSchema, statoEventoSchema,
+  type AzioneEvento, parametriTesseraSchema, riga, sceltaSchema, scontoPersonale,
   unisciDati, usiTolti, type AnagraficaCral, type DatiScelta, type ConfigEvento,
 } from '../lib/cral.js'
 import { leggiFogli, MAX_BYTE_FILE } from '../services/cral/fogli.js'
@@ -108,6 +113,7 @@ const STATO_HTTP: Record<CralErrore, number> = {
   SEDE_SCONOSCIUTA: 400, LEGAME_NON_VALIDO: 400, STATO_NON_VALIDO: 409, SUFFISSI_ESAURITI: 409, TIPO_SCONOSCIUTO: 400,
   LOTTO_NON_TROVATO: 404, LOTTO_CHIUSO: 409, LOTTO_SOLO_PROVA: 409, OCCUPATO: 409,
   TELEFONO_NON_VALIDO: 400, TELEFONO_MANCANTE: 400, CONSENSO_REVOCATO: 409, DATA_NON_VALIDA: 400,
+  STATO_SCONOSCIUTO: 400, EVENTO_NON_TROVATO: 404,
 }
 const eErrore = (x: unknown): x is CralErrore => typeof x === 'string' && x in STATO_HTTP
 
@@ -271,6 +277,27 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     await audit(request, 'CRAL_TIPOLOGIA_CREATA', r.id, {})
     return reply.code(201).send({ tipologia: r })
   })
+  // 0030: stati degli eventi. La regola decide cosa si puo' fare; uno stato in uso non si cancella, si disattiva
+  app.post('/stati-evento', admin, async (request, reply) => {
+    const b = statoEventoSchema.parse(request.body)
+    const r = await repo.creaStatoEvento(b)
+    await audit(request, 'CRAL_STATO_EVENTO_CREATO', r.id, { regola: r.regola })
+    return reply.code(201).send({ stato: r })
+  })
+  app.patch('/stati-evento/:id', admin, async (request, reply) => {
+    const { id } = z.object({ id: ID_TIPO }).parse(request.params)
+    const b = statoEventoSchema.partial().extend({ attivo: z.boolean().optional() }).strict().parse(request.body)
+    const r = await repo.aggiornaStatoEvento(id, b)
+    if (!r) return reply.code(404).send({ error: 'STATO_SCONOSCIUTO' })
+    await audit(request, 'CRAL_STATO_EVENTO_MODIFICATO', id, { campi: Object.keys(b), ...(b.regola ? { regola: b.regola } : {}) })
+    return reply.send({ stato: r })
+  })
+  app.put('/stati-evento/ordine', admin, async (request, reply) => {
+    const { ids } = z.object({ ids: z.array(ID_TIPO).min(1).max(100) }).parse(request.body)
+    if (!(await repo.ordinaStatiEvento(ids))) return reply.code(400).send({ error: 'ORDINE_NON_VALIDO' })
+    await audit(request, 'CRAL_STATI_EVENTO_ORDINE', undefined, { stati: ids.length })
+    return reply.send({ ok: true })
+  })
   app.patch('/tipologie/:id', admin, async (request, reply) => {
     const { id } = z.object({ id: ID_TIPO }).parse(request.params)
     const b = z.object({ nome: riga(80, 1).optional(), attiva: z.boolean().optional() }).parse(request.body)
@@ -303,7 +330,7 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
       if (!a) return reply.code(400).send({ error: 'MATRICOLA_NON_IN_ANAGRAFICA' })
       cognome = a.cognome ?? a.cognNome ?? ''; nome = a.nome ?? ''; nascita = a.nascita ?? nascita
     } else if (!cognome) return reply.code(400).send({ error: 'COGNOME_MANCANTE' })
-    if (b.perIniziativa && !(await repo.iniziativa(b.perIniziativa))) return reply.code(404).send({ error: 'EVENTO_NON_TROVATO' })
+    if (b.perIniziativa && !(await eventoModificabile(reply, b.perIniziativa, ['raccolta']))) return
     // Dall'anagrafica PGS e i familiari: subito attivi. Socio esterno ed esterno: da validare.
     const stato = b.matricola || b.tipo === 'FAM' ? 'ATTIVO' : 'DA_VALIDARE'
     const r = await repo.creaPersona({
@@ -614,7 +641,7 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
       if (tolto) return reply.code(409).send({ error: tolto })
     }
     const r = await repo.salvaIniziativa(id, i, uid(request))
-    if (r === 'TIPO_SCONOSCIUTO') return errore(reply, r)
+    if (r === 'TIPO_SCONOSCIUTO' || r === 'STATO_SCONOSCIUTO') return errore(reply, r)
     if (!r) return reply.code(404).send({ error: 'EVENTO_NON_TROVATO' })
     await audit(request, id ? 'CRAL_EVENTO_MODIFICATO' : 'CRAL_EVENTO_CREATO', r.id, { tipo: r.tipo, modalita: r.modalita, stato: r.stato })
     return reply.code(id ? 200 : 201).send({ iniziativa: r })
@@ -630,24 +657,49 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true })
   })
 
-  /** L'evento esiste e non è archiviato: le modifiche lo richiedono. */
-  async function eventoModificabile(reply: FastifyReply, id: string) {
+  // 26.11.23: copia di un evento. L'evento nuovo passa dalle stesse regole di «Nuovo evento»; partecipanti e
+  // scelte riportate nascono nella stessa transazione. L'origine puo' essere archiviata (l'evento dell'anno prima).
+  app.post('/iniziative/copia', admin, async (request, reply) => {
+    const b = copiaEventoSchema.parse(request.body)
+    const err = erroreIniziativa(b.evento)
+    if (err) return reply.code(400).send({ error: err })
+    const r = await repo.copiaIniziativa(b.da, b.evento, b.partecipanti, b.scelte, uid(request))
+    if (typeof r === 'string') return errore(reply, r)
+    await audit(request, 'CRAL_EVENTO_COPIATO', r.iniziativa.id, { da: b.da, tipo: r.iniziativa.tipo, modalita: r.iniziativa.modalita, stato: r.iniziativa.stato, partecipanti: r.partecipanti, scelte: r.scelte })
+    return reply.code(201).send(r)
+  })
+
+  /**
+   * L'evento esiste, non è archiviato e il suo stato permette le azioni chieste (0030). Senza azioni:
+   * solo esistenza e archiviazione (modifica dell'evento, cambio di stato).
+   */
+  async function eventoModificabile(reply: FastifyReply, id: string, azioni: Iterable<AzioneEvento> = []) {
     const i = await repo.iniziativa(id)
     if (!i) { reply.code(404).send({ error: 'EVENTO_NON_TROVATO' }); return null }
     if (i.archiviata) { reply.code(409).send({ error: 'EVENTO_ARCHIVIATO' }); return null }
-    return i
+    return (await permesso(reply, i, azioni)) ? i : null
+  }
+  /** La regola dello stato dell'evento (già letto) permette le azioni? Se no risponde 409 e dà false. */
+  async function permesso(reply: FastifyReply, i: { stato: string }, azioni: Iterable<AzioneEvento>): Promise<boolean> {
+    const elenco = [...azioni]
+    if (!elenco.length) return true
+    const no = azioneVietata(await repo.regolaStato(i.stato), elenco)
+    if (no) { reply.code(409).send({ error: 'STATO_NON_PERMETTE', stato: i.stato, azione: no }); return false }
+    return true
   }
 
   app.post('/iniziative/:id/partecipanti', admin, async (request, reply) => {
     const { id } = z.object({ id: UUID }).parse(request.params)
     const b = z.object({ aggiungi: z.array(ID_PERSONA).max(MAX_IDS).default([]), togli: z.array(ID_PERSONA).max(MAX_IDS).default([]) }).parse(request.body)
-    if (!(await eventoModificabile(reply, id))) return
+    if (!(await eventoModificabile(reply, id, ['raccolta']))) return
     const n = await repo.partecipanti(id, b.aggiungi, b.togli)
     await audit(request, 'CRAL_PARTECIPANTI', id, { aggiunti: b.aggiungi.length, tolti: b.togli.length })
     return reply.send({ fatte: n })
   })
 
-  const FONTE = z.enum(['manuale', 'modulo', 'predefinita'])
+  const FONTE = z.enum(['manuale', 'modulo', 'predefinita', 'copia'])
+  /** I dati salvati di una persona, senza la fonte (che non e' un dato). */
+  const senzaFonte = (x: Record<string, unknown> | undefined) => { if (!x) return undefined; const { fonte: _f, ...d } = x; return d }
   /** Unisce e valida i dati di una scelta contro la config dell'evento. */
   function datiValidi(prima: Record<string, unknown> | undefined, patch: DatiScelta, config: ConfigEvento): DatiScelta | string {
     const { fonte: _f, ...vecchi } = (prima ?? {}) as Record<string, unknown>
@@ -658,10 +710,12 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/iniziative/:id/scelte/:socio', admin, async (request, reply) => {
     const { id, socio } = z.object({ id: UUID, socio: ID_PERSONA }).parse(request.params)
     const b = z.object({ dati: sceltaSchema, fonte: FONTE.default('manuale') }).parse(request.body)
-    const i = await eventoModificabile(reply, id)
-    if (!i) return
-    const d = datiValidi(i.scelte[socio], b.dati, i.config as ConfigEvento)
+    const i0 = await eventoModificabile(reply, id)
+    if (!i0) return
+    const d = datiValidi(i0.scelte[socio], b.dati, i0.config as ConfigEvento)
     if (typeof d === 'string') return reply.code(400).send({ error: d })
+    // 0030: la regola dello stato decide su che cosa cambia davvero (scelta, pagamento, consegna)
+    if (!(await permesso(reply, i0, azioniScelta(senzaFonte(i0.scelte[socio]), d)))) return
     await repo.salvaScelte(id, [{ socio, dati: d, fonte: b.fonte }], uid(request))
     await audit(request, 'CRAL_SCELTA', id, { socio, campi: Object.keys(b.dati) })
     return reply.send({ dati: d })
@@ -676,11 +730,17 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     const i = await eventoModificabile(reply, id)
     if (!i) return
     const voci = []
+    const azioni = new Set<AzioneEvento>()
     for (const v of b.voci) {
       const d = datiValidi(v.sostituisci ? undefined : i.scelte[v.socio], v.dati, i.config as ConfigEvento)
       if (typeof d === 'string') return reply.code(400).send({ error: d, socio: v.socio })
+      const prima = senzaFonte(i.scelte[v.socio])
+      // assegnare l'opzione predefinita a chi non ha scelto e' un'operazione di chiusura, non di raccolta
+      const soloPred = b.fonte === 'predefinita' && !prima?.['opz'] && Object.keys(v.dati).every(k => k === 'opz')
+      for (const a of soloPred ? ['gestione' as const] : azioniScelta(prima, d)) azioni.add(a)
       voci.push({ socio: v.socio, dati: d, fonte: b.fonte })
     }
+    if (!(await permesso(reply, i, azioni))) return
     await repo.salvaScelte(id, voci, uid(request))
     await audit(request, 'CRAL_SCELTE_IN_BLOCCO', id, { voci: voci.length, fonte: b.fonte })
     return reply.send({ fatte: voci.length })
@@ -689,7 +749,7 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
   app.post('/iniziative/:id/carichi', admin, async (request, reply) => {
     const { id } = z.object({ id: UUID }).parse(request.params)
     const b = z.object({ art: z.string().max(30), qta: z.number().int().min(1).max(100_000), data: DATA, note: riga(300).default('') }).parse(request.body)
-    const i = await eventoModificabile(reply, id)
+    const i = await eventoModificabile(reply, id, ['gestione'])
     if (!i) return
     if (!(i.config as ConfigEvento).articoli?.some(a => a.id === b.art)) return reply.code(400).send({ error: 'ARTICOLO_SCONOSCIUTO' })
     const r = await repo.creaCarico(id, b, uid(request))
@@ -703,7 +763,7 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
       persona: ID_PERSONA, art: z.string().max(30), qta: z.number().int().min(1).max(1000), dataRich: DATA,
       modo: z.enum(['MANO', 'EMAIL']).default('MANO'), note: riga(300).default(''),
     }).parse(request.body)
-    const i = await eventoModificabile(reply, id)
+    const i = await eventoModificabile(reply, id, ['raccolta'])
     if (!i) return
     if (!(i.config as ConfigEvento).articoli?.some(a => a.id === b.art)) return reply.code(400).send({ error: 'ARTICOLO_SCONOSCIUTO' })
     if (!(await repo.socio(b.persona))) return reply.code(404).send({ error: 'SOCIO_NON_TROVATO' })
@@ -721,7 +781,12 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     }).parse(request.body)
     if (b.stato === 'CONSEGNATA' && !b.dataCons) return reply.code(400).send({ error: 'DATA_CONSEGNA_MANCANTE' })
     if (b.stato && b.stato !== 'CONSEGNATA') b.dataCons = null
-    if (!(await eventoModificabile(reply, id))) return
+    const i0 = await eventoModificabile(reply, id)
+    if (!i0) return
+    // consegnare o stornare una consegna e' consegna; il resto (annulla, pagato, sconto, note) e' gestione
+    const primaRic = i0.richieste.find(x => x.id === rid)
+    const consegna = (b.stato !== undefined && b.stato !== primaRic?.stato && (b.stato === 'CONSEGNATA' || primaRic?.stato === 'CONSEGNATA')) || (b.dataCons !== undefined && primaRic?.stato === 'CONSEGNATA')
+    if (!(await permesso(reply, i0, [consegna ? 'consegna' : 'gestione']))) return
     const r = await repo.aggiornaRichiesta(id, rid, b, uid(request))
     if (!r) return reply.code(404).send({ error: 'RICHIESTA_NON_TROVATA' })
     await audit(request, 'CRAL_RICHIESTA_MODIFICATA', id, { richiesta: rid, campi: Object.keys(b), ...(b.stato ? { stato: b.stato } : {}) })

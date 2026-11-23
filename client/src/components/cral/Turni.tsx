@@ -10,6 +10,7 @@ import { CellaAggancio, ColonneChiave, PropostaTelefoni, chiaviDi, daProporre, n
 import { Fragment, useMemo, useState, type ReactNode } from 'react'
 import { cralApi } from '../../api/endpoints'
 import type { Iniziativa, PatchScelta, Persona, StatoPeriodo } from './tipi'
+import type { Permessi } from './logica'
 import {
   CAT_SCONTO_1, GRUPPI, RELAZIONI, aCaricoDi, catSconto, destinatari, contiTurni, dovutoTurni, etichettaPers, fmtData,
   fmtEuro, fmtImp, fmtSconto, ggmm, haSconto, iscrittoTurni, nominativo, norm, normNome, occupati, oggi, pagaPer, parseEuro, periodiDovuti,
@@ -24,7 +25,7 @@ const STATI_PER: Record<StatoPeriodo, [string, string]> = {
 }
 export type NomeCella = (s: Persona, o?: { rientro?: boolean; sotto?: ReactNode }) => ReactNode
 
-export function TurniCorpo({ ini, chiusa, nomeCella }: { ini: Iniziativa; chiusa: boolean; nomeCella: NomeCella }) {
+export function TurniCorpo({ ini, perm, nomeCella }: { ini: Iniziativa; perm: Permessi; nomeCella: NomeCella }) {
   const { db, scelta } = useCral()
   const [cerca, setCerca] = useState('')
   const [solo, setSolo] = useState(ini.modoPart === 'SINGOLI' ? '' : 'iscritti')
@@ -60,7 +61,7 @@ export function TurniCorpo({ ini, chiusa, nomeCella }: { ini: Iniziativa; chiusa
     return <div className="text-xs text-slate-500 flex items-center gap-1.5 flex-wrap mt-0.5">
       {vista === 'elenco' ? (r && r.id !== s.id ? <span>rif. {nominativo(r)} · {CAT_SCONTO_1[catSconto(r)]}</span> : !r ? <span>nessun riferimento</span> : null) : (rel ? <span>{RELAZIONI[rel]}</span> : r?.id === s.id ? <span>partecipa in prima persona</span> : null)}
       {isc && <span title={`Categoria bloccata: ${CAT_SCONTO_1[isc.cat]}`}>iscritto il {fmtData(isc.data)}</span>}
-      {!chiusa && <button className="text-indigo-300 hover:text-indigo-200 underline-offset-2 hover:underline" onClick={() => setRifPer(s)}>cambia riferimento</button>}
+      {perm.raccolta && <button className="text-indigo-300 hover:text-indigo-200 underline-offset-2 hover:underline" onClick={() => setRifPer(s)}>cambia riferimento</button>}
     </div>
   }
   const riga = (s: Persona, rientro: boolean) => {
@@ -72,19 +73,20 @@ export function TurniCorpo({ ini, chiusa, nomeCella }: { ini: Iniziativa; chiusa
         <td className="px-3 py-1.5 whitespace-nowrap">
           <div className={`text-xs tabular-nums ${haSconto(db, ini, s) ? 'text-emerald-300' : 'text-slate-200'}`} title={sc1?.iscr ? `Sconto deciso all'iscrizione del ${fmtData(sc1.iscr.data)}: ${CAT_SCONTO_1[sc1.iscr.cat]}` : ''}>{fmtEuro(quotaDi(db, ini, s))}</div>
           {sc1?.iscr && oggiCat !== sc1.iscr.cat && <div className="text-[10px] text-amber-400" title="Lo sconto resta quello del giorno d'iscrizione">oggi: {CAT_SCONTO_1[oggiCat]}</div>}
-          <button disabled={chiusa} title="Automatico = regola della tipologia del riferimento" className={`mt-0.5 rounded border text-[11px] px-1.5 py-0.5 ${pers ? 'border-amber-700 text-amber-300' : 'border-slate-800 text-slate-500 hover:text-slate-300'}`} onClick={() => setSpPer(s)}>{etichettaPers(pers, regolaTurni(db, ini, s))}</button>
+          <button disabled={!perm.gestione} title="Automatico = regola della tipologia del riferimento" className={`mt-0.5 rounded border text-[11px] px-1.5 py-0.5 ${pers ? 'border-amber-700 text-amber-300' : 'border-slate-800 text-slate-500 hover:text-slate-300'}`} onClick={() => setSpPer(s)}>{etichettaPers(pers, regolaTurni(db, ini, s))}</button>
         </td>
         {ini.periodi.map(p => {
           const st = statoPer(ini, s.id, p.id)
           return <td key={p.id} className="px-1.5 py-1.5 text-center">
-            <select disabled={chiusa} aria-label={`${p.nome} · ${nominativo(s)}`} className={`rounded-md bg-slate-950 border text-xs px-1.5 py-1 ${st ? STATI_PER[st][1] : 'border-slate-800 text-slate-500'}`} value={st} onChange={e => setPer(s, p.id, e.target.value as StatoPeriodo)}>
-              <option value="">—</option><option value="P">Prenotata</option><option value="F">Frequentata</option><option value="T">Tolta</option></select></td>
+            {/* 0030: a raccolta chiusa una settimana già prenotata passa a Frequentata o Tolta, ma non se ne aggiungono */}
+            <select disabled={!(perm.raccolta || (perm.consegna && !!st))} aria-label={`${p.nome} · ${nominativo(s)}`} className={`rounded-md bg-slate-950 border text-xs px-1.5 py-1 ${st ? STATI_PER[st][1] : 'border-slate-800 text-slate-500'}`} value={st} onChange={e => setPer(s, p.id, e.target.value as StatoPeriodo)}>
+              <option value="" disabled={!perm.raccolta}>—</option><option value="P">Prenotata</option><option value="F">Frequentata</option><option value="T">Tolta</option></select></td>
         })}
         <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-slate-100">{dov ? fmtEuro(dov) : <span className="text-slate-600">—</span>}</td>
-        <td className="px-3 py-1.5 text-right"><input inputMode="decimal" disabled={chiusa} className={inputW + ' py-1 w-24 text-right tabular-nums'} defaultValue={v ? fmtImp(v) : ''} key={`${s.id}-${v}`} placeholder="0,00"
+        <td className="px-3 py-1.5 text-right"><input inputMode="decimal" disabled={!perm.gestione} className={inputW + ' py-1 w-24 text-right tabular-nums'} defaultValue={v ? fmtImp(v) : ''} key={`${s.id}-${v}`} placeholder="0,00"
           onBlur={e => { const x = parseEuro(e.target.value || '0'); if (x === null) { avviso('Importo non valido', 'error'); return } if (x !== v) aggiorna(s.id, { versato: x || null }) }} /></td>
         <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${dov - v > 0 ? 'text-amber-400' : dov - v < 0 ? 'text-cyan-300' : 'text-slate-500'}`}>{dov || v ? fmtEuro(dov - v) : '—'}</td>
-        <td className="px-3 py-1.5"><input disabled={chiusa} className={inputCls + ' py-1 text-xs min-w-[140px]'} defaultValue={sc1?.note ?? ''} key={`${s.id}-n-${sc1?.note ?? ''}`} maxLength={500} placeholder={iscrittoTurni(ini, s.id) ? 'Es. allungamento richiesto' : ''}
+        <td className="px-3 py-1.5"><input disabled={!perm.gestione} className={inputCls + ' py-1 text-xs min-w-[140px]'} defaultValue={sc1?.note ?? ''} key={`${s.id}-n-${sc1?.note ?? ''}`} maxLength={500} placeholder={iscrittoTurni(ini, s.id) ? 'Es. allungamento richiesto' : ''}
           onBlur={e => { if (e.target.value !== (sc1?.note ?? '')) aggiorna(s.id, { note: e.target.value || null }) }} /></td>
       </tr>)
   }

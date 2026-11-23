@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   anniEsentiDopoRipristino, archivioSchema, azioneStato, confrontaArchivio, confrontaT6, confrontaT7, tenutoQuota,
+  type EventoArch, type StatoEventoArch,
   type Archivio, type PersonaArch,
 } from './cralLotti.js'
 import { ALIMENTARI_VUOTI, CONTATTI_VUOTI } from './cralContatti.js'
@@ -266,4 +267,39 @@ test('quote (0028): l\'archivio porta stato e motivo insieme, come variazione da
   assert.deepEqual(b.campi.find(c => c.campo === 'dovuta')!.dopo, { stato: 'NON_DOVUTA', motivo: 'inserito per errore' })
   // 090003: dovuta da entrambe le parti (con e senza i campi) → nessuna differenza
   assert.equal(vs.find(v => v.chiave === '2026|090003'), undefined)
+})
+
+test('stati degli eventi (0030): l\'archivio li porta; un evento con uno stato che qui non c\'è resta fermo', () => {
+  const STATI: StatoEventoArch[] = [
+    { id: 'BOZZA', nome: 'Bozza', colore: '#64748B', regola: 'PREPARAZIONE' as const, attivo: true, ordine: 1 },
+    { id: 'APERTA', nome: 'Raccolta aperta', colore: '#16A34A', regola: 'RACCOLTA' as const, attivo: true, ordine: 2 },
+    { id: 'CHIUSA', nome: 'Raccolta chiusa', colore: '#0891B2', regola: 'RACCOLTA_CHIUSA' as const, attivo: true, ordine: 3 },
+  ]
+  const tab = (stati?: StatoEventoArch[]) => ({ tipi: [{ id: 'PAN', nome: 'Panettone', colore: '#D97706', pagamento: false, modo: null, attivo: true, ordine: 1 }], tipologie: [], ...(stati ? { stati } : {}), tessera: TESSERA, extProssimo: 1, famProssimo: 1, quoteAnno: [] })
+  const ev = (id: string, stato: string, extra: Partial<EventoArch> = {}): EventoArch => ({
+    id, tipo: 'PAN', titolo: `Panettoni ${id.slice(0, 4)}`, anno: 2026, data: '2026-12-18', scadenza: null, stato, modalita: 'NESSUNA', modoPart: 'GRUPPI',
+    gruppi: ['SD'], sedi: [], predefinita: null, fornitore: '', pagamento: '', note: '', quota: 0,
+    config: { opzioni: [], prodotti: [], periodi: [], articoli: [], sconti: {} }, archiviata: false, archiviataDa: null, archiviataIl: null,
+    partecipanti: [], scelte: [], carichi: [], richieste: [], ...extra,
+  })
+  const ID1 = '11111111-1111-4111-8111-111111111111', ID2 = '22222222-2222-4222-8222-222222222222', ID3 = '33333333-3333-4333-8333-333333333333', ID4 = '44444444-4444-4444-8444-444444444444'
+  const nuovoStato = { id: 'CONSEGNA', nome: 'In consegna', colore: '#7C3AED', regola: 'RACCOLTA_CHIUSA' as const, attivo: true, ordine: 4 }
+  const src = A({ tabelle: tab([...STATI.map(s => s.id === 'CHIUSA' ? { ...s, regola: 'CONCLUSO' as const } : s), nuovoStato]),
+    eventi: [ev(ID1, 'CONSEGNA'), ev(ID2, 'SOSPESO'), ev(ID3, 'CONSEGNA', { copiatoDa: ID1 }), ev(ID4, 'APERTA')] })
+  const dst = A({ tabelle: tab(STATI), eventi: [ev(ID4, 'BOZZA')] })
+  assert.ok(archivioSchema.safeParse(JSON.parse(JSON.stringify(src))).success)
+  const vs = confrontaArchivio(src, dst, ['tabelle', 'eventi'], new Set()).variazioni
+  const di = (k: string) => vs.find(v => v.chiave === k)!
+  // lo stato nuovo arriva; cambiare la regola di uno stato che c'è è delicato
+  assert.equal(di('CONSEGNA').tipo, 'NUOVO'); assert.equal(di('CONSEGNA').entita, 'stato')
+  assert.equal(di('CHIUSA').tipo, 'MODIFICA'); assert.ok(di('CHIUSA').delicata); assert.deepEqual(di('CHIUSA').campi.map(c => c.campo), ['regola'])
+  // l'evento con uno stato in arrivo passa; quello con uno stato che non c'è né arriva resta fermo
+  assert.ok(!di(ID1).bloccata); assert.ok(!di(ID3).bloccata)
+  assert.match(di(ID2).bloccata ?? '', /stato SOSPESO non c'è qui/)
+  // un evento che c'è: il cambio di stato passa (APERTA c'è)
+  assert.deepEqual(di(ID4).campi.find(c => c.campo === 'stato'), { campo: 'stato', etichetta: 'Stato', prima: 'BOZZA', dopo: 'APERTA' })
+  // un archivio di prima della 0030 (senza stati) si legge, e i suoi BOZZA/APERTA/CHIUSA sono noti
+  const vecchio = A({ tabelle: tab(), eventi: [ev(ID2, 'CHIUSA')] })
+  assert.ok(archivioSchema.safeParse(JSON.parse(JSON.stringify(vecchio))).success)
+  assert.ok(!confrontaArchivio(vecchio, A({ tabelle: tab(STATI) }), ['eventi'], new Set()).variazioni[0]!.bloccata)
 })

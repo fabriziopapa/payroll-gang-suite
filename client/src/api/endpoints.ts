@@ -6,7 +6,7 @@ import { apiFetch } from './client'
 import type { AppSettings, VoceConfig } from '../types'
 import type {
   AnagraficaPgs, ArchivioTestata, Carico, EsitoProva, Iniziativa, Legame, Lotto, ModelloExport, ParametriTessera, PatchScelta, Persona, QuotaSocio, Richiesta,
-  ScontoPers, Sede, SezioneLotto, StatoApi, TipoEvento, Tipologia, Variazione,
+  RegolaStato, ScontoPers, Sede, SezioneLotto, StatoApi, StatoEvento, TipoEvento, Tipologia, Variazione,
 } from '../components/cral/tipi'
 
 // ── Tipi risposta dal server ──────────────────────────────────
@@ -1327,6 +1327,11 @@ export const cralApi = {
   aggiornaTipo: (id: string, p: { nome?: string; colore?: string; pagamento?: boolean; attivo?: boolean }) =>
     apiFetch<{ tipo: TipoEvento }>(`/cral/tipi/${enc(id)}`, corpo('PATCH', p)),
   creaTipologia: (nome: string) => apiFetch<{ tipologia: Tipologia }>('/cral/tipologie', corpo('POST', { nome })),
+  /** 0030: stati degli eventi */
+  creaStatoEvento: (s: { nome: string; colore: string; regola: RegolaStato }) => apiFetch<{ stato: StatoEvento }>('/cral/stati-evento', corpo('POST', s)),
+  aggiornaStatoEvento: (id: string, p: { nome?: string; colore?: string; regola?: RegolaStato; attivo?: boolean }) =>
+    apiFetch<{ stato: StatoEvento }>(`/cral/stati-evento/${enc(id)}`, corpo('PATCH', p)),
+  ordinaStatiEvento: (ids: string[]) => apiFetch<{ ok: true }>('/cral/stati-evento/ordine', corpo('PUT', { ids })),
   aggiornaTipologia: (id: string, p: { nome?: string; attiva?: boolean }) =>
     apiFetch<{ tipologia: Tipologia }>(`/cral/tipologie/${enc(id)}`, corpo('PATCH', p)),
   salvaTessera: (t: ParametriTessera) => apiFetch<unknown>('/cral/parametri/tessera', corpo('PUT', t)),
@@ -1371,9 +1376,12 @@ export const cralApi = {
   creaIniziativa: (b: CralIniziativaBody) => apiFetch<{ iniziativa: { id: string } }>('/cral/iniziative', corpo('POST', b)),
   salvaIniziativa: (id: string, b: CralIniziativaBody) => apiFetch<{ iniziativa: { id: string } }>(`/cral/iniziative/${enc(id)}`, corpo('PUT', b)),
   archivia: (id: string, archiviata: boolean) => apiFetch<{ ok: true }>(`/cral/iniziative/${enc(id)}/archivia`, corpo('POST', { archiviata })),
+  /** 26.11.23: copia di un evento, con partecipanti e scelte riportate, in una sola operazione */
+  copiaIniziativa: (b: { da: string; evento: CralIniziativaBody; partecipanti: string[]; scelte: Array<{ socio: string; opz: string }> }) =>
+    apiFetch<{ iniziativa: { id: string }; partecipanti: number; scelte: number }>('/cral/iniziative/copia', corpo('POST', b), 60_000),
   partecipanti: (id: string, aggiungi: string[], togli: string[] = []) =>
     apiFetch<{ fatte: number }>(`/cral/iniziative/${enc(id)}/partecipanti`, corpo('POST', { aggiungi, togli })),
-  scelta: (id: string, socio: string, dati: PatchScelta, fonte: 'manuale' | 'modulo' | 'predefinita' = 'manuale') =>
+  scelta: (id: string, socio: string, dati: PatchScelta, fonte: 'manuale' | 'modulo' | 'predefinita' | 'copia' = 'manuale') =>
     apiFetch<{ dati: Record<string, unknown> }>(`/cral/iniziative/${enc(id)}/scelte/${enc(socio)}`, corpo('PATCH', { dati, fonte })),
   scelteInBlocco: (id: string, voci: Array<{ socio: string; dati: PatchScelta; sostituisci?: boolean }>, fonte: 'manuale' | 'modulo' | 'predefinita') =>
     apiFetch<{ fatte: number }>(`/cral/iniziative/${enc(id)}/scelte`, corpo('POST', { voci, fonte }), 60_000),

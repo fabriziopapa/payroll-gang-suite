@@ -28,7 +28,8 @@ export const COLONNE: Array<{ id: string; nome: string; gruppo: Gruppo }> = [
   { id: 'esigenze', nome: 'Esigenze alimentari', gruppo: 'Alimentari' }, { id: 'allergie', nome: 'Allergie', gruppo: 'Alimentari' },
 ]
 const GRUPPI: Gruppo[] = ['Persona', 'Iscrizione', 'Telefono e WhatsApp', 'Alimentari']
-const nomeCol = (id: string) => COLONNE.find(c => c.id === id)?.nome ?? id
+// 26.11.23: «numero» è il progressivo (1, 2, 3…) nell'ordine del file; si accende con l'interruttore
+const nomeCol = (id: string) => (id === 'numero' ? 'N. progressivo' : COLONNE.find(c => c.id === id)?.nome ?? id)
 
 /** Modelli pronti: non si cancellano. Quelli salvati stanno nei parametri del modulo. */
 export const MODELLI_PRONTI: ModelloExport[] = [
@@ -104,6 +105,8 @@ export function EsportaElenco({ ids, familiari = [], titolo, onClose, iniziale =
           <Campo label="Formato"><select className={inputCls} value={m.formato} onChange={e => setM({ ...m, formato: e.target.value as 'xlsx' | 'csv' })}><option value="xlsx">Excel (.xlsx)</option><option value="csv">CSV (testo)</option></select></Campo>
           {m.formato === 'csv' ? <Campo label="Separatore del CSV" hint="Virgola per gli strumenti di invio WhatsApp; punto e virgola per Excel in italiano"><select className={inputCls} value={m.separatore} onChange={e => setM({ ...m, separatore: e.target.value as ';' | ',' })}><option value=",">Virgola ( , )</option><option value=";">Punto e virgola ( ; )</option></select></Campo> : <div />}
         </div>
+        <Interruttore on={m.colonne.includes('numero')} label="Numero progressivo (1, 2, 3…) come prima colonna"
+          onChange={v => setM({ ...m, id: m.id.startsWith('pronto-') ? 'libero' : m.id, colonne: v ? ['numero', ...m.colonne.filter(x => x !== 'numero')] : m.colonne.filter(x => x !== 'numero') })} />
         {familiari.length > 0 && <Interruttore on={conFam} onChange={setConFam} label={`Aggiungi i familiari attivi di queste persone (${familiari.length})`} />}
         <div className="flex flex-wrap items-end gap-2 border-t border-slate-800 pt-4">
           <div className="flex-1 min-w-[200px]"><Campo label="Salva queste scelte come modello" hint="I modelli salvati li vedono tutti gli amministratori"><input className={inputCls} maxLength={60} placeholder={salvato ? salvato.nome : 'Nome del modello'} value={nome} onChange={e => setNome(e.target.value)} /></Campo></div>

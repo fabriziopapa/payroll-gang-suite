@@ -9,7 +9,7 @@
 import { ESIGENZE } from './contatti'
 import type {
   CatSconto, Db, Iniziativa, Modalita, ParametriTessera, Persona, Prodotto, Relazione, Richiesta,
-  ScontoPers, ScontoRegola, StatoPeriodo, TipoPersona, QuotaSocio, StatoQuota, Gruppo,
+  ScontoPers, ScontoRegola, StatoPeriodo, TipoPersona, QuotaSocio, StatoQuota, Gruppo, RegolaStato, StatoEvento,
 } from './tipi.ts'
 
 // ── Testo e date ─────────────────────────────────────────────
@@ -514,3 +514,132 @@ export function spezzaNominativo(nom: string): [string, string] {
 const csvCella = (v: unknown): string => { const s = String(v ?? ''); return /[;"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
 export const creaCsv = (intest: string[], righe: Array<Array<string | number>>): string =>
   '﻿' + [intest, ...righe].map(r => r.map(csvCella).join(';')).join('\r\n')
+
+
+// ── Stati dell'evento (0030) ─────────────────────────────────
+/**
+ * Lo stato di un evento si sceglie fra quelli di Parametri; ognuno ha una di
+ * queste regole. Tre famiglie di azioni (le stesse del server, lib/cral.ts):
+ *   · raccolta   scelte, ordini, iscrizioni alle settimane, partecipanti, richieste
+ *   · gestione   pagamenti, versamenti, note, sconti personali, carichi di magazzino
+ *   · consegna   consegnato, settimana frequentata, biglietti consegnati
+ */
+export interface Permessi { raccolta: boolean; gestione: boolean; consegna: boolean }
+export const PERMESSI_REGOLA: Record<RegolaStato, Permessi> = {
+  PREPARAZIONE:    { raccolta: true,  gestione: true,  consegna: false },
+  RACCOLTA:        { raccolta: true,  gestione: true,  consegna: true },
+  RACCOLTA_CHIUSA: { raccolta: false, gestione: true,  consegna: true },
+  SOSPESO:         { raccolta: false, gestione: false, consegna: false },
+  CONCLUSO:        { raccolta: false, gestione: false, consegna: false },
+  ANNULLATO:       { raccolta: false, gestione: false, consegna: false },
+}
+export const REGOLE: Record<RegolaStato, { nome: string; descr: string }> = {
+  PREPARAZIONE:    { nome: 'Preparazione', descr: 'Si imposta tutto e si raccolgono scelte, ordini, iscrizioni e pagamenti; le consegne no' },
+  RACCOLTA:        { nome: 'Raccolta', descr: 'Tutto: scelte, ordini, iscrizioni, pagamenti e consegne' },
+  RACCOLTA_CHIUSA: { nome: 'Raccolta chiusa', descr: 'Niente nuove scelte, ordini, iscrizioni o partecipanti; consegne e pagamenti sì' },
+  SOSPESO:         { nome: 'Sospeso', descr: 'Fermo: non si registra nulla finché non cambia stato' },
+  CONCLUSO:        { nome: 'Concluso', descr: 'Sola lettura, ma resta fra gli eventi attivi e nei report' },
+  ANNULLATO:       { nome: 'Annullato', descr: 'Sola lettura: barrato in elenco, fuori dalla scheda della persona, «ANNULLATO» nei report' },
+}
+export const ORDINE_REGOLE: RegolaStato[] = ['PREPARAZIONE', 'RACCOLTA', 'RACCOLTA_CHIUSA', 'SOSPESO', 'CONCLUSO', 'ANNULLATO']
+/** Lo stato di un evento; uno sconosciuto (dati di un altro ambiente) non permette nulla. */
+export const statoDi = (db: Pick<Db, 'stati'>, id: string): StatoEvento =>
+  db.stati.find(s => s.id === id) ?? { id, nome: id, colore: '#64748B', regola: 'SOSPESO', attivo: false, ordine: 999 }
+/** Cosa si può fare nell'evento: l'archiviato è di sola lettura qualunque sia lo stato. */
+export const permessi = (db: Pick<Db, 'stati'>, ini: Pick<Iniziativa, 'stato' | 'archiviata'>): Permessi =>
+  ini.archiviata ? { raccolta: false, gestione: false, consegna: false } : PERMESSI_REGOLA[statoDi(db, ini.stato).regola]
+export const annullato = (db: Pick<Db, 'stati'>, ini: Pick<Iniziativa, 'stato'>): boolean => statoDi(db, ini.stato).regola === 'ANNULLATO'
+/** Gli eventi che contano per una persona e per i conteggi: non archiviati e non annullati. */
+export const eventiVivi = (db: Db): Iniziativa[] => db.iniziative.filter(i => !i.archiviata && !annullato(db, i))
+/** Cosa non si può fare nello stato attuale, in una frase (vuota se si può tutto). */
+export function frasePermessi(p: Permessi): string {
+  const no = [!p.raccolta && 'nuove scelte, ordini, iscrizioni o partecipanti', !p.gestione && 'pagamenti e note', !p.consegna && 'consegne'].filter(Boolean) as string[]
+  return no.length ? `In questo stato non si registrano ${no.length > 1 ? `${no.slice(0, -1).join(', ')} né ${no.at(-1)}` : no[0]}.` : ''
+}
+
+// ── Copia di un evento (26.11.23) ────────────────────────────
+export type PartCopia = 'REGOLA' | 'LISTA' | 'PARTE' | 'NESSUNO'
+export type FiltroCopia = 'scelto' | 'ordinato' | 'iscritto' | 'consegnato' | 'richiesta'
+export const NOMI_FILTRO: Record<FiltroCopia, string> = {
+  scelto: 'chi ha scelto', ordinato: 'chi ha ordinato', iscritto: 'chi era iscritto', consegnato: 'chi ha ricevuto la consegna', richiesta: 'chi ha chiesto biglietti',
+}
+/** I filtri che hanno senso per la modalità dell'evento d'origine. */
+export const filtriCopia = (m: Modalita): FiltroCopia[] =>
+  m === 'SCELTA' ? ['scelto', 'consegnato'] : m === 'NESSUNA' ? ['consegnato'] : m === 'ORDINE' ? ['ordinato', 'consegnato'] : m === 'TURNI' ? ['iscritto'] : ['richiesta', 'consegnato']
+/**
+ * Le persone di un evento: partecipanti singoli e aggiunti, chi la regola comprende oggi,
+ * chi ha una riga (scelta, ordine, iscrizione, consegna) e chi ha chiesto biglietti. In ordine di nome.
+ */
+export function personeDellEvento(db: Db, ini: Iniziativa): string[] {
+  const ids = new Set<string>([...ini.partecipanti, ...destinatari(db, ini).map(s => s.id), ...Object.keys(ini.scelte), ...ini.richieste.map(r => r.persona)])
+  return [...ids].filter(id => db.perId.has(id)).sort((a, b) => nominativo(db.perId.get(a)!).localeCompare(nominativo(db.perId.get(b)!)))
+}
+export function personeFiltro(db: Db, ini: Iniziativa, f: FiltroCopia): string[] {
+  const ok = (id: string): boolean => {
+    const sc = ini.scelte[id]
+    if (f === 'scelto') return !!sc?.opz
+    if (f === 'ordinato') return haOrdinato(ini, id)
+    if (f === 'iscritto') return iscrittoTurni(ini, id)
+    if (f === 'richiesta') return ini.richieste.some(r => r.persona === id && r.stato !== 'ANNULLATA')
+    return ini.modalita === 'MAGAZZINO' ? ini.richieste.some(r => r.persona === id && r.stato === 'CONSEGNATA') : !!sc?.consegnato
+  }
+  return personeDellEvento(db, ini).filter(ok)
+}
+/** Quante di queste persone partecipano davvero oggi (attive, e i familiari con un riferimento attivo). */
+export const ancoraAttive = (db: Db, ids: string[]): number => ids.filter(id => { const s = db.perId.get(id); return !!s && s.stato === 'ATTIVO' && rifAttivo(db, s) }).length
+
+export type Spostamento = { tipo: 'ANNO' } | { tipo: 'GIORNI'; n: number } | { tipo: 'NO' }
+/** Sposta una data ISO di un anno (il 29 febbraio diventa il 28) o di N giorni. */
+export function sposta(iso: string | null, s: Spostamento): string | null {
+  if (!iso || s.tipo === 'NO') return iso
+  const [y = 0, m = 1, g = 1] = iso.slice(0, 10).split('-').map(Number)
+  const d = s.tipo === 'ANNO' ? new Date(Date.UTC(y + 1, m - 1, Math.min(g, m === 2 ? (((y + 1) % 4 === 0 && ((y + 1) % 100 !== 0 || (y + 1) % 400 === 0)) ? 29 : 28) : g)))
+    : new Date(Date.UTC(y, m - 1, g) + s.n * 86_400_000)
+  return d.toISOString().slice(0, 10)
+}
+/** Titolo proposto: l'anno nel titolo diventa quello nuovo; se non c'è o non cambia, «(copia)». */
+export function titoloCopia(titolo: string, annoPrima: number, annoDopo: number): string {
+  if (annoDopo !== annoPrima && titolo.includes(String(annoPrima))) return titolo.split(String(annoPrima)).join(String(annoDopo))
+  return `${titolo} (copia)`.slice(0, 160)
+}
+export interface ImpostCopia { config: boolean; predefinita: boolean; sconti: boolean; fornitore: boolean; quota: boolean; note: boolean; sedi: boolean }
+export interface OpzioniCopia {
+  tipo: string; modalita: Modalita; stato: string; titolo: string; spostamento: Spostamento
+  imp: ImpostCopia; part: PartCopia; filtro: FiltroCopia
+  /** Scelte riportate (solo da Scelta a Scelta): opzione di prima → opzione nuova ('' = nessuna). */
+  scelte: boolean; mappa: Record<string, string>
+}
+export interface CopiaPronta { da: Iniziativa; base: Iniziativa; partecipanti: string[]; scelte: Array<{ socio: string; opz: string }> }
+/** L'evento nuovo (da rivedere nella maschera), i partecipanti e le scelte da riportare. Non si copia mai nulla di ciò che le persone hanno fatto. */
+export function preparaCopia(db: Db, ini: Iniziativa, o: OpzioniCopia): CopiaPronta {
+  const stessa = o.modalita === ini.modalita
+  const conf = stessa && o.imp.config
+  const data = sposta(ini.data, o.spostamento) ?? ini.data
+  const opzioni = conf && o.modalita === 'SCELTA' ? ini.opzioni.map(x => ({ ...x })) : []
+  const base: Iniziativa = {
+    id: '', tipo: o.tipo, titolo: o.titolo.trim().slice(0, 160), anno: +data.slice(0, 4), data, scadenza: sposta(ini.scadenza, o.spostamento),
+    stato: o.stato, modalita: o.modalita, modoPart: 'SINGOLI', gruppi: [], sedi: [],
+    predefinita: conf && o.imp.predefinita && o.modalita === 'SCELTA' && opzioni.some(x => x.id === ini.predefinita) ? ini.predefinita : null,
+    fornitore: o.imp.fornitore ? ini.fornitore : '', pagamento: o.imp.fornitore ? ini.pagamento : '', note: o.imp.note ? ini.note : '',
+    quota: stessa && o.imp.quota ? ini.quota : 0,
+    opzioni,
+    prodotti: conf && o.modalita === 'ORDINE' ? ini.prodotti.map(x => ({ ...x })) : [],
+    periodi: conf && o.modalita === 'TURNI' ? ini.periodi.map(x => ({ ...x, dal: sposta(x.dal, o.spostamento) ?? x.dal, al: sposta(x.al, o.spostamento) ?? x.al })) : [],
+    articoli: conf && o.modalita === 'MAGAZZINO' ? ini.articoli.map(x => ({ ...x })) : [],
+    sconti: stessa && o.imp.sconti ? { ...ini.sconti } : {},
+    archiviata: false, archiviataDa: null, archiviataIl: null, copiatoDa: ini.id,
+    partecipanti: [], scelte: {}, carichi: [], richieste: [],
+  }
+  let partecipanti: string[] = []
+  if (o.part === 'REGOLA') {
+    base.modoPart = ini.modoPart
+    if (ini.modoPart === 'GRUPPI') { base.gruppi = [...ini.gruppi]; base.sedi = o.imp.sedi ? [...ini.sedi] : [] }
+    partecipanti = ini.partecipanti.filter(id => db.perId.has(id))
+  } else if (o.part === 'LISTA') partecipanti = personeDellEvento(db, ini)
+  else if (o.part === 'PARTE') partecipanti = personeFiltro(db, ini, o.filtro)
+  const nuove = new Set(opzioni.map(x => x.id))
+  const scelte = o.scelte && ini.modalita === 'SCELTA' && o.modalita === 'SCELTA'
+    ? Object.entries(ini.scelte).flatMap(([socio, sc]) => { const n = sc.opz ? o.mappa[sc.opz] ?? '' : ''; return n && nuove.has(n) && db.perId.has(socio) ? [{ socio, opz: n }] : [] })
+    : []
+  return { da: ini, base, partecipanti, scelte }
+}

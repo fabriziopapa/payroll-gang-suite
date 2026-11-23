@@ -125,6 +125,13 @@ export function DiChi({ db, s }: { db: Db; s: Persona }) {
   const ls = sociDi(db, s)
   return ls.length ? <span className="text-xs text-slate-500">{ls.map(l => `${RELAZIONI[l.relazione]} di ${nominativo(l.s)}${eSocio(l.s) ? '' : ' (esterno)'}`).join(' · ')}</span> : null
 }
+/** 0030: lo stato dell'evento col suo colore. */
+export function StatoChip({ db, id, title }: { db: Pick<Db, 'stati'>; id: string; title?: string }) {
+  const s = db.stati.find(x => x.id === id)
+  const c = s?.colore ?? '#64748b'
+  return <span title={title} className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-1.5 py-0.5 rounded-full border whitespace-nowrap text-slate-100" style={{ borderColor: `${c}B3`, background: `${c}33` }}>
+    <span className="w-1.5 h-1.5 rounded-full" style={{ background: c }} />{s?.nome ?? id}</span>
+}
 export function TipoChip({ db, id }: { db: Db; id: string }) {
   const t = db.tipi.find(x => x.id === id)
   return <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-300"><span className="w-2 h-2 rounded-full" style={{ background: t?.colore ?? '#64748b' }} />{t?.nome ?? id}{t?.pagamento && <span className="text-[10px] text-pink-300 uppercase tracking-wider">a pagamento</span>}</span>
@@ -209,6 +216,9 @@ const ERRORI: Record<string, string> = {
   DATA_NON_VALIDA: 'Una data è nel futuro.',
   TRACCIATO_NON_ADATTO: 'Questo modello non è previsto per questo tipo di evento.',
   COLONNA_SCONOSCIUTA: 'Una colonna del modello non esiste più: ricrea il modello.',
+  STATO_NON_PERMETTE: "Lo stato dell'evento non lo permette: cambialo con «Modifica». Non è stato scritto nulla.",
+  STATO_SCONOSCIUTO: 'Stato sconosciuto: ricarica la pagina (Parametri › Stati degli eventi).',
+  ORDINE_NON_VALIDO: "L'elenco degli stati è cambiato: ricarica la pagina.",
 }
 export function messaggioErrore(err: unknown): string {
   if (!(err instanceof ApiError)) return 'Errore imprevisto.'
@@ -227,7 +237,7 @@ export interface CralCtx {
   /** Chiamata al server, poi ricarica dello stato. Ritorna null se è fallita (il messaggio è già mostrato). */
   esegui: <T>(fn: () => Promise<T>, ok?: string | ((r: T) => string), livello?: 'success' | 'info' | 'warning') => Promise<T | null>
   /** Modifica di una scelta, subito a video e poi sul server. */
-  scelta: (iniziativa: string, socio: string, patch: PatchScelta, fonte?: 'manuale' | 'modulo' | 'predefinita') => void
+  scelta: (iniziativa: string, socio: string, patch: PatchScelta, fonte?: 'manuale' | 'modulo' | 'predefinita' | 'copia') => void
   /** Modifica di una richiesta di biglietti, subito a video e poi sul server. */
   richiesta: (iniziativa: string, rid: string, patch: Partial<Pick<Richiesta, 'stato' | 'dataCons' | 'modo' | 'pagato' | 'sconto' | 'note'>>) => Promise<boolean>
   /** Modifica della quota di un socio, subito a video e poi sul server. */

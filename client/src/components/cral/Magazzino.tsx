@@ -7,6 +7,7 @@
 import { useState } from 'react'
 import { cralApi } from '../../api/endpoints'
 import type { Iniziativa, Persona, Richiesta } from './tipi'
+import type { Permessi } from './logica'
 import {
   catPersona, codaRichieste, contiMagazzino, destinatari, etichettaPers, fmtData, fmtEuro, importoRichiesta, lordoRichiesta, movimentiMagazzino,
   nomeDi, nominativo, norm, oggi, ordineRichieste, persona, regolaCat,
@@ -17,7 +18,7 @@ import { Campo, D, Ico, Modale, Origine, Pill, avviso, btnPiccolo, btnPiccoloSec
 export const STATI_RIC: Record<Richiesta['stato'], [string, Tono]> = { ATTESA: ['In attesa', 'warn'], CONSEGNATA: ['Consegnata', 'ok'], ANNULLATA: ['Annullata', 'neutro'] }
 export const MODI_CONS: Record<Richiesta['modo'], string> = { MANO: 'A mano', EMAIL: 'Digitale via email' }
 
-export function MagazzinoCorpo({ ini, chiusa }: { ini: Iniziativa; chiusa: boolean }) {
+export function MagazzinoCorpo({ ini, perm }: { ini: Iniziativa; perm: Permessi }) {
   const { db, esegui, richiesta } = useCral()
   const [car, setCar] = useState({ art: ini.articoli[0]?.id ?? '', qta: '', data: oggi(), note: '' })
   const [nuova, setNuova] = useState(false)
@@ -60,7 +61,7 @@ export function MagazzinoCorpo({ ini, chiusa }: { ini: Iniziativa; chiusa: boole
       <div className="grid lg:grid-cols-2 gap-4 items-start">
         <div className={`${cardCls} overflow-hidden`}>
           <div className="px-5 py-3 border-b border-slate-800"><p className="text-sm font-medium text-white">Carichi</p><p className="text-xs text-slate-500">Biglietti arrivati al CRAL, con la data di carico.</p></div>
-          {!chiusa && <div className="px-5 py-3 border-b border-slate-800 grid grid-cols-2 sm:grid-cols-[1.4fr_80px_140px] gap-2 items-end">
+          {perm.gestione && <div className="px-5 py-3 border-b border-slate-800 grid grid-cols-2 sm:grid-cols-[1.4fr_80px_140px] gap-2 items-end">
             <Campo label="Articolo"><select className={inputCls} value={car.art} onChange={e => setCar({ ...car, art: e.target.value })}>{ini.articoli.map(a => <option key={a.id} value={a.id}>{a.nome}</option>)}</select></Campo>
             <Campo label="Quantità"><input inputMode="numeric" className={inputCls + ' text-right tabular-nums'} value={car.qta} onChange={e => setCar({ ...car, qta: e.target.value.replace(/\D/g, '') })} /></Campo>
             <Campo label="Data carico"><input type="date" className={inputCls} value={car.data} onChange={e => setCar({ ...car, data: e.target.value })} /></Campo>
@@ -84,7 +85,7 @@ export function MagazzinoCorpo({ ini, chiusa }: { ini: Iniziativa; chiusa: boole
           <p className="text-sm font-medium text-white flex-1 self-center">Richieste</p>
           <select className={inputCls + ' sm:w-44'} value={stato} onChange={e => setStato(e.target.value)}><option value="">Tutte</option>{(Object.keys(STATI_RIC) as Array<Richiesta['stato']>).map(k => <option key={k} value={k}>{STATI_RIC[k][0]}</option>)}</select>
           <select className={inputCls + ' sm:w-48'} value={art} onChange={e => setArt(e.target.value)}><option value="">Tutti gli articoli</option>{ini.articoli.map(a => <option key={a.id} value={a.id}>{a.nome}</option>)}</select>
-          {!chiusa && <button className={btnPrimario} onClick={() => setNuova(true)}><Ico d={D.plus} />Nuova richiesta</button>}
+          {perm.raccolta && <button className={btnPrimario} onClick={() => setNuova(true)}><Ico d={D.plus} />Nuova richiesta</button>}
         </div>
         <Scorrevole className="max-h-[520px]"><table className="w-full text-sm">
           <thead className="sticky top-0 bg-slate-900 text-left text-[11px] uppercase tracking-wider text-slate-500"><tr><th className="px-5 py-2.5 font-semibold">Richiesta il</th><th className={thCls}>Persona</th><th className={thCls}>Articolo</th><th className={thCls + ' text-right'}>Q.tà</th><th className={thCls + ' text-right'}>Importo</th><th className={thCls}>Stato</th><th className={thCls}>Consegna</th><th className={thCls + ' text-center'}>Pagato</th><th className="px-5 py-2.5 font-semibold text-right">Azioni</th></tr></thead>
@@ -98,13 +99,14 @@ export function MagazzinoCorpo({ ini, chiusa }: { ini: Iniziativa; chiusa: boole
                   <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{artNome(r.art)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-white">{r.qta}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums text-slate-300 whitespace-nowrap">{imp !== lordo && <div className="text-[11px] text-slate-500 line-through">{fmtEuro(lordo)}</div>}{fmtEuro(imp)}
-                    <div><button disabled={chiusa || r.stato === 'ANNULLATA'} className={`text-[11px] ${r.sconto ? 'text-amber-300' : 'text-slate-500 hover:text-slate-300'}`} onClick={() => setSpRic(r)}>{etichettaPers(r.sconto, regolaCat(ini, catPersona(persona(db, r.persona), db)))}</button></div></td>
+                    <div><button disabled={!perm.gestione || r.stato === 'ANNULLATA'} className={`text-[11px] ${r.sconto ? 'text-amber-300' : 'text-slate-500 hover:text-slate-300'}`} onClick={() => setSpRic(r)}>{etichettaPers(r.sconto, regolaCat(ini, catPersona(persona(db, r.persona), db)))}</button></div></td>
                   <td className="px-3 py-2 whitespace-nowrap"><Pill tono={st}>{sl}</Pill>{r.stato === 'ATTESA' && <span className={`ml-2 text-[11px] ${coda[r.id] === 'pronta' ? 'text-emerald-300' : 'text-amber-400'}`}>{coda[r.id] === 'pronta' ? 'consegnabile' : 'in coda: mancano biglietti'}</span>}</td>
-                  <td className="px-3 py-2 text-xs text-slate-400 whitespace-nowrap">{r.stato === 'CONSEGNATA' ? `${fmtData(r.dataCons)} · ${MODI_CONS[r.modo]}` : <select disabled={chiusa || r.stato !== 'ATTESA'} className="bg-slate-950 border border-slate-800 rounded px-1.5 py-1 text-xs" value={r.modo} onChange={e => void richiesta(ini.id, r.id, { modo: e.target.value as Richiesta['modo'] })}>{(Object.keys(MODI_CONS) as Array<Richiesta['modo']>).map(k => <option key={k} value={k}>{MODI_CONS[k]}</option>)}</select>}</td>
-                  <td className="px-3 py-2 text-center"><input type="checkbox" className="accent-emerald-500 w-4 h-4" disabled={chiusa || r.stato === 'ANNULLATA'} checked={r.pagato} onChange={e => void richiesta(ini.id, r.id, { pagato: e.target.checked })} aria-label={`Pagato da ${nomeDi(db, r.persona)}`} /></td>
+                  <td className="px-3 py-2 text-xs text-slate-400 whitespace-nowrap">{r.stato === 'CONSEGNATA' ? `${fmtData(r.dataCons)} · ${MODI_CONS[r.modo]}` : <select disabled={!perm.gestione || r.stato !== 'ATTESA'} className="bg-slate-950 border border-slate-800 rounded px-1.5 py-1 text-xs" value={r.modo} onChange={e => void richiesta(ini.id, r.id, { modo: e.target.value as Richiesta['modo'] })}>{(Object.keys(MODI_CONS) as Array<Richiesta['modo']>).map(k => <option key={k} value={k}>{MODI_CONS[k]}</option>)}</select>}</td>
+                  <td className="px-3 py-2 text-center"><input type="checkbox" className="accent-emerald-500 w-4 h-4" disabled={!perm.gestione || r.stato === 'ANNULLATA'} checked={r.pagato} onChange={e => void richiesta(ini.id, r.id, { pagato: e.target.checked })} aria-label={`Pagato da ${nomeDi(db, r.persona)}`} /></td>
                   <td className="px-5 py-2"><div className="flex justify-end gap-1.5">
-                    {r.stato === 'ATTESA' && !chiusa && <><button className={btnPiccolo + ' bg-emerald-700/80 hover:bg-emerald-600 text-white'} onClick={() => void consegna(r)}>Consegna</button><button className={btnPiccoloSec} onClick={() => void richiesta(ini.id, r.id, { stato: 'ANNULLATA', dataCons: null })}>Annulla</button></>}
-                    {r.stato !== 'ATTESA' && !chiusa && <button className={btnPiccoloSec} onClick={() => void richiesta(ini.id, r.id, { stato: 'ATTESA', dataCons: null })}>{r.stato === 'CONSEGNATA' ? 'Storna consegna' : 'Ripristina'}</button>}
+                    {r.stato === 'ATTESA' && perm.consegna && <button className={btnPiccolo + ' bg-emerald-700/80 hover:bg-emerald-600 text-white'} onClick={() => void consegna(r)}>Consegna</button>}
+                    {r.stato === 'ATTESA' && perm.gestione && <button className={btnPiccoloSec} onClick={() => void richiesta(ini.id, r.id, { stato: 'ANNULLATA', dataCons: null })}>Annulla</button>}
+                    {r.stato !== 'ATTESA' && (r.stato === 'CONSEGNATA' ? perm.consegna : perm.gestione) && <button className={btnPiccoloSec} onClick={() => void richiesta(ini.id, r.id, { stato: 'ATTESA', dataCons: null })}>{r.stato === 'CONSEGNATA' ? 'Storna consegna' : 'Ripristina'}</button>}
                   </div></td>
                 </tr>)
             })}

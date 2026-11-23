@@ -6,8 +6,8 @@
 
 import { useState } from 'react'
 import { cralApi } from '../../api/endpoints'
-import type { ParametriTessera } from './tipi'
-import { fmtEuro, fmtImp, formatTessera, nominativo, oggi, parseEuro, prossimaTessera, rataMese, tesseraNelFormato } from './logica'
+import type { ParametriTessera, RegolaStato } from './tipi'
+import { ORDINE_REGOLE, PERMESSI_REGOLA, REGOLE, fmtEuro, fmtImp, formatTessera, nominativo, oggi, parseEuro, prossimaTessera, rataMese, tesseraNelFormato } from './logica'
 import { StatoRubrica } from './Rubrica'
 import { Campo, D, Ico, Interruttore, avviso, btnPiccoloSec, btnPrimario, cardCls, etichettaCls, inputCls, inputW, sceltaCls, useCral } from './ui'
 
@@ -39,6 +39,56 @@ function ListaParametri({ titolo, sotto, voci, usi, onRinomina, onFlag, flagLabe
         <input className={inputCls + ' py-1.5'} maxLength={maxLen} placeholder={segnaposto} value={nuovo} onChange={e => setNuovo(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') aggiungi() }} />
         <button className={btnPiccoloSec + ' whitespace-nowrap'} disabled={!nuovo.trim()} onClick={aggiungi}><Ico d={D.plus} cls="w-3.5 h-3.5" />Aggiungi</button>
       </div>
+    </div>
+  )
+}
+
+/**
+ * 0030: stati degli eventi. Nome, colore e ordine liberi; la regola, fra sei fisse, decide cosa si può
+ * fare negli eventi in quello stato (il server la controlla a ogni scrittura). Uno stato in uso non si
+ * cancella: si disattiva, e gli eventi che lo hanno lo tengono.
+ */
+function ParametriStati() {
+  const { db, esegui } = useCral()
+  const [nuovo, setNuovo] = useState<{ nome: string; regola: RegolaStato }>({ nome: '', regola: 'RACCOLTA_CHIUSA' })
+  const usi = (id: string) => db.iniziative.filter(i => i.stato === id).length
+  const sposta = (k: number, d: -1 | 1) => {
+    const ids = db.stati.map(s => s.id); const j = k + d
+    if (j < 0 || j >= ids.length) return
+    ;[ids[k], ids[j]] = [ids[j]!, ids[k]!]
+    void esegui(() => cralApi.ordinaStatiEvento(ids), 'Ordine salvato', 'info')
+  }
+  const aggiungi = () => { const n = nuovo.nome.trim(); if (n) void esegui(() => cralApi.creaStatoEvento({ nome: n, colore: '#64748B', regola: nuovo.regola }), `Stato «${n}» aggiunto`).then(r => { if (r) setNuovo({ ...nuovo, nome: '' }) }) }
+  const si = (b: boolean) => (b ? 'sì' : 'no')
+  return (
+    <div className={`${cardCls} overflow-hidden`}>
+      <div className="px-5 py-3 border-b border-slate-800"><p className="text-sm font-medium text-white">Stati degli eventi</p>
+        <p className="text-xs text-slate-500 mt-0.5">Nome, colore e ordine sono liberi. La <b className="text-slate-400">regola</b> decide cosa si può fare negli eventi in quello stato, ed è controllata anche dal server. L'ordine è quello dell'elenco degli eventi. Uno stato in uso non si cancella: si disattiva.</p></div>
+      <div className="divide-y divide-slate-800/70">
+        {db.stati.map((s, k) => (
+          <div key={s.id} className="px-5 py-2 flex flex-wrap items-center gap-2">
+            <div className="flex flex-col"><button className="text-slate-500 hover:text-slate-200 disabled:opacity-30 leading-none text-xs" disabled={k === 0} aria-label={`Sposta su ${s.nome}`} onClick={() => sposta(k, -1)}>▲</button><button className="text-slate-500 hover:text-slate-200 disabled:opacity-30 leading-none text-xs" disabled={k === db.stati.length - 1} aria-label={`Sposta giù ${s.nome}`} onClick={() => sposta(k, 1)}>▼</button></div>
+            <input type="color" defaultValue={s.colore} onBlur={e => { if (e.target.value.toUpperCase() !== s.colore.toUpperCase()) void esegui(() => cralApi.aggiornaStatoEvento(s.id, { colore: e.target.value.toUpperCase() }), 'Colore salvato', 'info') }} className="w-6 h-6 rounded bg-transparent border-0 cursor-pointer" aria-label={`Colore ${s.nome}`} />
+            <span className="font-mono text-[11px] text-slate-500 w-20 truncate" title={s.id}>{s.id}</span>
+            <input className={inputCls + ' py-1.5 flex-1 min-w-[130px] w-auto'} maxLength={60} defaultValue={s.nome} key={s.nome}
+              onBlur={e => { const n = e.target.value.trim(); if (!n) { e.target.value = s.nome; return } if (n !== s.nome) void esegui(() => cralApi.aggiornaStatoEvento(s.id, { nome: n }), 'Stato rinominato') }} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }} />
+            <select className={inputW + ' py-1.5 w-44'} value={s.regola} title={REGOLE[s.regola].descr} aria-label={`Regola di ${s.nome}`}
+              onChange={e => void esegui(() => cralApi.aggiornaStatoEvento(s.id, { regola: e.target.value as RegolaStato }), `«${s.nome}»: regola ${REGOLE[e.target.value as RegolaStato].nome}`)}>
+              {ORDINE_REGOLE.map(r => <option key={r} value={r}>{REGOLE[r].nome}</option>)}</select>
+            <span className="text-xs text-slate-500 tabular-nums w-14 text-right whitespace-nowrap">{usi(s.id)} eventi</span>
+            <Interruttore on={s.attivo} onChange={v => void esegui(() => cralApi.aggiornaStatoEvento(s.id, { attivo: v }), v ? 'Stato attivato' : 'Stato disattivato', 'info')} label="attivo" />
+          </div>))}
+      </div>
+      <div className="px-5 py-3 border-t border-slate-800 flex flex-wrap gap-2">
+        <input className={inputCls + ' py-1.5 flex-1 min-w-[160px]'} maxLength={60} placeholder="Es. In consegna, Ordine inviato…" value={nuovo.nome} onChange={e => setNuovo({ ...nuovo, nome: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') aggiungi() }} />
+        <select className={inputW + ' py-1.5 w-44'} value={nuovo.regola} aria-label="Regola del nuovo stato" onChange={e => setNuovo({ ...nuovo, regola: e.target.value as RegolaStato })}>{ORDINE_REGOLE.map(r => <option key={r} value={r}>{REGOLE[r].nome}</option>)}</select>
+        <button className={btnPiccoloSec + ' whitespace-nowrap'} disabled={!nuovo.nome.trim()} onClick={aggiungi}><Ico d={D.plus} cls="w-3.5 h-3.5" />Aggiungi</button>
+      </div>
+      <details className="px-5 py-3 border-t border-slate-800 text-xs text-slate-400"><summary className="cursor-pointer text-slate-300">Le sei regole</summary>
+        <table className="mt-2 w-full"><thead><tr className="text-left text-slate-500"><th className="py-1 font-normal">Regola</th><th className="font-normal">Scelte, ordini, iscrizioni</th><th className="font-normal">Pagamenti, note</th><th className="font-normal">Consegne</th></tr></thead>
+          <tbody>{ORDINE_REGOLE.map(r => <tr key={r} className="border-t border-slate-800/70"><td className="py-1 pr-2 text-slate-200" title={REGOLE[r].descr}>{REGOLE[r].nome}</td><td>{si(PERMESSI_REGOLA[r].raccolta)}</td><td>{si(PERMESSI_REGOLA[r].gestione)}</td><td>{si(PERMESSI_REGOLA[r].consegna)}</td></tr>)}</tbody></table>
+        <p className="mt-2">«Concluso» e «Annullato» sono di sola lettura; l'annullato è barrato in elenco, esce dalla scheda della persona e nei report porta «ANNULLATO». Archiviare un evento resta una cosa a parte.</p>
+      </details>
     </div>
   )
 }
@@ -159,6 +209,7 @@ export function ParametriTab() {
           onColore={(id, colore) => void esegui(() => cralApi.aggiornaTipo(id, { colore: colore.toUpperCase() }), 'Colore salvato', 'info')}
           onFlag={(id, attivo) => void esegui(() => cralApi.aggiornaTipo(id, { attivo }), attivo ? 'Tipo attivato' : 'Tipo disattivato', 'info')}
           onAggiungi={async nome => !!(await esegui(() => cralApi.creaTipo({ nome, colore: '#DB2777', pagamento: false }), `Tipo «${nome}» aggiunto`))} />
+        <ParametriStati />
         <ListaParametri titolo="Tipologie di prodotto" sotto="Raggruppano i prodotti degli eventi a pagamento (es. varietà dell'olio)."
           voci={db.tipologie.map(t => ({ id: t.id, nome: t.nome, flag: t.attiva }))} segnaposto="Es. Vino rosso, Formaggi…" flagLabel="attiva" maxLen={80}
           usi={id => db.iniziative.reduce((a, i) => a + i.prodotti.filter(p => p.tipologia === id).length, 0)}

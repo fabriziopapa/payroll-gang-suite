@@ -38,6 +38,9 @@ export interface Persona {
 
 export interface Sede { id: string; nome: string; attiva: boolean; ordine: number }
 export interface TipoEvento { id: string; nome: string; colore: string; pagamento: boolean; modo: Modalita | null; attivo: boolean; ordine: number }
+/** 0030: stato di un evento (Parametri) e la regola, fra sei fisse, che decide cosa si può fare. */
+export type RegolaStato = 'PREPARAZIONE' | 'RACCOLTA' | 'RACCOLTA_CHIUSA' | 'SOSPESO' | 'CONCLUSO' | 'ANNULLATO'
+export interface StatoEvento { id: string; nome: string; colore: string; regola: RegolaStato; attivo: boolean; ordine: number }
 export interface Tipologia { id: string; nome: string; attiva: boolean; ordine: number }
 export interface ParametriTessera {
   formato: 'NUM' | 'PREF'; prefisso: string; cifre: number; prossimo: number
@@ -62,7 +65,7 @@ export interface Scelta {
   /** Categoria per lo sconto bloccata all'iscrizione. */
   iscr?: { data: string; cat: Exclude<CatSconto, 'FAM'> }
   scontoPers?: ScontoPers
-  fonte?: 'manuale' | 'modulo' | 'predefinita'
+  fonte?: 'manuale' | 'modulo' | 'predefinita' | 'copia'
 }
 /** Modifica di una scelta: null toglie la chiave (stessa regola del server). */
 export type PatchScelta = { [K in keyof Omit<Scelta, 'fonte'>]?: Scelta[K] | null }
@@ -84,11 +87,14 @@ export interface Richiesta {
 
 export interface Iniziativa {
   id: string; tipo: string; titolo: string; anno: number; data: string; scadenza: string | null
-  stato: 'BOZZA' | 'APERTA' | 'CHIUSA'; modalita: Modalita
+  /** 0030: codice di uno stato di Parametri (BOZZA, APERTA, CHIUSA, …) */
+  stato: string; modalita: Modalita
   modoPart: 'GRUPPI' | 'SINGOLI'; gruppi: Gruppo[]; sedi: string[]; predefinita: string | null
   fornitore: string; pagamento: string; note: string; quota: number
   opzioni: Opzione[]; prodotti: Prodotto[]; periodi: Periodo[]; articoli: Articolo[]; sconti: Sconti
   archiviata: boolean; archiviataDa: string | null; archiviataIl: string | null
+  /** 26.11.23: evento da cui è stato copiato */
+  copiatoDa: string | null
   partecipanti: string[]
   scelte: Record<string, Scelta>
   carichi: Carico[]
@@ -112,6 +118,8 @@ export interface Db {
   /** Prefisso dato ai numeri scritti senza (39) e modelli di esportazione salvati. */
   prefissoTel: string; modelliExport: ModelloExport[]
   sedi: Sede[]; tipi: TipoEvento[]; tipologie: Tipologia[]
+  /** 0030: stati degli eventi, in ordine */
+  stati: StatoEvento[]
   tessera: ParametriTessera; extProssimo: number; famProssimo: number
   soci: Persona[]
   /** Indice per ID: le ricerche nelle tabelle grandi non scorrono l'elenco. */
@@ -124,6 +132,8 @@ export interface Db {
 // ── Risposta del server ──────────────────────────────────────
 export interface StatoApi {
   sedi: Sede[]; tipi: TipoEvento[]; tipologie: Tipologia[]
+  /** 0030 (un server più vecchio non li manda) */
+  stati?: StatoEvento[]
   parametri: { tessera: ParametriTessera; extProssimo: number; famProssimo: number; prefissoTel?: string; modelliExport?: ModelloExport[] }
   soci: Persona[]
   iniziative: Array<Omit<Iniziativa, 'opzioni' | 'prodotti' | 'periodi' | 'articoli' | 'sconti' | 'scelte' | 'richieste'> & {
@@ -167,6 +177,12 @@ export interface ArchivioTestata {
 }
 
 const arr = <T>(x: unknown): T[] => (Array.isArray(x) ? (x as T[]) : [])
+/** I tre stati di sempre, se il server non manda la tabella (prima della 0030). */
+export const STATI_DI_BASE: StatoEvento[] = [
+  { id: 'BOZZA', nome: 'Bozza', colore: '#64748B', regola: 'PREPARAZIONE', attivo: true, ordine: 1 },
+  { id: 'APERTA', nome: 'Raccolta aperta', colore: '#16A34A', regola: 'RACCOLTA', attivo: true, ordine: 2 },
+  { id: 'CHIUSA', nome: 'Raccolta chiusa', colore: '#0891B2', regola: 'RACCOLTA_CHIUSA', attivo: true, ordine: 3 },
+]
 
 export function daStato(s: StatoApi): Db {
   const iniziative: Iniziativa[] = s.iniziative.map(i => {
@@ -174,6 +190,7 @@ export function daStato(s: StatoApi): Db {
     const { config: _c, ...resto } = i
     return {
       ...resto,
+      copiatoDa: i.copiatoDa ?? null,
       opzioni: arr<Opzione>(c['opzioni']),
       prodotti: arr<Prodotto>(c['prodotti']),
       periodi: arr<Periodo>(c['periodi']),
@@ -185,7 +202,7 @@ export function daStato(s: StatoApi): Db {
     }
   })
   return {
-    sedi: s.sedi, tipi: s.tipi, tipologie: s.tipologie,
+    sedi: s.sedi, tipi: s.tipi, tipologie: s.tipologie, stati: s.stati ?? STATI_DI_BASE,
     prefissoTel: s.parametri.prefissoTel ?? '39', modelliExport: s.parametri.modelliExport ?? [],
     tessera: s.parametri.tessera, extProssimo: s.parametri.extProssimo, famProssimo: s.parametri.famProssimo,
     soci: s.soci, perId: new Map(s.soci.map(p => [p.id, p])),

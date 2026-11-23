@@ -10,7 +10,7 @@ import { Fragment, useEffect, useState } from 'react'
 import { cralApi, type CralNuovaPersonaApi } from '../../api/endpoints'
 import type { AnagraficaPgs, Legame, Persona, Relazione, TipoPersona } from './tipi'
 import {
-  RELAZIONI, STATI, TIPOLOGIE, destinatari, eSocio, eta, familiariDi, fmtData, nominativo, norm, oggi, prossimaTessera, relDi,
+  RELAZIONI, STATI, TIPOLOGIE, destinatari, eSocio, eventiVivi, eta, familiariDi, fmtData, nominativo, norm, oggi, prossimaTessera, relDi,
   rifAttivo, sedeNome, sociDi, tesseraDalCampo, tesseraDoppia, tesseraRiammissione, totaleSoci,
 } from './logica'
 import { esportaSociExcel } from './ImportDati'
@@ -321,7 +321,8 @@ function SocioModal({ id, onClose, onApri }: { id: string; onClose: () => void; 
     setSalvo(false)
     if (r) onClose()
   }
-  const iniz = db.iniziative.filter(i => !i.archiviata && destinatari(db, i).some(x => x.id === id))
+  // 0030: gli annullati non contano fra gli eventi della persona
+  const iniz = eventiVivi(db).filter(i => destinatari(db, i).some(x => x.id === id))
   const ria = eSocio(s) ? tesseraRiammissione(db.tessera, s) : null
   return (
     <Modale largo titolo={nominativo(s)} sotto={<span className="font-mono">{s.id}</span>} onClose={onClose} piedi={<>

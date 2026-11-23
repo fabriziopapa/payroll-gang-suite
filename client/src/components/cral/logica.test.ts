@@ -6,6 +6,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Db, Iniziativa, Persona } from './tipi.ts'
 import { ALIMENTARI_VUOTI, CONTATTI_VUOTI } from './contatti.ts'
+import { STATI_DI_BASE } from './tipi.ts'
+import * as L from './logica.ts'
+import { numera } from './report.ts'
 import {
   aggiunti, applicaSconto, codaRichieste, contiMagazzino, contiOrdine, descrPart, destinatari, differenzeQuote, dovutoTurni, eta, importoRichiesta, leggiData,
   motivoQuota, nettoSocio, noteQuota, parseEuro, quotaDi, quotaDopoModifica, quoteDovute, rataMese, rifDi, risolvi, riepilogo, simNome, sociAnno, sociQuota, spezzaNominativo, statoQuota, tenutoQuota, tesseraRiammissione, versatoQuota,
@@ -34,13 +37,13 @@ const db = (over: Partial<Db> = {}): Db => ({
   sedi: [{ id: 'S1', nome: 'Sede Uno', attiva: true, ordine: 1 }, { id: 'S2', nome: 'Sede Due', attiva: true, ordine: 2 }],
   tipi: [], tipologie: [{ id: 'TER', nome: 'Terra', attiva: true, ordine: 1 }],
   tessera: { formato: 'NUM', prefisso: 'CRAL-', cifre: 4, prossimo: 5, riammissione: 'NUOVO', sepSuffisso: '/', cifreSuffisso: 2, vincolante: false },
-  extProssimo: 3, famProssimo: 4, soci: SOCI, perId: new Map(SOCI.map(s => [s.id, s])), iniziative: [],
+  stati: STATI_DI_BASE, extProssimo: 3, famProssimo: 4, soci: SOCI, perId: new Map(SOCI.map(s => [s.id, s])), iniziative: [],
   quoteAnno: [{ anno: 2026, importo: 6000 }], quote: {}, ...over,
 })
 const evento = (over: Partial<Iniziativa>): Iniziativa => ({
   id: 'e1', tipo: 'X', titolo: 'Prova', anno: 2026, data: '2026-07-01', scadenza: null, stato: 'APERTA', modalita: 'SCELTA', modoPart: 'GRUPPI',
   gruppi: ['SD', 'SE'], sedi: [], predefinita: null, fornitore: '', pagamento: '', note: '', quota: 0, opzioni: [], prodotti: [], periodi: [], articoli: [],
-  sconti: {}, archiviata: false, archiviataDa: null, archiviataIl: null, partecipanti: [], scelte: {}, carichi: [], richieste: [], ...over,
+  sconti: {}, archiviata: false, archiviataDa: null, archiviataIl: null, copiatoDa: null, partecipanti: [], scelte: {}, carichi: [], richieste: [], ...over,
 })
 
 test('importi e date dai file', () => {
@@ -307,4 +310,103 @@ test('quote (0028): dovuta, esente, non dovuta; «Allinea soci» conta le differ
   assert.equal(rigaDi('ROSSI')[col('Dovuto €')], '60,00')
   assert.equal(rep.righe.at(-1)![col('Dovuto €')], '240,00', 'totale: quattro quote dovute')
   assert.equal(costruisciReport(dopo, cfg).righe.some(x => String(x[col('Nominativo')]).startsWith('COLOMBO')), false)
+})
+
+test('stati (0030): permessi per regola, archiviato, stato sconosciuto', () => {
+  const stati = [...STATI_DI_BASE, { id: 'SOSP', nome: 'Sospeso', colore: '#D97706', regola: 'SOSPESO' as const, attivo: true, ordine: 4 }, { id: 'ANN', nome: 'Annullato', colore: '#DC2626', regola: 'ANNULLATO' as const, attivo: true, ordine: 5 }]
+  const d = db({ stati })
+  const p = (stato: string, archiviata = false) => L.permessi(d, evento({ stato, archiviata }))
+  assert.deepEqual(p('BOZZA'), { raccolta: true, gestione: true, consegna: false })
+  assert.deepEqual(p('APERTA'), { raccolta: true, gestione: true, consegna: true })
+  assert.deepEqual(p('CHIUSA'), { raccolta: false, gestione: true, consegna: true })
+  assert.deepEqual(p('SOSP'), { raccolta: false, gestione: false, consegna: false })
+  assert.deepEqual(p('APERTA', true), { raccolta: false, gestione: false, consegna: false }, 'archiviato: sola lettura')
+  assert.deepEqual(p('NONCE'), { raccolta: false, gestione: false, consegna: false }, 'stato sconosciuto: nulla')
+  assert.equal(L.statoDi(d, 'NONCE').nome, 'NONCE')
+  assert.equal(L.frasePermessi(p('CHIUSA')), 'In questo stato non si registrano nuove scelte, ordini, iscrizioni o partecipanti.')
+  assert.equal(L.frasePermessi(p('BOZZA')), 'In questo stato non si registrano consegne.')
+  assert.equal(L.frasePermessi(p('APERTA')), '')
+  // annullato: fuori dagli eventi «vivi» (scheda della persona)
+  const d2 = db({ stati, iniziative: [evento({ id: 'a', stato: 'APERTA' }), evento({ id: 'b', stato: 'ANN' }), evento({ id: 'c', stato: 'APERTA', archiviata: true })] })
+  assert.deepEqual(L.eventiVivi(d2).map(i => i.id), ['a'])
+})
+
+test('copia (26.11.23): date, titolo, persone dell\'evento, filtri', () => {
+  assert.equal(L.sposta('2025-12-18', { tipo: 'ANNO' }), '2026-12-18')
+  assert.equal(L.sposta('2024-02-29', { tipo: 'ANNO' }), '2025-02-28')
+  assert.equal(L.sposta('2027-02-28', { tipo: 'ANNO' }), '2028-02-28')
+  assert.equal(L.sposta('2026-06-29', { tipo: 'GIORNI', n: 364 }), '2027-06-28')
+  assert.equal(L.sposta('2026-03-01', { tipo: 'GIORNI', n: -1 }), '2026-02-28')
+  assert.equal(L.sposta(null, { tipo: 'ANNO' }), null)
+  assert.equal(L.sposta('2026-01-10', { tipo: 'NO' }), '2026-01-10')
+  assert.equal(L.titoloCopia('Panettoni 2025', 2025, 2026), 'Panettoni 2026')
+  assert.equal(L.titoloCopia('Strenne di Natale', 2025, 2026), 'Strenne di Natale (copia)')
+  assert.equal(L.titoloCopia('Panettoni 2025', 2025, 2025), 'Panettoni 2025 (copia)')
+  const d = db()
+  // evento per soci con: un esterno aggiunto, una scelta di un familiare (fuori dai gruppi), una richiesta... di un cessato
+  const ini = evento({ id: 'PAN25', gruppi: ['SD'], partecipanti: ['EXT-0002'], scelte: { '090001': { opz: 'O1', consegnato: true }, '090002': { opz: 'O2' }, 'FAM-0001': { opz: 'O1' }, '090004': { opz: 'O2', consegnato: true } } })
+  assert.deepEqual(L.personeDellEvento(d, ini), ['090002', '090001', 'FAM-0001', 'EXT-0002', '090004'].sort((a, b) => L.nominativo(d.perId.get(a)!).localeCompare(L.nominativo(d.perId.get(b)!))))
+  assert.deepEqual(L.personeFiltro(d, ini, 'consegnato').sort(), ['090001', '090004'])
+  assert.deepEqual(L.personeFiltro(d, ini, 'scelto').length, 4)
+  assert.equal(L.ancoraAttive(d, ['090001', '090004', 'FAM-0003']), 1, 'il cessato e il figlio del cessato non contano')
+  assert.deepEqual(L.filtriCopia('TURNI'), ['iscritto'])
+})
+
+test('copia (26.11.23): l\'evento nuovo, la lista e le scelte riportate', () => {
+  const d = db()
+  const ini = evento({
+    id: 'PAN25', tipo: 'PAN', titolo: 'Panettoni 2025', anno: 2025, data: '2025-12-18', scadenza: '2025-11-30', stato: 'CHIUSA', archiviata: true, archiviataIl: '2026-01-10',
+    gruppi: ['SD', 'SE'], sedi: ['S2'], partecipanti: ['EXT-0002'], predefinita: 'O1', note: 'ritiro in portineria', fornitore: 'Pasticceria',
+    opzioni: [{ id: 'O1', etichetta: 'Tradizionale' }, { id: 'O2', etichetta: 'Cioccolato' }, { id: 'O3', etichetta: 'Albicocca' }],
+    scelte: { '090001': { opz: 'O1', consegnato: true, note: 'x', pagato: true }, '090002': { opz: 'O3' }, 'EXT-0001': { opz: 'O2', fonte: 'modulo' } },
+  })
+  const base = { tipo: 'PAN', modalita: 'SCELTA' as const, stato: 'BOZZA', titolo: 'Panettoni 2026', spostamento: { tipo: 'ANNO' as const },
+    imp: { config: true, predefinita: true, sconti: true, fornitore: false, quota: true, note: false, sedi: true }, part: 'REGOLA' as const, filtro: 'scelto' as const,
+    scelte: true, mappa: { O1: 'O1', O2: 'O2', O3: '' } }
+  const c = L.preparaCopia(d, ini, base)
+  // un evento nuovo, non archiviato, legato all'origine, con nulla di ciò che le persone hanno fatto
+  assert.equal(c.base.copiatoDa, 'PAN25'); assert.equal(c.base.archiviata, false); assert.equal(c.base.stato, 'BOZZA')
+  assert.deepEqual([c.base.data, c.base.scadenza, c.base.anno], ['2026-12-18', '2026-11-30', 2026])
+  assert.deepEqual(c.base.opzioni.map(o => o.etichetta), ['Tradizionale', 'Cioccolato', 'Albicocca']); assert.equal(c.base.predefinita, 'O1')
+  assert.deepEqual([c.base.fornitore, c.base.note], ['', ''])
+  assert.deepEqual(c.base.scelte, {}); assert.deepEqual(c.base.richieste, []); assert.deepEqual(c.base.carichi, [])
+  // stessa regola: gruppi, sedi e gli aggiunti
+  assert.deepEqual([c.base.modoPart, c.base.gruppi, c.base.sedi, c.partecipanti], ['GRUPPI', ['SD', 'SE'], ['S2'], ['EXT-0002']])
+  // scelte riportate: solo l'opzione, con la corrispondenza (Albicocca → nessuna)
+  assert.deepEqual(c.scelte.sort((a, b) => a.socio.localeCompare(b.socio)), [{ socio: '090001', opz: 'O1' }, { socio: 'EXT-0001', opz: 'O2' }])
+  // lista fissa e parte
+  const lista = L.preparaCopia(d, ini, { ...base, part: 'LISTA' })
+  assert.equal(lista.base.modoPart, 'SINGOLI'); assert.ok(lista.partecipanti.includes('EXT-0002') && lista.partecipanti.includes('090002'))
+  const parte = L.preparaCopia(d, ini, { ...base, part: 'PARTE', filtro: 'consegnato' })
+  assert.deepEqual(parte.partecipanti, ['090001'])
+  assert.deepEqual(L.preparaCopia(d, ini, { ...base, part: 'NESSUNO' }).partecipanti, [])
+  // un'altra modalità: niente configurazione, niente scelte, niente predefinita
+  const ord = L.preparaCopia(d, ini, { ...base, tipo: 'VEN', modalita: 'ORDINE' })
+  assert.deepEqual([ord.base.opzioni, ord.base.prodotti, ord.base.predefinita, ord.scelte], [[], [], null, []])
+  // senza le opzioni non si riportano scelte
+  assert.deepEqual(L.preparaCopia(d, ini, { ...base, imp: { ...base.imp, config: false } }).scelte, [])
+  // campi estivi: le settimane si spostano
+  const campo = evento({ id: 'CAM26', modalita: 'TURNI', quota: 18000, data: '2026-06-29', periodi: [{ id: 'W1', nome: 'Settimana 1', dal: '2026-06-29', al: '2026-07-03', posti: 30 }] })
+  const cc = L.preparaCopia(d, campo, { ...base, modalita: 'TURNI', spostamento: { tipo: 'GIORNI', n: 364 }, part: 'NESSUNO' })
+  assert.deepEqual([cc.base.periodi[0]!.dal, cc.base.periodi[0]!.al, cc.base.periodi[0]!.posti, cc.base.quota], ['2027-06-28', '2027-07-02', 30, 18000])
+})
+
+test('report (26.11.23): numero progressivo, anche per gruppo, senza contare totali e grassetti', () => {
+  const rep = { titolo: 'x', intest: ['Sede', 'Nominativo', 'Importo'], gruppi: true, numCols: new Set([2]), bold: new Set([2]),
+    righe: [['S1', 'ROSSI', '1,00'], ['S1', 'BIANCHI', '2,00'], ['S1', 'Subtotale', '3,00'], ['S2', 'VERDI', '4,00']] }
+  const a = numera(rep, true)
+  assert.deepEqual(a.intest, ['Sede', 'N.', 'Nominativo', 'Importo'])
+  assert.deepEqual(a.righe.map(r => r[1]), [1, 2, '', 1])
+  assert.deepEqual([...a.numCols!].sort(), [1, 3])
+  assert.deepEqual(numera(rep, false).righe.map(r => r[1]), [1, 2, '', 3])
+  const piatto = numera({ titolo: 'y', intest: ['Nominativo'], totale: true, righe: [['A'], ['B'], ['Totale']] }, true)
+  assert.deepEqual(piatto.righe, [[1, 'A'], [2, 'B'], ['', 'Totale']])
+  // il report vero: elenco soci con il progressivo
+  const cfg = { tipo: 'soci', ini: '', sedi: [], origine: '', ordinaPer: 'nom', tessera: true, colSoci: { sede: false, id: false, nom: true }, firma: false, eta: false, numero: true, numeroPerGruppo: true } as unknown as CfgReport
+  const r = costruisciReport(db(), cfg, '2026-11-23')
+  assert.equal(r.intest[0], 'N.'); assert.deepEqual(r.righe.map(x => x[0]), r.righe.map((_, i) => i + 1))
+  // un evento annullato lo dice nel titolo
+  const stati = [...STATI_DI_BASE, { id: 'ANN', nome: 'Annullato', colore: '#DC2626', regola: 'ANNULLATO' as const, attivo: true, ordine: 9 }]
+  const dA = db({ stati, iniziative: [evento({ id: 'e9', titolo: 'Gita', stato: 'ANN', modalita: 'NESSUNA' })] })
+  assert.match(costruisciReport(dA, { ...cfg, tipo: 'scelte', ini: 'e9', numero: false } as CfgReport, '2026-11-23').titolo, /· ANNULLATO$/)
 })

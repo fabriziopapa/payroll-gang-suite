@@ -17,7 +17,7 @@
 import { ALIMENTARI_VUOTI, CONTATTI_VUOTI, ID_ESIGENZE, ID_ORIGINI, MESSAGGI_CONTATTI, alimentariDopo, contattiDopo } from './cralContatti.js'
 import { z } from 'zod'
 import {
-  MODALITA, rataMese, erroreDati, erroreIniziativa, iniziativaSchema, parametriTesseraSchema, riga, sceltaSchema, scontoPersonale,
+  MODALITA, REGOLE_STATO, rataMese, erroreDati, erroreIniziativa, iniziativaSchema, parametriTesseraSchema, riga, sceltaSchema, scontoPersonale,
   tesseraNelFormato, usiTolti, type ConfigEvento, type ParametriTessera,
 } from './cral.js'
 import { normalizza } from '../services/emolumenti/nominativi.js'
@@ -27,7 +27,7 @@ export const FORMATO_ARCHIVIO = 'pgs-cral-archivio'
 export const SEZIONI = ['sedi', 'tabelle', 'soci', 'quote', 'eventi'] as const
 export type Sezione = typeof SEZIONI[number]
 export const ORDINE_SEZIONI: Record<Sezione, number> = { sedi: 0, tabelle: 1, soci: 2, quote: 3, eventi: 4 }
-export type Entita = 'sede' | 'tipo' | 'tipologia' | 'tessera' | 'quotaAnno' | 'persona' | 'quota' | 'evento'
+export type Entita = 'sede' | 'tipo' | 'tipologia' | 'stato' | 'tessera' | 'quotaAnno' | 'persona' | 'quota' | 'evento'
 
 // ── Formato dell'archivio ────────────────────────────────────
 const DATA       = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -48,8 +48,12 @@ export const tipoArch = z.object({
   modo: z.enum(MODALITA).nullable(), attivo: z.boolean(), ordine: z.number().int(),
 })
 export const tipologiaArch = z.object({ id: ID_COD, nome: riga(80, 1), attiva: z.boolean(), ordine: z.number().int() })
+// 0030: stati degli eventi (un archivio di prima non li ha: valgono BOZZA, APERTA e CHIUSA, che ci sono ovunque)
+export const statoEventoArch = z.object({
+  id: ID_COD, nome: riga(60, 1), colore: z.string().regex(/^#[0-9A-Fa-f]{6}$/), regola: z.enum(REGOLE_STATO), attivo: z.boolean(), ordine: z.number().int(),
+})
 export const tabelleArch = z.object({
-  tipi: z.array(tipoArch).max(200), tipologie: z.array(tipologiaArch).max(200),
+  tipi: z.array(tipoArch).max(200), tipologie: z.array(tipologiaArch).max(200), stati: z.array(statoEventoArch).max(100).optional(),
   tessera: parametriTesseraSchema, extProssimo: z.number().int().min(1), famProssimo: z.number().int().min(1),
   quoteAnno: z.array(z.object({ anno: ANNO, importo: z.number().int().min(1).max(10_000_000) })).max(200),
 })
@@ -95,8 +99,9 @@ const dovutaDi = (q: Pick<QuotaArch, 'stato' | 'motivo'>): { stato: 'DOVUTA' | '
 const UUID = z.string().uuid()
 export const eventoArch = iniziativaSchema.extend({
   id: UUID, archiviata: z.boolean(), archiviataDa: UTENTE, archiviataIl: TS,
+  copiatoDa: UUID.nullable().optional(),
   partecipanti: z.array(ID_PERSONA).max(50_000),
-  scelte: z.array(z.object({ socio: ID_PERSONA, dati: sceltaSchema, fonte: z.enum(['manuale', 'modulo', 'predefinita']) })).max(50_000),
+  scelte: z.array(z.object({ socio: ID_PERSONA, dati: sceltaSchema, fonte: z.enum(['manuale', 'modulo', 'predefinita', 'copia']) })).max(50_000),
   carichi: z.array(z.object({ id: UUID, art: z.string().max(30), qta: z.number().int().min(1).max(100_000), data: DATA, note: riga(300) })).max(10_000),
   richieste: z.array(z.object({
     id: UUID, persona: ID_PERSONA, art: z.string().max(30), qta: z.number().int().min(1).max(1000), dataRich: DATA,
@@ -116,6 +121,7 @@ export const archivioSchema = z.object({
 export type SedeArch = z.infer<typeof sedeArch>
 export type TipoArch = z.infer<typeof tipoArch>
 export type TipologiaArch = z.infer<typeof tipologiaArch>
+export type StatoEventoArch = z.infer<typeof statoEventoArch>
 export type TabelleArch = z.infer<typeof tabelleArch>
 export type PersonaArch = z.infer<typeof personaArch>
 export type QuotaArch = z.infer<typeof quotaArch>
@@ -238,6 +244,9 @@ export function confrontaArchivio(src: Archivio, dst: Archivio, sezioni: Sezione
   // ── Tabelle: tipi di evento, tipologie di prodotto, tessera, importi della quota
   const tipiDst = new Map((dst.tabelle?.tipi ?? []).map(t => [t.id, t]))
   const tipiInArrivo = new Set<string>()
+  // 0030: gli stati di qui (un archivio di prima non li porta: ci sono comunque BOZZA, APERTA e CHIUSA)
+  const statiDst = new Map((dst.tabelle?.stati ?? []).map(t => [t.id, t]))
+  const statiInArrivo = new Set<string>()
   const annoDst = new Map((dst.tabelle?.quoteAnno ?? []).map(a => [a.anno, a.importo]))
   const anniInArrivo = new Set<number>()
   if (vuole('tabelle') && src.tabelle) {
@@ -253,6 +262,13 @@ export function confrontaArchivio(src: Archivio, dst: Archivio, sezioni: Sezione
       if (!d) { out.push({ sezione: 'tabelle', entita: 'tipologia', chiave: t.id, tipo: 'NUOVO', delicata: false, etichetta: `Tipologia di prodotto · ${t.nome}`, campi: [{ campo: 'nome', etichetta: 'Nome', prima: null, dopo: t.nome }], record: t }); continue }
       const campi = campiDiversi(d, t, { nome: 'Nome', attiva: 'Attiva' })
       if (campi.length) out.push({ sezione: 'tabelle', entita: 'tipologia', chiave: t.id, tipo: 'MODIFICA', delicata: false, etichetta: `Tipologia di prodotto · ${d.nome}`, campi, record: t })
+    }
+    // 0030: stati degli eventi. Cambiare la regola di uno stato cambia cosa si puo' fare negli eventi: delicata
+    for (const t of src.tabelle.stati ?? []) {
+      const d = statiDst.get(t.id)
+      if (!d) { statiInArrivo.add(t.id); out.push({ sezione: 'tabelle', entita: 'stato', chiave: t.id, tipo: 'NUOVO', delicata: false, etichetta: `Stato degli eventi · ${t.nome}`, campi: [{ campo: 'nome', etichetta: 'Nome', prima: null, dopo: t.nome }, { campo: 'regola', etichetta: 'Regola', prima: null, dopo: t.regola }], record: t }); continue }
+      const campi = campiDiversi(d, t, { nome: 'Nome', colore: 'Colore', regola: 'Regola', attivo: 'Attivo' })
+      if (campi.length) out.push({ sezione: 'tabelle', entita: 'stato', chiave: t.id, tipo: 'MODIFICA', delicata: campi.some(c => c.campo === 'regola'), etichetta: `Stato degli eventi · ${d.nome}`, campi, record: t })
     }
     if (dst.tabelle) {
       const campi = campiDiversi(dst.tabelle.tessera, src.tabelle.tessera, {
@@ -351,10 +367,11 @@ export function confrontaArchivio(src: Archivio, dst: Archivio, sezioni: Sezione
   if (vuole('eventi')) {
     const eDst = new Map((dst.eventi ?? []).map(e => [e.id, e]))
     const tipoNoto = (t: string) => tipiDst.has(t) || tipiInArrivo.has(t)
+    const statoNoto = (s: string) => statiDst.has(s) || statiInArrivo.has(s) || (!dst.tabelle?.stati && ['BOZZA', 'APERTA', 'CHIUSA'].includes(s))
     for (const e0 of src.eventi ?? []) {
       const e: EventoArch = { ...e0, sedi: e0.sedi.map(x => sedeQui(x) ?? x) }
       const d = eDst.get(e.id)
-      out.push(...(d ? confrontaEvento(e, d, personaNota) : [nuovoEvento(e, tipoNoto, personaNota)]))
+      out.push(...(d ? confrontaEvento(e, d, personaNota, statoNoto) : [nuovoEvento(e, tipoNoto, personaNota, statoNoto)]))
     }
   }
   return { variazioni: out.map(conBlocchi), sediTradotte, daRimappare: [...identita].filter(([, e]) => e === 'altroId').map(([id]) => id) }
@@ -481,13 +498,14 @@ function scelteValide(e: Pick<EventoArch, 'scelte' | 'config'>): EventoArch['sce
   return e.scelte.filter(x => !erroreDati(x.dati, e.config as ConfigEvento))
 }
 
-function nuovoEvento(e: EventoArch, tipoNoto: (t: string) => boolean, personaNota: (id: string) => boolean): Variazione {
+function nuovoEvento(e: EventoArch, tipoNoto: (t: string) => boolean, personaNota: (id: string) => boolean, statoNoto: (s: string) => boolean = () => true): Variazione {
   const part = e.partecipanti.filter(personaNota)
   const sce = scelteValide(e).filter(x => personaNota(x.socio))
   const ric = e.richieste.filter(r => personaNota(r.persona))
   const fuori = e.partecipanti.length - part.length + e.scelte.length - sce.length + e.richieste.length - ric.length
   const err = erroreIniziativa(e)
-  const bloccata = !tipoNoto(e.tipo) ? `il tipo di evento ${e.tipo} non c'è qui (sezione Parametri e tabelle)` : err ? `configurazione non valida (${err})` : undefined
+  const bloccata = !tipoNoto(e.tipo) ? `il tipo di evento ${e.tipo} non c'è qui (sezione Parametri e tabelle)`
+    : !statoNoto(e.stato) ? `lo stato ${e.stato} non c'è qui (sezione Parametri e tabelle)` : err ? `configurazione non valida (${err})` : undefined
   return {
     sezione: 'eventi', entita: 'evento', chiave: e.id, tipo: 'NUOVO', delicata: false, ...(bloccata ? { bloccata } : {}),
     etichetta: `${e.titolo} (${e.anno})`,
@@ -504,13 +522,14 @@ function nuovoEvento(e: EventoArch, tipoNoto: (t: string) => boolean, personaNot
 }
 
 const CAMPI_EVENTO: Record<string, string> = {
-  titolo: 'Titolo', anno: 'Anno', data: 'Data', scadenza: 'Scadenza', stato: 'Stato della raccolta', modalita: 'Modalità', modoPart: 'Partecipanti',
+  titolo: 'Titolo', anno: 'Anno', data: 'Data', scadenza: 'Scadenza', stato: 'Stato', modalita: 'Modalità', modoPart: 'Partecipanti',
   gruppi: 'Gruppi', sedi: 'Sedi', predefinita: 'Scelta predefinita', fornitore: 'Fornitore', pagamento: 'Pagamento', note: 'Note',
   quota: 'Quota', archiviata: 'Archiviato',
 }
 
-function confrontaEvento(e: EventoArch, d: EventoArch, personaNota: (id: string) => boolean): Variazione[] {
+function confrontaEvento(e: EventoArch, d: EventoArch, personaNota: (id: string) => boolean, statoNoto: (s: string) => boolean = () => true): Variazione[] {
   const campi = campiDiversi(d as unknown as Record<string, unknown>, e as unknown as Record<string, unknown>, CAMPI_EVENTO)
+  for (const c of campi) if (c.campo === 'stato' && !statoNoto(e.stato)) c.blocco = `lo stato ${e.stato} non c'è qui`
   const dati = d.scelte.length || d.richieste.length || d.carichi.length
   for (const c of campi) if (c.campo === 'modalita' && dati) c.blocco = 'qui ci sono già scelte o movimenti'
   if (!uguale(d.config, e.config)) {
@@ -816,6 +835,7 @@ export function archivioDaStato(st: CralStato, meta: { app: string; ambiente: st
   if (ha('tabelle')) a.tabelle = {
     tipi: st.tipi.map(t => ({ id: t.id, nome: t.nome, colore: t.colore, pagamento: t.pagamento, modo: t.modo as TipoArch['modo'], attivo: t.attivo, ordine: t.ordine })),
     tipologie: st.tipologie.map(t => ({ id: t.id, nome: t.nome, attiva: t.attiva, ordine: t.ordine })),
+    stati: st.stati.map(s => ({ id: s.id, nome: s.nome, colore: s.colore, regola: s.regola, attivo: s.attivo, ordine: s.ordine })),
     tessera: st.parametri.tessera, extProssimo: st.parametri.extProssimo, famProssimo: st.parametri.famProssimo,
     quoteAnno: st.quoteAnno.map(q => ({ anno: q.anno, importo: q.importo })),
   }
@@ -826,7 +846,7 @@ export function archivioDaStato(st: CralStato, meta: { app: string; ambiente: st
     id: i.id, tipo: i.tipo, titolo: i.titolo, anno: i.anno, data: i.data, scadenza: i.scadenza, stato: i.stato, modalita: i.modalita,
     modoPart: i.modoPart, gruppi: i.gruppi as EventoArch['gruppi'], sedi: i.sedi, predefinita: i.predefinita, fornitore: i.fornitore,
     pagamento: i.pagamento, note: i.note, quota: i.quota, config: i.config as EventoArch['config'],
-    archiviata: i.archiviata, archiviataDa: i.archiviataDa, archiviataIl: i.archiviataIl, partecipanti: i.partecipanti,
+    archiviata: i.archiviata, archiviataDa: i.archiviataDa, archiviataIl: i.archiviataIl, copiatoDa: i.copiatoDa, partecipanti: i.partecipanti,
     scelte: Object.entries(i.scelte).map(([socio, x]) => { const { fonte, ...dati } = x as Record<string, unknown>; return { socio, dati: dati as EventoArch['scelte'][number]['dati'], fonte: (fonte ?? 'manuale') as 'manuale' } }),
     carichi: i.carichi.map(c => ({ id: c.id, art: c.art, qta: c.qta, data: c.data, note: c.note })),
     richieste: i.richieste.map(r => ({ id: r.id, persona: r.persona, art: r.art, qta: r.qta, dataRich: r.dataRich, stato: r.stato, dataCons: r.dataCons, modo: r.modo, pagato: r.pagato, sconto: (r.sconto ?? null) as EventoArch['richieste'][number]['sconto'], note: r.note })),

@@ -4,6 +4,7 @@
 
 import { sql } from 'drizzle-orm'
 import {
+  type AnyPgColumn,
   pgTable,
   smallint,
   primaryKey,
@@ -718,6 +719,16 @@ export const cralSociTessere = pgTable('cral_soci_tessere', {
   al:      date('al').notNull(),
 })
 
+// 0030: stati degli eventi; la regola (fra sei fisse) decide cosa si puo' fare
+export const cralStatiEvento = pgTable('cral_stati_evento', {
+  id:     varchar('id', { length: 10 }).primaryKey(),
+  nome:   varchar('nome', { length: 60 }).notNull(),
+  colore: char('colore', { length: 7 }).notNull().default('#64748B'),
+  regola: varchar('regola', { length: 16 }).notNull(),
+  attivo: boolean('attivo').notNull().default(true),
+  ordine: integer('ordine').notNull().default(0),
+})
+
 export const cralIniziative = pgTable('cral_iniziative', {
   id:           uuid('id').primaryKey().defaultRandom(),
   tipoId:       varchar('tipo_id', { length: 10 }).notNull().references(() => cralTipi.id, { onUpdate: 'cascade' }),
@@ -725,7 +736,7 @@ export const cralIniziative = pgTable('cral_iniziative', {
   anno:         smallint('anno').notNull(),
   data:         date('data').notNull(),
   scadenza:     date('scadenza'),
-  stato:        varchar('stato', { length: 8 }).notNull().default('BOZZA'),
+  stato:        varchar('stato', { length: 10 }).notNull().default('BOZZA').references(() => cralStatiEvento.id, { onUpdate: 'cascade' }),
   modalita:     varchar('modalita', { length: 10 }).notNull(),
   partecipanti: varchar('partecipanti', { length: 7 }).notNull().default('GRUPPI'),
   gruppi:       text('gruppi').array().notNull().default(sql`'{}'::text[]`),
@@ -743,6 +754,8 @@ export const cralIniziative = pgTable('cral_iniziative', {
   updatedBy:    uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
   createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:    timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  // 0030: evento da cui e' stato copiato
+  copiatoDa:    uuid('copiato_da').references((): AnyPgColumn => cralIniziative.id, { onDelete: 'set null' }),
 })
 
 export const cralIniziativePartecipanti = pgTable('cral_iniziative_partecipanti', {

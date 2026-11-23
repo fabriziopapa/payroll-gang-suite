@@ -13,18 +13,19 @@ import {
   GRUPPI, GRUPPI_EVENTO, NOMI_GRUPPO, catPersona, gruppoDi, contiMagazzino, contiOrdine, contiTurni, aggiunti, descrPart, destinatari, nelGruppo, etichettaPers, fmtData, fmtEuro, fmtImp,
   fmtQ, generaSettimane, gruppiProdotti, haOrdinato, nettoSocio, nominativo, norm, parseEuro, partecipantiEffettivi, riepilogoAlimentare, perUnita, persDi, prodLabel, qta, regolaCat,
   riassuntoSconti, riepilogo, righeOrdiniPerSede, sedeBreve, sedeNome, tipNome, totaleSocio,
+  REGOLE, annullato, frasePermessi, permessi, statoDi, type CopiaPronta,
 } from './logica'
+import { CopiaEventoModal } from './CopiaEvento'
 import { ScontiTipologia, ScontoPersonaleModal, scontiDaTxt, scontiInTxt, scontiTxtOk, type ScontiTxt } from './Sconti'
 import { TurniCorpo, IscrizioniImportModal, type NomeCella } from './Turni'
 import { MagazzinoCorpo } from './Magazzino'
 import { ModuloRisposteModal, OrdiniImportModal, PartecipantiImportModal } from './ImportEvento'
 import { NuovoSocioModal } from './SociTab'
 import {
-  Campo, Conferma, D, DiChi, Ico, Interruttore, Modale, Origine, Pill, TipoChip, avviso, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario,
-  cardCls, chipCls, etichettaCls, inputCls, inputW, sceltaCls, thCls, useCral, type Tono, Scorrevole
+  Campo, Conferma, D, DiChi, Ico, Interruttore, Modale, Origine, Pill, StatoChip, TipoChip, avviso, btnPiccolo, btnPiccoloSec, btnPrimario, btnSecondario,
+  cardCls, chipCls, etichettaCls, inputCls, inputW, sceltaCls, thCls, useCral, Scorrevole
 } from './ui'
 
-const STATI_INI: Record<Iniziativa['stato'], [string, Tono]> = { BOZZA: ['Bozza', 'neutro'], APERTA: ['Raccolta aperta', 'ok'], CHIUSA: ['Chiusa', 'cyan'] }
 
 export function IniziativeTab() {
   const { db } = useCral()
@@ -32,10 +33,14 @@ export function IniziativeTab() {
   const [edit, setEdit] = useState<string | null>(null)
   const [tipo, setTipo] = useState('')
   const [arch, setArch] = useState(false)
-  if (aperta && db.iniziative.some(i => i.id === aperta)) return <IniziativaDettaglio id={aperta} onBack={() => setAperta(null)} />
+  const [statoF, setStatoF] = useState('')
+  if (aperta && db.iniziative.some(i => i.id === aperta)) return <IniziativaDettaglio key={aperta} id={aperta} onBack={() => setAperta(null)} onApri={setAperta} />
   const nArch = db.iniziative.filter(i => i.archiviata).length
-  const lista = db.iniziative.filter(i => (!tipo || i.tipo === tipo) && i.archiviata === arch)
-    .sort((a, b) => (Number(a.stato === 'CHIUSA') - Number(b.stato === 'CHIUSA')) || b.data.localeCompare(a.data))
+  const visibili = db.iniziative.filter(i => (!tipo || i.tipo === tipo) && i.archiviata === arch)
+  // 0030: in ordine di stato (l'ordine di Parametri), poi dal più recente
+  const lista = visibili.filter(i => !statoF || i.stato === statoF)
+    .sort((a, b) => (statoDi(db, a.stato).ordine - statoDi(db, b.stato).ordine) || b.data.localeCompare(a.data))
+  const statiUsati = db.stati.filter(s => visibili.some(i => i.stato === s.id))
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap gap-2 items-center">
@@ -44,12 +49,17 @@ export function IniziativeTab() {
         <button onClick={() => setArch(!arch)} className={`${btnPiccolo} border ml-auto ${arch ? 'bg-slate-700 text-white border-slate-500' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200'}`}>{arch ? 'Torna agli eventi attivi' : `Archiviati (${nArch})`}</button>
         <button className={btnPrimario} onClick={() => setEdit('__NEW')}><Ico d={D.plus} />Nuovo evento</button>
       </div>
+      {statiUsati.length > 1 && <div className="flex flex-wrap gap-1.5 items-center -mt-1">
+        <span className="text-xs text-slate-500 mr-1">Stato</span>
+        <button onClick={() => setStatoF('')} className={chipCls(!statoF)}>Tutti</button>
+        {statiUsati.map(s => <button key={s.id} onClick={() => setStatoF(statoF === s.id ? '' : s.id)} className={chipCls(statoF === s.id)}><span className="w-2 h-2 rounded-full" style={{ background: s.colore }} />{s.nome} <span className="text-slate-500 tabular-nums">{visibili.filter(i => i.stato === s.id).length}</span></button>)}
+      </div>}
       {arch && <p className="text-xs text-slate-500 -mt-1">Eventi archiviati: in sola lettura, fuori dagli elenchi di lavoro. Restano consultabili e nei report.</p>}
       {!lista.length && <div className={`${cardCls} p-8 text-center text-sm text-slate-500`}>{arch ? 'Nessun evento archiviato.' : 'Nessun evento. Creane uno con «Nuovo evento».'}</div>}
       <div className="grid md:grid-cols-2 gap-4">
         {lista.map(i => {
-          const [sl, st] = STATI_INI[i.stato]
           const mod = i.modalita
+          const ann = annullato(db, i)
           let testo: string, pct: number
           if (mod === 'ORDINE') { const c = contiOrdine(db, i); pct = c.totale ? Math.round(100 * c.incassato / c.totale) : 0; testo = `${c.ord.length} ordini · ${fmtQ(c.pezzi)} pezzi · ${fmtEuro(c.totale)}${c.sconti ? ` (sconti ${fmtEuro(c.sconti)})` : ''} (incassato ${fmtEuro(c.incassato)})` }
           else if (mod === 'TURNI') { const c = contiTurni(db, i); pct = c.dovuto ? Math.min(100, Math.round(100 * c.versato / c.dovuto)) : 0; testo = `${c.isc.length} iscritti · ${c.settimane} settimane · ${fmtEuro(c.dovuto)} (versato ${fmtEuro(c.versato)})` }
@@ -58,8 +68,8 @@ export function IniziativeTab() {
           const mag = mod === 'MAGAZZINO' ? contiMagazzino(i) : null
           return (
             <button key={i.id} onClick={() => setAperta(i.id)} className={`${cardCls} p-5 text-left hover:border-slate-700 transition-colors flex flex-col gap-3`}>
-              <div className="flex items-center gap-2"><TipoChip db={db} id={i.tipo} /><span className="ml-auto flex gap-1.5">{i.archiviata && <Pill>Archiviato</Pill>}<Pill tono={st}>{sl}</Pill></span></div>
-              <div><p className="text-white font-semibold">{i.titolo}</p>
+              <div className="flex items-center gap-2"><TipoChip db={db} id={i.tipo} /><span className="ml-auto flex gap-1.5">{i.archiviata && <Pill>Archiviato</Pill>}<StatoChip db={db} id={i.stato} title={REGOLE[statoDi(db, i.stato).regola].descr} /></span></div>
+              <div><p className={`font-semibold ${ann ? 'text-slate-500 line-through' : 'text-white'}`}>{i.titolo}</p>
                 <p className="text-xs text-slate-500 mt-0.5 tabular-nums">{fmtData(i.data)}{i.scadenza ? ` · entro ${fmtData(i.scadenza)}` : ''} · {descrPart(i, aggiunti(db, i).length)}</p></div>
               <div className="flex flex-wrap gap-1.5">
                 {mod === 'SCELTA' && i.opzioni.map(o => <span key={o.id} className={`text-[11px] px-2 py-0.5 rounded-md border ${o.id === i.predefinita ? 'border-indigo-700 text-indigo-300' : 'border-slate-700 text-slate-400'}`}>{o.etichetta}</span>)}
@@ -94,12 +104,13 @@ interface FormEvento {
 const nuovoId = (p: string) => `${p}${Date.now().toString(36)}${Math.floor(Math.random() * 36 ** 2).toString(36)}`
 const MODI: Array<[Modalita, string, string]> = [['SCELTA', "Scelta di un'opzione", 'Es. gusto del panettone'], ['NESSUNA', 'Nessuna scelta', 'Uguale per tutti, si registra la consegna'], ['ORDINE', 'Ordine a pagamento', 'Prodotti con prezzo e quantità'], ['TURNI', 'Turni a quota fissa', 'Es. campi estivi: settimane a prezzo fisso'], ['MAGAZZINO', 'Magazzino', 'Es. biglietti cinema: carichi, richieste, consegne']]
 
-function IniziativaModal({ id, onClose, onCreata }: { id: string | null; onClose: () => void; onCreata?: (id: string) => void }) {
+function IniziativaModal({ id, onClose, onCreata, copia }: { id: string | null; onClose: () => void; onCreata?: (id: string) => void; copia?: CopiaPronta }) {
   const { db, esegui } = useCral()
   const esistente = id ? db.iniziative.find(i => i.id === id) : undefined
   const tipoIniziale = db.tipi.find(t => t.attivo && !t.pagamento && !t.modo)?.id ?? db.tipi[0]?.id ?? ''
   const [f, setF] = useState<FormEvento>(() => {
-    const b = esistente
+    // 26.11.23: la copia apre la maschera di un evento nuovo già compilata
+    const b = esistente ?? copia?.base
     return {
       tipo: b?.tipo ?? tipoIniziale, titolo: b?.titolo ?? '', anno: b?.anno ?? new Date().getFullYear(), data: b?.data ?? '', scadenza: b?.scadenza ?? '',
       stato: b?.stato ?? 'BOZZA', modalita: b?.modalita ?? 'SCELTA', modoPart: b?.modoPart ?? 'GRUPPI', gruppi: b?.gruppi ?? ['SD', 'SE'], sedi: b?.sedi ?? [],
@@ -158,20 +169,26 @@ function IniziativaModal({ id, onClose, onCreata }: { id: string | null; onClose
       },
     }
     setSalvo(true)
-    const r = await esegui(() => esistente ? cralApi.salvaIniziativa(esistente.id, body) : cralApi.creaIniziativa(body), esistente ? 'Evento salvato' : 'Evento creato')
+    // copia: le scelte riportate valgono solo per le opzioni che l'evento nuovo ha ancora
+    const opzFinali = new Set(body.config.opzioni.map(o => o.id))
+    const scelteCopia = copia && mod === 'SCELTA' ? copia.scelte.filter(x => opzFinali.has(x.opz)) : []
+    const r = await esegui(() => esistente ? cralApi.salvaIniziativa(esistente.id, body)
+      : copia ? cralApi.copiaIniziativa({ da: copia.da.id, evento: body, partecipanti: copia.partecipanti, scelte: scelteCopia })
+        : cralApi.creaIniziativa(body),
+    x => esistente ? 'Evento salvato' : copia ? `Evento copiato${'partecipanti' in x && x.partecipanti ? ` · ${x.partecipanti} partecipanti` : ''}${'scelte' in x && x.scelte ? ` · ${x.scelte} scelte riportate` : ''}` : 'Evento creato')
     setSalvo(false)
     if (r) { onClose(); if (!esistente) onCreata?.(r.iniziativa.id) }
   }
   const setPeriodo = (pid: string, p: Partial<FormEvento['periodi'][number]>) => setF({ ...f, periodi: f.periodi.map(x => x.id === pid ? { ...x, ...p } : x) })
   return (
-    <Modale largo titolo={esistente ? 'Modifica evento' : 'Nuovo evento'} onClose={onClose} piedi={<><button className={btnSecondario} onClick={onClose}>Annulla</button><button className={btnPrimario} disabled={!ok} onClick={() => void salva()}>Salva</button></>}>
+    <Modale largo titolo={esistente ? 'Modifica evento' : copia ? 'Nuovo evento · copia' : 'Nuovo evento'} sotto={copia ? `Da «${copia.da.titolo}». Rivedi e cambia quello che serve: si salva come un evento nuovo.` : undefined} onClose={onClose} piedi={<><button className={btnSecondario} onClick={onClose}>Annulla</button><button className={btnPrimario} disabled={!ok} onClick={() => void salva()}>Salva</button></>}>
       <div className="flex flex-col gap-4">
         <div className="grid sm:grid-cols-3 gap-4">
           <Campo label="Tipo" hint="I tipi si personalizzano in Parametri"><select className={inputCls} value={f.tipo} onChange={e => scegliTipo(e.target.value)}>{db.tipi.filter(t => t.attivo || t.id === f.tipo).map(t => <option key={t.id} value={t.id}>{t.nome}{t.pagamento ? ' · a pagamento' : ''}</option>)}</select></Campo>
           <div className="sm:col-span-2"><Campo label="Titolo"><input className={inputCls} maxLength={160} value={f.titolo} placeholder="Es. Panettoni Natale 2026" onChange={e => setF({ ...f, titolo: e.target.value })} /></Campo></div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <Campo label="Stato"><select className={inputCls} value={f.stato} onChange={e => setF({ ...f, stato: e.target.value as Iniziativa['stato'] })}><option value="BOZZA">Bozza</option><option value="APERTA">Raccolta aperta</option><option value="CHIUSA">Chiusa</option></select></Campo>
+          <Campo label="Stato" hint={REGOLE[statoDi(db, f.stato).regola].descr}><select className={inputCls} value={f.stato} onChange={e => setF({ ...f, stato: e.target.value })}>{db.stati.filter(s => s.attivo || s.id === f.stato).map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}</select></Campo>
           <Campo label="Anno"><input type="number" min={2000} max={2100} className={inputCls} value={f.anno} onChange={e => setF({ ...f, anno: +e.target.value || f.anno })} /></Campo>
           <Campo label="Data consegna / evento"><input type="date" className={inputCls} value={f.data} onChange={e => setF({ ...f, data: e.target.value })} /></Campo>
           <Campo label={mod === 'ORDINE' ? 'Ordini entro' : mod === 'TURNI' ? 'Iscrizioni entro' : mod === 'MAGAZZINO' ? 'Richieste entro' : 'Scelte entro'}><input type="date" className={inputCls} value={f.scadenza} onChange={e => setF({ ...f, scadenza: e.target.value })} /></Campo>
@@ -273,7 +290,7 @@ function IniziativaModal({ id, onClose, onCreata }: { id: string | null; onClose
                 {db.sedi.filter(s => s.attiva || f.sedi.includes(s.id)).map(s => { const on = f.sedi.includes(s.id); return <button key={s.id} onClick={() => setF({ ...f, sedi: on ? f.sedi.filter(x => x !== s.id) : [...f.sedi, s.id] })} className={chipCls(on)}>{sedeBreve(s.nome)}</button> })}
               </div></div>
             <p className="text-xs text-slate-500">{nAgg ? `${nAgg} ${nAgg === 1 ? 'persona aggiunta a mano resta' : 'persone aggiunte a mano restano'} nell'evento anche se fuori da questi gruppi e sedi: si tolgono dalla pagina dell'evento.` : "Chi è fuori dai gruppi (es. un esterno a cui fare un omaggio) si aggiunge dalla pagina dell'evento con «Aggiungi persona»: resta della sua tipologia."}</p>
-          </> : <p className="text-xs text-slate-500">{esistente?.partecipanti.length ? `${esistente.partecipanti.length} partecipanti già caricati.` : "Dopo il salvataggio, nella pagina dell'evento: «Importa partecipanti» (file) oppure «Nuovo partecipante» (uno alla volta, anche persone nuove di qualunque tipologia)."}</p>}
+          </> : <p className="text-xs text-slate-500">{copia && !esistente ? (copia.partecipanti.length ? `${copia.partecipanti.length} partecipanti dalla copia: si caricano col salvataggio.` : "Nessun partecipante dalla copia: dopo il salvataggio, nella pagina dell'evento, «Importa partecipanti» o «Nuovo partecipante».") : esistente?.partecipanti.length ? `${esistente.partecipanti.length} partecipanti già caricati.` : "Dopo il salvataggio, nella pagina dell'evento: «Importa partecipanti» (file) oppure «Nuovo partecipante» (uno alla volta, anche persone nuove di qualunque tipologia)."}</p>}
         </div>
         <Campo label="Note"><textarea rows={2} maxLength={1000} className={inputCls} value={f.note} onChange={e => setF({ ...f, note: e.target.value })} /></Campo>
       </div>
@@ -369,7 +386,7 @@ function EsigenzeEvento({ ini }: { ini: Iniziativa }) {
   )
 }
 
-function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void }) {
+function IniziativaDettaglio({ id, onBack, onApri }: { id: string; onBack: () => void; onApri: (id: string) => void }) {
   const [esporta, setEsporta] = useState(false)
   const { db, esegui, scelta } = useCral()
   const ini = db.iniziative.find(i => i.id === id)
@@ -386,6 +403,8 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
   const [tipF, setTipF] = useState('')
   const [ord, setOrd] = useState<{ k: string; dir: 1 | -1 }>({ k: 'nom', dir: 1 })
   const [confArch, setConfArch] = useState(false)
+  const [copiaDa, setCopiaDa] = useState(false)
+  const [copia, setCopia] = useState<CopiaPronta | null>(null)
   if (!ini) return null
   const mod = ini.modalita
   const singoli = ini.modoPart === 'SINGOLI'
@@ -418,7 +437,10 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
   const lista = dest.filter(s => (!q || norm(`${nominativo(s)} ${s.tessera} ${s.id}`).includes(q)) && (!sede || s.sede === sede) && (!tipF || gruppoDi(db, s) === tipF) && filtroSolo(s)).sort(confronta)
   const mancanti = dest.filter(s => !ini.scelte[s.id]?.opz).length
   const esclusi = db.soci.filter(s => s.stato === 'DA_VALIDARE' && (partSet.has(s.id) || (!singoli && ini.gruppi.includes(gruppoDi(db, s))))).length
-  const chiusa = ini.stato === 'CHIUSA' || ini.archiviata
+  // 0030: cosa si può fare lo decide la regola dello stato (e l'archiviazione)
+  const perm = permessi(db, ini)
+  const st0 = statoDi(db, ini.stato)
+  const origine = ini.copiatoDa ? db.iniziative.find(x => x.id === ini.copiatoDa) : undefined
   const archivia = (v: boolean) => { void esegui(() => cralApi.archivia(id, v), v ? 'Evento archiviato' : 'Evento ripristinato').then(r => { if (r && v) onBack() }) }
   // la fonte («modulo», «predef.») resta finché non si cambia a mano la scelta o le quantità
   const aggiorna = (sid: string, patch: PatchScelta) => scelta(ini.id, sid, patch, 'opz' in patch || 'q' in patch ? 'manuale' : (ini.scelte[sid]?.fonte ?? 'manuale'))
@@ -428,21 +450,21 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
     aggiorna(s.id, { q: { ...(ini.scelte[s.id]?.q ?? {}), [p.id]: n } })
   }
   const togliPart = (sid: string) => { void esegui(() => cralApi.partecipanti(id, [], [sid]), 'Tolto dall\'evento', 'info') }
-  const [sl, st] = STATI_INI[ini.stato]
   const conti = mod === 'ORDINE' ? contiOrdine(db, ini) : null
-  const nomeCella: NomeCella = (s, o = {}) => <td className={`${o.rientro ? 'pl-10' : 'pl-5'} pr-3 py-2 whitespace-nowrap`}><span className="inline-flex items-center gap-1.5">{o.rientro && <span className="text-slate-600 -ml-4 mr-0.5">↳</span>}<span className="text-slate-100">{nominativo(s)}</span>{s.tipo !== 'SD' && <Origine s={s} />}{agg.has(s.id) && <Pill tratteggio title="Aggiunto a mano: non rientra nei gruppi o nelle sedi dell'evento">aggiunto</Pill>}{(singoli || agg.has(s.id)) && !chiusa && <button title="Togli dall'evento" className="text-slate-500 hover:text-red-400" onClick={() => togliPart(s.id)}><Ico d={D.x} cls="w-3.5 h-3.5" /></button>}</span>{s.tipo === 'FAM' && !o.sotto && <div><DiChi db={db} s={s} /></div>}{o.sotto}</td>
+  const nomeCella: NomeCella = (s, o = {}) => <td className={`${o.rientro ? 'pl-10' : 'pl-5'} pr-3 py-2 whitespace-nowrap`}><span className="inline-flex items-center gap-1.5">{o.rientro && <span className="text-slate-600 -ml-4 mr-0.5">↳</span>}<span className="text-slate-100">{nominativo(s)}</span>{s.tipo !== 'SD' && <Origine s={s} />}{agg.has(s.id) && <Pill tratteggio title="Aggiunto a mano: non rientra nei gruppi o nelle sedi dell'evento">aggiunto</Pill>}{(singoli || agg.has(s.id)) && perm.raccolta && <button title="Togli dall'evento" className="text-slate-500 hover:text-red-400" onClick={() => togliPart(s.id)}><Ico d={D.x} cls="w-3.5 h-3.5" /></button>}</span>{s.tipo === 'FAM' && !o.sotto && <div><DiChi db={db} s={s} /></div>}{o.sotto}</td>
   const nomePred = ini.opzioni.find(o => o.id === ini.predefinita)?.etichetta
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
         <button className={btnPiccoloSec} onClick={onBack}><Ico d={D.back} cls="w-3.5 h-3.5" />Eventi</button>
-        <TipoChip db={db} id={ini.tipo} /><Pill tono={st}>{sl}</Pill>{ini.archiviata && <Pill>Archiviato</Pill>}
+        <TipoChip db={db} id={ini.tipo} /><StatoChip db={db} id={ini.stato} title={REGOLE[st0.regola].descr} />{ini.archiviata && <Pill>Archiviato</Pill>}
         <div className="ml-auto flex flex-wrap gap-2">
-          {!singoli && !chiusa && <button className={btnSecondario} onClick={() => setAddPar(true)} title="Fa entrare chi è fuori dai gruppi dell'evento, es. un esterno a cui fare un omaggio: resta della sua tipologia"><Ico d={D.plus} />Aggiungi persona</button>}
-          {singoli && !chiusa && <><button className={btnSecondario} onClick={() => setImpPar(true)}><Ico d={D.upload} />Importa partecipanti</button><button className={btnSecondario} onClick={() => setAddPar(true)}><Ico d={D.plus} />Nuovo partecipante</button></>}
-          {(mod === 'SCELTA' || mod === 'ORDINE' || mod === 'TURNI') && !chiusa && <button className={btnSecondario} onClick={() => setModulo(true)}><Ico d={D.upload} />{mod === 'ORDINE' ? 'Importa ordini' : mod === 'TURNI' ? 'Importa iscrizioni' : 'Importa risposte modulo'}</button>}
+          {!singoli && perm.raccolta && <button className={btnSecondario} onClick={() => setAddPar(true)} title="Fa entrare chi è fuori dai gruppi dell'evento, es. un esterno a cui fare un omaggio: resta della sua tipologia"><Ico d={D.plus} />Aggiungi persona</button>}
+          {singoli && perm.raccolta && <><button className={btnSecondario} onClick={() => setImpPar(true)}><Ico d={D.upload} />Importa partecipanti</button><button className={btnSecondario} onClick={() => setAddPar(true)}><Ico d={D.plus} />Nuovo partecipante</button></>}
+          {(mod === 'SCELTA' || mod === 'ORDINE' || mod === 'TURNI') && perm.raccolta && <button className={btnSecondario} onClick={() => setModulo(true)}><Ico d={D.upload} />{mod === 'ORDINE' ? 'Importa ordini' : mod === 'TURNI' ? 'Importa iscrizioni' : 'Importa risposte modulo'}</button>}
           <button className={btnSecondario} onClick={() => setEsporta(true)} title="Lista WhatsApp, rubrica, esigenze alimentari: scegli colonne e formato"><Ico d={D.download} />Esporta elenco</button>
           {!ini.archiviata && <button className={btnSecondario} onClick={() => setEdit(true)}>Modifica</button>}
+          <button className={btnSecondario} onClick={() => setCopiaDa(true)} title="Un evento nuovo da questo: scegli tipo, impostazioni, lista dei partecipanti e scelte da riportare"><Ico d={D.plus} />Copia</button>
           <button className={btnSecondario} onClick={() => { if (ini.archiviata) archivia(false); else setConfArch(true) }}>{ini.archiviata ? 'Ripristina' : 'Archivia'}</button>
         </div>
       </div>
@@ -452,10 +474,11 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
       <div><h3 className="text-lg font-semibold text-white">{ini.titolo}</h3>
         <p className="text-sm text-slate-400 tabular-nums">{fmtData(ini.data)}{ini.scadenza ? ` · ${({ ORDINE: 'ordini', TURNI: 'iscrizioni', MAGAZZINO: 'richieste' } as Record<string, string>)[mod] ?? 'scelte'} entro ${fmtData(ini.scadenza)}` : ''} · {dest.length} partecipanti ({descrPart(ini, agg.size)}){ini.fornitore ? ` · Fornitore: ${ini.fornitore}` : ''}{ini.pagamento ? ` · Pagamento: ${ini.pagamento}` : ''}{ini.note ? ` · ${ini.note}` : ''}</p>
         {esclusi > 0 && <p className="text-xs text-amber-400 mt-1">{esclusi === 1 ? '1 persona in attesa di validazione non è' : `${esclusi} persone in attesa di validazione non sono`} tra i partecipanti: lo diventano appena validate.</p>}
-        {ini.stato === 'BOZZA' && <p className="text-xs text-slate-500 mt-1">In bozza le consegne non si registrano: passa a «Raccolta aperta» con «Modifica».</p>}</div>
+        {origine && <p className="text-xs text-slate-500 mt-1">Copia di <button className="text-indigo-300 hover:text-indigo-200" onClick={() => onApri(origine.id)}>«{origine.titolo}»</button>{origine.archiviata ? ' (archiviato)' : ''}.</p>}
+        {!ini.archiviata && frasePermessi(perm) && <p className={`text-xs mt-1 ${st0.regola === 'ANNULLATO' || st0.regola === 'SOSPESO' ? 'text-amber-400' : 'text-slate-500'}`}>Stato «{st0.nome}»: {frasePermessi(perm).charAt(0).toLowerCase() + frasePermessi(perm).slice(1)} Si cambia con «Modifica».</p>}</div>
 
-      {mod === 'TURNI' ? <TurniCorpo ini={ini} chiusa={chiusa} nomeCella={nomeCella} />
-        : mod === 'MAGAZZINO' ? <MagazzinoCorpo ini={ini} chiusa={chiusa} />
+      {mod === 'TURNI' ? <TurniCorpo ini={ini} perm={perm} nomeCella={nomeCella} />
+        : mod === 'MAGAZZINO' ? <MagazzinoCorpo ini={ini} perm={perm} />
           : <>
             {conti && <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               {([['Ordini', String(conti.ord.length), 'text-white'], ['Totale', fmtEuro(conti.totale), 'text-white'], ['Sconti', fmtEuro(conti.sconti), conti.sconti ? 'text-pink-300' : 'text-slate-500'], ['Incassato', fmtEuro(conti.incassato), 'text-emerald-300'], ['Da incassare', fmtEuro(conti.totale - conti.incassato), conti.totale > conti.incassato ? 'text-amber-400' : 'text-white']] as Array<[string, string, string]>).map(([l, n, c]) => (
@@ -483,7 +506,7 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
                 <select className={inputCls + ' sm:w-44'} value={tipF} onChange={e => setTipF(e.target.value)}><option value="">Tutte le tipologie</option>{GRUPPI_EVENTO.map(g => <option key={g} value={g}>{NOMI_GRUPPO[g]}</option>)}</select>
                 <div className="flex gap-1 items-center"><select className={inputCls + ' sm:w-56'} value={ord.k} onChange={e => setOrd({ k: e.target.value, dir: 1 })} title="Ordina per">{Object.entries(CHIAVI_ORD).map(([k, [l]]) => <option key={k} value={k}>Ordina: {l}</option>)}</select>
                   <button className={btnPiccoloSec + ' h-[38px]'} title={ord.dir > 0 ? 'Crescente' : 'Decrescente'} onClick={() => setOrd({ ...ord, dir: ord.dir === 1 ? -1 : 1 })}>{ord.dir > 0 ? 'A→Z' : 'Z→A'}</button></div>
-                {mod === 'SCELTA' && ini.predefinita && mancanti > 0 && !chiusa && <button className={btnPiccoloSec} onClick={() => setConfPred(true)}>Assegna la predefinita ai {mancanti} senza scelta</button>}
+                {mod === 'SCELTA' && ini.predefinita && mancanti > 0 && perm.gestione && <button className={btnPiccoloSec} onClick={() => setConfPred(true)}>Assegna la predefinita ai {mancanti} senza scelta</button>}
               </div>
               <Scorrevole className="max-h-[560px]"><table className="w-full text-sm">
                 <thead className="sticky top-0 bg-slate-900 z-10 text-left text-[11px] uppercase tracking-wider text-slate-500">
@@ -503,16 +526,17 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
                         <td className="px-3 py-2 font-mono text-xs text-slate-400">{s.tessera || '—'}</td>
                         <td className="px-3 py-2 text-slate-400 text-xs whitespace-nowrap">{s.sede ? sedeBreve(sedeNome(db, s.sede)) : <span className="text-amber-400">non indicata</span>}</td>
                         {mod === 'SCELTA' && <td className="px-3 py-1.5"><div className="flex items-center gap-2">
-                          <select disabled={chiusa} className={inputCls + ' py-1 text-xs min-w-[220px]'} value={sc?.opz ?? ''} onChange={e => aggiorna(s.id, { opz: e.target.value || null })}>
+                          <select disabled={!perm.raccolta} className={inputCls + ' py-1 text-xs min-w-[220px]'} value={sc?.opz ?? ''} onChange={e => aggiorna(s.id, { opz: e.target.value || null })}>
                             <option value="">— Nessuna scelta</option>{ini.opzioni.map(o => <option key={o.id} value={o.id}>{o.etichetta}</option>)}</select>
                           {sc?.opz && sc.fonte === 'modulo' && <span title="Arrivata dalle risposte del modulo" className="text-[10px] text-cyan-400 uppercase tracking-wider">modulo</span>}
-                          {sc?.opz && sc.fonte === 'predefinita' && <span className="text-[10px] text-indigo-400 uppercase tracking-wider">predef.</span>}</div></td>}
-                        {mod === 'ORDINE' && ini.prodotti.map(p => <td key={p.id} className="px-2 py-1.5 text-center"><input type="number" min="0" step={p.unita === 'kg' ? '0.5' : '1'} max={p.max ?? undefined} disabled={chiusa} className={inputW + ' py-1 w-16 text-center tabular-nums ' + (qta(ini, s.id, p.id) ? 'border-pink-700 text-white' : 'text-slate-500')} value={qta(ini, s.id, p.id)} onChange={e => setQta(s, p, e.target.value)} aria-label={`${prodLabel(db, p)} per ${nominativo(s)}`} /></td>)}
+                          {sc?.opz && sc.fonte === 'predefinita' && <span className="text-[10px] text-indigo-400 uppercase tracking-wider">predef.</span>}
+                          {sc?.opz && sc.fonte === 'copia' && <span title="Riportata dall'evento copiato: si cambia a mano" className="text-[10px] text-amber-300 uppercase tracking-wider">da copia</span>}</div></td>}
+                        {mod === 'ORDINE' && ini.prodotti.map(p => <td key={p.id} className="px-2 py-1.5 text-center"><input type="number" min="0" step={p.unita === 'kg' ? '0.5' : '1'} max={p.max ?? undefined} disabled={!perm.raccolta} className={inputW + ' py-1 w-16 text-center tabular-nums ' + (qta(ini, s.id, p.id) ? 'border-pink-700 text-white' : 'text-slate-500')} value={qta(ini, s.id, p.id)} onChange={e => setQta(s, p, e.target.value)} aria-label={`${prodLabel(db, p)} per ${nominativo(s)}`} /></td>)}
                         {mod === 'ORDINE' && <><td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{ordinato ? <>{nettoSocio(db, ini, s.id) !== totaleSocio(ini, s.id) && <div className="text-[11px] text-slate-500 line-through">{fmtEuro(totaleSocio(ini, s.id))}</div>}<span className="text-white">{fmtEuro(nettoSocio(db, ini, s.id))}</span>
-                          <div><button disabled={chiusa} className={`text-[11px] ${persDi(ini, s.id) ? 'text-amber-300' : 'text-slate-500 hover:text-slate-300'}`} onClick={() => setSpOrd(s)}>{etichettaPers(persDi(ini, s.id), regolaCat(ini, catPersona(s, db)))}</button></div></> : <span className="text-slate-600">—</span>}</td>
-                          <td className="px-3 py-2 text-center"><input type="checkbox" disabled={chiusa || !ordinato} className="accent-emerald-500 w-4 h-4" checked={!!sc?.pagato} onChange={e => aggiorna(s.id, { pagato: e.target.checked })} aria-label={`Pagato da ${nominativo(s)}`} /></td>
-                          <td className="px-3 py-1.5"><input disabled={chiusa} maxLength={500} className={inputCls + ' py-1 text-xs min-w-[150px]'} defaultValue={sc?.note ?? ''} key={`${s.id}-${sc?.note ?? ''}`} placeholder={ordinato ? 'Es. resto da dare' : ''} onBlur={e => { if (e.target.value !== (sc?.note ?? '')) aggiorna(s.id, { note: e.target.value || null }) }} /></td></>}
-                        <td className="px-5 py-2 text-center"><input type="checkbox" disabled={ini.archiviata || ini.stato === 'BOZZA' || (mod === 'ORDINE' && !ordinato)} className="accent-indigo-500 w-4 h-4" checked={!!sc?.consegnato} onChange={e => aggiorna(s.id, { consegnato: e.target.checked })} aria-label={`Consegnato a ${nominativo(s)}`} /></td>
+                          <div><button disabled={!perm.gestione} className={`text-[11px] ${persDi(ini, s.id) ? 'text-amber-300' : 'text-slate-500 hover:text-slate-300'}`} onClick={() => setSpOrd(s)}>{etichettaPers(persDi(ini, s.id), regolaCat(ini, catPersona(s, db)))}</button></div></> : <span className="text-slate-600">—</span>}</td>
+                          <td className="px-3 py-2 text-center"><input type="checkbox" disabled={!perm.gestione || !ordinato} className="accent-emerald-500 w-4 h-4" checked={!!sc?.pagato} onChange={e => aggiorna(s.id, { pagato: e.target.checked })} aria-label={`Pagato da ${nominativo(s)}`} /></td>
+                          <td className="px-3 py-1.5"><input disabled={!perm.gestione} maxLength={500} className={inputCls + ' py-1 text-xs min-w-[150px]'} defaultValue={sc?.note ?? ''} key={`${s.id}-${sc?.note ?? ''}`} placeholder={ordinato ? 'Es. resto da dare' : ''} onBlur={e => { if (e.target.value !== (sc?.note ?? '')) aggiorna(s.id, { note: e.target.value || null }) }} /></td></>}
+                        <td className="px-5 py-2 text-center"><input type="checkbox" disabled={!perm.consegna || (mod === 'ORDINE' && !ordinato)} className="accent-indigo-500 w-4 h-4" checked={!!sc?.consegnato} onChange={e => aggiorna(s.id, { consegnato: e.target.checked })} aria-label={`Consegnato a ${nominativo(s)}`} /></td>
                       </tr>)
                   })}
                   {!lista.length && <tr><td colSpan={20} className="px-5 py-10 text-center text-slate-500">{singoli && !ini.partecipanti.length ? 'Nessun partecipante: usa «Importa partecipanti» o «Nuovo partecipante».' : 'Nessuno con questi filtri.'}</td></tr>}
@@ -523,9 +547,11 @@ function IniziativaDettaglio({ id, onBack }: { id: string; onBack: () => void })
       {spOrd && <ScontoPersonaleModal titolo={`Sconto · ${nominativo(spOrd)}`} sotto="Sull'ordine intero" regola={regolaCat(ini, catPersona(spOrd, db))} valore={persDi(ini, spOrd.id)} lordo={totaleSocio(ini, spOrd.id)} onClose={() => setSpOrd(null)}
         onSalva={v => { aggiorna(spOrd.id, { scontoPers: v }); setSpOrd(null); avviso(v ? 'Sconto personale salvato' : 'Sconto automatico') }} />}
       {edit && <IniziativaModal id={id} onClose={() => setEdit(false)} />}
+      {copiaDa && <CopiaEventoModal ini={ini} onClose={() => setCopiaDa(false)} onAvanti={c => { setCopiaDa(false); setCopia(c) }} />}
+      {copia && <IniziativaModal id={null} copia={copia} onClose={() => setCopia(null)} onCreata={nuovo => onApri(nuovo)} />}
       {addPar && <AggiungiPartecipanteModal ini={ini} onClose={() => setAddPar(false)} />}
       {impPar && <PartecipantiImportModal ini={ini} onClose={() => setImpPar(false)} />}
-      {confArch && <Conferma testo="Archiviare l'evento?" dettaglio={`«${ini.titolo}» esce dagli eventi attivi e diventa di sola lettura${ini.stato !== 'CHIUSA' ? ' (e viene chiuso)' : ''}. Resta consultabile in «Archiviati» e nei report; si può ripristinare.`} etichetta="Archivia" onClose={() => setConfArch(false)} onOk={() => archivia(true)} />}
+      {confArch && <Conferma testo="Archiviare l'evento?" dettaglio={`«${ini.titolo}» esce dagli eventi attivi e diventa di sola lettura${ini.stato !== 'CHIUSA' ? ` (e passa a «${statoDi(db, 'CHIUSA').nome}»)` : ''}. Resta consultabile in «Archiviati» e nei report; si può ripristinare.`} etichetta="Archivia" onClose={() => setConfArch(false)} onOk={() => archivia(true)} />}
       {modulo && mod === 'TURNI' && <IscrizioniImportModal ini={ini} onClose={() => setModulo(false)} />}
       {modulo && mod === 'ORDINE' && <OrdiniImportModal ini={ini} onClose={() => setModulo(false)} />}
       {modulo && mod === 'SCELTA' && <ModuloRisposteModal ini={ini} onClose={() => setModulo(false)} />}

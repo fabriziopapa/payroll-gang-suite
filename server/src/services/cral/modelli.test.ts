@@ -49,3 +49,16 @@ test('con i partecipanti: una riga a testa in ordine di nome, ID come testo, nie
   assert.deepEqual(leggi('T5', persone).fogli['Iscrizioni']![1], ['090001', 'ROSSI Maria', '', '', '', '', ''])
   assert.equal(leggi('T1', persone).m.persone, 0) // solo T2, T3, T5
 })
+
+test('Esporta elenco (26.11.23): numero progressivo nell\'ordine dell\'elenco', async () => {
+  const { COLONNE_ELENCO, elencoSoci } = await import('./esporta.js')
+  const col = (ids: string[]) => ids.map(id => COLONNE_ELENCO.find(c => c.id === id)!)
+  const p = [{ id: '090002', cognome: 'VERDI', nome: 'Luca' }, { id: '090001', cognome: 'ROSSI', nome: 'Maria' }, { id: 'EXT-0001', cognome: 'BIANCHI', nome: 'Ida' }] as CralSocioRow[]
+  const csv = elencoSoci(p, col(['numero', 'cognome', 'nome']), { sedi: [], soci: p } as unknown as Pick<CralStato, 'sedi' | 'soci'>, 'csv', ';', 'Prova').toString('utf8')
+  assert.equal(csv, '﻿N.;Cognome;Nome\r\n1;BIANCHI;Ida\r\n2;ROSSI;Maria\r\n3;VERDI;Luca\r\n')
+  // nell'Excel il progressivo è un numero, il resto testo
+  const xlsx = elencoSoci(p, col(['numero', 'id']), { sedi: [], soci: p } as unknown as Pick<CralStato, 'sedi' | 'soci'>, 'xlsx', ';', 'Prova')
+  const XLSX = (await import('xlsx')).default ?? await import('xlsx')
+  const ws = XLSX.read(xlsx, { type: 'buffer' }).Sheets['Prova']!
+  assert.deepEqual([ws['A2']?.t, ws['A2']?.v, ws['B2']?.t, ws['B2']?.v], ['n', 1, 's', 'EXT-0001'])
+})

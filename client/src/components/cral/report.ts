@@ -6,7 +6,7 @@
 // ============================================================
 
 import { nomiEsigenze } from './contatti'
-import { partecipantiEffettivi, riepilogoAlimentare } from './logica'
+import { annullato, partecipantiEffettivi, riepilogoAlimentare } from './logica'
 import type { Db, Iniziativa, Persona, QuotaSocio, Richiesta, StatoPeriodo } from './tipi'
 import {
   CAT_SCONTO_1, GRUPPI, MESI, nomeTipologia, MODI_QUOTA, TIPOLOGIE, aCaricoDi, catSconto, conScontiIni, contenutoTot, contiMagazzino, descrScontoPers,
@@ -25,6 +25,8 @@ export interface CfgReport {
   soloMancanti: boolean; inclusiVuoti: boolean; soloDaPagare: boolean; soloSaldo: boolean
   includiTolte: boolean; presenze: boolean; aCarico: boolean; perRif: boolean; eta: boolean
   anno: number; qmodo: '' | QuotaSocio['modo']; mesi: boolean; statoRic: '' | Richiesta['stato']
+  /** 26.11.23: numero progressivo (1, 2, 3…) come prima colonna; con il raggruppamento, ricomincia in ogni gruppo */
+  numero?: boolean; numeroPerGruppo?: boolean
 }
 export type Cella = string | number
 export interface Report {
@@ -41,7 +43,37 @@ export interface Report {
 export const STATI_RIC_ETICH: Record<Richiesta['stato'], string> = { ATTESA: 'In attesa', CONSEGNATA: 'Consegnata', ANNULLATA: 'Annullata' }
 export const MODI_CONS_ETICH: Record<Richiesta['modo'], string> = { MANO: 'A mano', EMAIL: 'Digitale via email' }
 
+/** I report che elencano persone o movimenti: il progressivo vi si può aggiungere (non ai prospetti per sede o per prodotto). */
+export const conProgressivo = (cfg: Pick<CfgReport, 'tipo'>): boolean => cfg.tipo !== 'riepilogo' && cfg.tipo !== 'fornitore'
+
+/**
+ * Aggiunge la colonna «N.» (subito dopo quella del gruppo, se c'è): le persone o i movimenti si contano
+ * 1, 2, 3…; totali, subtotali e righe in grassetto no. Con `perGruppo` si ricomincia da 1 in ogni gruppo.
+ */
+export function numera(rep: Report, perGruppo: boolean): Report {
+  if (!rep.intest.length || !rep.righe.length) return rep
+  const pos = rep.gruppi ? 1 : 0
+  const ultimoTot = rep.totale ? rep.righe.length - 1 : -1
+  let n = 0, gruppo: Cella | undefined
+  const righe = rep.righe.map((r, i) => {
+    if (rep.gruppi && perGruppo && r[0] !== gruppo) { gruppo = r[0]; n = 0 }
+    const salta = i === ultimoTot || !!rep.bold?.has(i)
+    return [...r.slice(0, pos), salta ? '' : ++n, ...r.slice(pos)]
+  })
+  const ins = <T,>(a: T[] | undefined, v: T): T[] | undefined => (a ? [...a.slice(0, pos), v, ...a.slice(pos)] : a)
+  const numCols = new Set([pos, ...[...(rep.numCols ?? [])].map(k => (k >= pos ? k + 1 : k))])
+  return { ...rep, intest: ins(rep.intest, 'N.')!, sopra: ins(rep.sopra, ''), breve: ins(rep.breve, 'N.'), righe, numCols }
+}
+
 export function costruisciReport(db: Db, cfg: CfgReport, oggiIso: string): Report {
+  const rep = costruisciBase(db, cfg, oggiIso)
+  // 0030: un evento annullato lo dice nel titolo
+  const ini = cfg.tipo !== 'soci' && cfg.tipo !== 'quote' ? db.iniziative.find(i => i.id === cfg.ini) : undefined
+  const r = ini && rep.titolo && annullato(db, ini) ? { ...rep, titolo: `${rep.titolo} · ANNULLATO` } : rep
+  return cfg.numero && conProgressivo(cfg) ? numera(r, !!cfg.numeroPerGruppo) : r
+}
+
+function costruisciBase(db: Db, cfg: CfgReport, oggiIso: string): Report {
   const ini = db.iniziative.find(i => i.id === cfg.ini)
   const sediOk = (s: Persona) => !cfg.sedi.length || cfg.sedi.includes(s.sede ?? '__NOSEDE')
   const tipOk = (s: Persona) => !cfg.origine || s.tipo === cfg.origine

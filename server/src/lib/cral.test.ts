@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  abbina, allineaQuoteSchema, applicaSconto, baseTessera, configSchema, erroreAllinea, erroreDati, erroreIniziativa, formatTessera, iniziativaSchema,
+  abbina, allineaQuoteSchema, applicaSconto, azioneVietata, azioniScelta, baseTessera, copiaEventoSchema, PERMESSI_REGOLA, statoEventoSchema, configSchema, erroreAllinea, erroreDati, erroreIniziativa, formatTessera, iniziativaSchema,
   numeroTessera, prossimoDopo, quotaDopoModifica, rataMese, sceltaSchema, versato, spezzaNominativo, tesseraDaFile, tesseraNelFormato, tesseraRiammissione, unisciDati, usiTolti,
   type AnagraficaCral, type ParametriTessera,
 } from './cral.js'
@@ -170,4 +170,52 @@ test('quote (0028): «Allinea soci» accetta solo soci, uno per volta, e vuole i
   assert.equal(erroreAllinea([{ socio: '090001', stato: 'DOVUTA', motivo: '' }, { socio: '090001', stato: 'ESENTE', motivo: 'x' }]), 'SOCI_RIPETUTI')
   // tornare dovuta non chiede il motivo
   assert.equal(erroreAllinea([{ socio: '090001', stato: 'DOVUTA', motivo: '' }]), null)
+})
+
+test('stati (0030): cosa permette ogni regola', () => {
+  assert.equal(azioneVietata('RACCOLTA', ['raccolta', 'gestione', 'consegna']), null)
+  assert.equal(azioneVietata('PREPARAZIONE', ['raccolta', 'gestione']), null)
+  assert.equal(azioneVietata('PREPARAZIONE', ['consegna']), 'consegna', 'in bozza le consegne non si registrano')
+  assert.equal(azioneVietata('RACCOLTA_CHIUSA', ['gestione', 'consegna']), null, 'a raccolta chiusa si consegna e si incassa')
+  assert.equal(azioneVietata('RACCOLTA_CHIUSA', ['consegna', 'raccolta']), 'raccolta')
+  for (const r of ['SOSPESO', 'CONCLUSO', 'ANNULLATO']) for (const a of ['raccolta', 'gestione', 'consegna'] as const) assert.equal(azioneVietata(r, [a]), a, `${r}: ${a}`)
+  assert.equal(azioneVietata(null, ['gestione']), 'gestione', 'stato sconosciuto: nulla')
+  assert.equal(azioneVietata('SOSPESO', []), null, 'nessuna azione: nulla da vietare')
+  assert.deepEqual(Object.keys(PERMESSI_REGOLA).sort(), ['ANNULLATO', 'CONCLUSO', 'PREPARAZIONE', 'RACCOLTA', 'RACCOLTA_CHIUSA', 'SOSPESO'])
+})
+
+test('stati (0030): che cosa tocca una modifica ai dati di una persona', () => {
+  const a = (prima: Record<string, unknown> | undefined, dopo: Record<string, unknown>) => [...azioniScelta(prima, dopo)].sort()
+  assert.deepEqual(a(undefined, { opz: 'A' }), ['raccolta'])
+  assert.deepEqual(a({ opz: 'A' }, { opz: 'A', consegnato: true }), ['consegna'])
+  assert.deepEqual(a({ q: { P1: 2 } }, { q: { P1: 2 }, pagato: true, note: 'resto 5 €' }), ['gestione'])
+  assert.deepEqual(a({ q: { P1: 2 } }, { q: { P1: 3 } }), ['raccolta'])
+  // campi: una settimana nuova o tolta del tutto è raccolta; Prenotata → Frequentata o Tolta è consegna
+  assert.deepEqual(a({ per: { W1: 'P' } }, { per: { W1: 'P', W2: 'P' } }), ['raccolta'])
+  assert.deepEqual(a({ per: { W1: 'P' } }, { per: { W1: 'F' } }), ['consegna'])
+  assert.deepEqual(a({ per: { W1: 'P' } }, { per: { W1: 'T' } }), ['consegna'])
+  assert.deepEqual(a({ per: { W1: 'P' } }, { per: {} }), ['raccolta'])
+  assert.deepEqual(a({ per: { W1: 'P' }, versato: 0 }, { per: { W1: 'P' }, versato: 18000 }), ['gestione'])
+  // nulla di cambiato, o vuoti equivalenti: nessuna azione
+  assert.deepEqual(a({ opz: 'A', consegnato: false }, { opz: 'A' }), [])
+  assert.deepEqual(a({ fonte: 'modulo', opz: 'A' } as Record<string, unknown>, { opz: 'A' }), [])
+  // scelta e consegna insieme
+  assert.deepEqual(a(undefined, { opz: 'B', consegnato: true }), ['consegna', 'raccolta'])
+})
+
+test('stati (0030): schema di uno stato e della copia', () => {
+  assert.ok(statoEventoSchema.safeParse({ nome: 'In consegna', colore: '#7C3AED', regola: 'RACCOLTA_CHIUSA' }).success)
+  assert.ok(!statoEventoSchema.safeParse({ nome: 'X', colore: '#7C3AED', regola: 'APERTISSIMO' }).success)
+  assert.ok(!statoEventoSchema.safeParse({ nome: '  ', colore: '#7C3AED', regola: 'RACCOLTA' }).success)
+  const evento = {
+    tipo: 'PAN', titolo: 'Panettoni 2026', anno: 2026, data: '2026-12-18', scadenza: null, stato: 'BOZZA', modalita: 'SCELTA', modoPart: 'SINGOLI',
+    gruppi: [], sedi: [], predefinita: 'O1', fornitore: '', pagamento: '', note: '', quota: 0,
+    config: { opzioni: [{ id: 'O1', etichetta: 'Tradizionale' }, { id: 'O2', etichetta: 'Cioccolato' }] },
+  }
+  const ok = copiaEventoSchema.parse({ da: '8b0f6c1e-5d2a-4c3b-9a1e-0f2d3c4b5a69', evento, partecipanti: ['090001', 'EXT-0002', 'FAM-0003'], scelte: [{ socio: '090001', opz: 'O2' }] })
+  assert.equal(ok.evento.stato, 'BOZZA'); assert.equal(ok.partecipanti.length, 3)
+  assert.ok(copiaEventoSchema.safeParse({ da: '8b0f6c1e-5d2a-4c3b-9a1e-0f2d3c4b5a69', evento: { ...evento, stato: 'CONSEGNA' } }).success, 'uno stato nuovo di Parametri')
+  assert.ok(!copiaEventoSchema.safeParse({ da: 'non-un-uuid', evento }).success)
+  assert.ok(!copiaEventoSchema.safeParse({ da: '8b0f6c1e-5d2a-4c3b-9a1e-0f2d3c4b5a69', evento: { ...evento, stato: 'bozza' } }).success)
+  assert.ok(!copiaEventoSchema.safeParse({ da: '8b0f6c1e-5d2a-4c3b-9a1e-0f2d3c4b5a69', evento, scelte: [{ socio: '090001', opz: 'O2', pagato: true }] }).success, 'dalla copia arriva solo l\'opzione')
 })

@@ -416,6 +416,26 @@ CREATE TABLE IF NOT EXISTS cral_soci_tessere (
 );
 CREATE INDEX IF NOT EXISTS cral_soci_tessere_socio ON cral_soci_tessere (socio_id);
 
+-- 0030: stati degli eventi, con la regola che decide cosa si puo' fare
+CREATE TABLE IF NOT EXISTS cral_stati_evento (
+  id      VARCHAR(10)  PRIMARY KEY CHECK (id ~ '^[A-Z0-9]{1,10}$'),
+  nome    VARCHAR(60)  NOT NULL CHECK (char_length(btrim(nome)) > 0),
+  colore  CHAR(7)      NOT NULL DEFAULT '#64748B' CHECK (colore ~ '^#[0-9A-Fa-f]{6}$'),
+  regola  VARCHAR(16)  NOT NULL CHECK (regola IN ('PREPARAZIONE', 'RACCOLTA', 'RACCOLTA_CHIUSA', 'SOSPESO', 'CONCLUSO', 'ANNULLATO')),
+  attivo  BOOLEAN      NOT NULL DEFAULT TRUE,
+  ordine  INTEGER      NOT NULL DEFAULT 0
+);
+
+INSERT INTO cral_stati_evento (id, nome, colore, regola, ordine) VALUES
+  ('BOZZA',     'Bozza',           '#64748B', 'PREPARAZIONE',    1),
+  ('APERTA',    'Raccolta aperta', '#16A34A', 'RACCOLTA',        2),
+  ('CHIUSA',    'Raccolta chiusa', '#0891B2', 'RACCOLTA_CHIUSA', 3),
+  ('CONSEGNA',  'In consegna',     '#7C3AED', 'RACCOLTA_CHIUSA', 4),
+  ('SOSPESO',   'Sospeso',         '#D97706', 'SOSPESO',         5),
+  ('CONCLUSO',  'Concluso',        '#475569', 'CONCLUSO',        6),
+  ('ANNULLATO', 'Annullato',       '#DC2626', 'ANNULLATO',       7)
+ON CONFLICT (id) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS cral_iniziative (
   id             UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   tipo_id        VARCHAR(10)   NOT NULL REFERENCES cral_tipi(id) ON UPDATE CASCADE,
@@ -423,7 +443,7 @@ CREATE TABLE IF NOT EXISTS cral_iniziative (
   anno           SMALLINT      NOT NULL,
   data           DATE          NOT NULL,
   scadenza       DATE,
-  stato          VARCHAR(8)    NOT NULL DEFAULT 'BOZZA' CHECK (stato IN ('BOZZA', 'APERTA', 'CHIUSA')),
+  stato          VARCHAR(10)   NOT NULL DEFAULT 'BOZZA' CONSTRAINT cral_iniziative_stato_fkey REFERENCES cral_stati_evento(id) ON UPDATE CASCADE,  -- 0030
   modalita       VARCHAR(10)   NOT NULL CHECK (modalita IN ('SCELTA', 'NESSUNA', 'ORDINE', 'TURNI', 'MAGAZZINO')),
   partecipanti   VARCHAR(7)    NOT NULL DEFAULT 'GRUPPI' CHECK (partecipanti IN ('GRUPPI', 'SINGOLI')),
   gruppi         TEXT[]        NOT NULL DEFAULT '{}' CHECK (gruppi <@ ARRAY['SD', 'SE', 'EST', 'FAM', 'FEX']::text[]),  -- 0027: FEX = familiari di esterni
@@ -440,7 +460,9 @@ CREATE TABLE IF NOT EXISTS cral_iniziative (
   created_by     UUID          REFERENCES users(id) ON DELETE SET NULL,
   updated_by     UUID          REFERENCES users(id) ON DELETE SET NULL,
   created_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
-  updated_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
+  updated_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  -- 0030: evento da cui e' stato copiato
+  copiato_da     UUID          CONSTRAINT cral_iniziative_copiato_da_fkey REFERENCES cral_iniziative(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS cral_iniziative_partecipanti (
@@ -453,7 +475,7 @@ CREATE TABLE IF NOT EXISTS cral_scelte (
   iniziativa_id  UUID         NOT NULL REFERENCES cral_iniziative(id) ON DELETE CASCADE,
   socio_id       VARCHAR(12)  NOT NULL REFERENCES cral_soci(id) ON UPDATE CASCADE ON DELETE CASCADE,
   dati           JSONB        NOT NULL DEFAULT '{}'::jsonb,
-  fonte          VARCHAR(12)  NOT NULL DEFAULT 'manuale' CHECK (fonte IN ('manuale', 'modulo', 'predefinita')),
+  fonte          VARCHAR(12)  NOT NULL DEFAULT 'manuale' CONSTRAINT cral_scelte_fonte_check CHECK (fonte IN ('manuale', 'modulo', 'predefinita', 'copia')),  -- 0030: copia
   updated_by     UUID         REFERENCES users(id) ON DELETE SET NULL,
   updated_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
   PRIMARY KEY (iniziativa_id, socio_id)

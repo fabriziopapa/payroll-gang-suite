@@ -89,7 +89,8 @@ export const iniziativaSchema = z.object({
   anno:        z.number().int().min(2000).max(2100),
   data:        DATA,
   scadenza:    DATA.nullable(),
-  stato:       z.enum(['BOZZA', 'APERTA', 'CHIUSA']),
+  // 0030: codice di uno stato di cral_stati_evento (BOZZA, APERTA, CHIUSA, … o uno nuovo)
+  stato:       z.string().regex(/^[A-Z0-9]{1,10}$/),
   modalita:    z.enum(MODALITA),
   modoPart:    z.enum(['GRUPPI', 'SINGOLI']),
   gruppi:      z.array(z.enum(GRUPPI_EVENTO)).max(5),
@@ -121,6 +122,76 @@ export function erroreIniziativa(i: IniziativaInput): string | null {
   if (i.modalita !== 'SCELTA' && i.predefinita) return 'PREDEFINITA_SCONOSCIUTA'
   return null
 }
+
+// ── Stati dell'evento: regole fisse (0030) ───────────────────
+/**
+ * Lo stato di un evento si sceglie fra quelli di Parametri; ognuno ha una
+ * di queste regole, che decidono cosa si puo' fare. Tre famiglie di azioni:
+ *   · raccolta   scelte, ordini, iscrizioni alle settimane, partecipanti, richieste
+ *   · gestione   pagamenti, versamenti, note, sconti personali, carichi di magazzino
+ *   · consegna   consegnato, settimana frequentata, biglietti consegnati
+ * Le stesse regole, identiche, sono nel client (components/cral/logica.ts).
+ */
+export const REGOLE_STATO = ['PREPARAZIONE', 'RACCOLTA', 'RACCOLTA_CHIUSA', 'SOSPESO', 'CONCLUSO', 'ANNULLATO'] as const
+export type RegolaStato = typeof REGOLE_STATO[number]
+export type AzioneEvento = 'raccolta' | 'gestione' | 'consegna'
+export const PERMESSI_REGOLA: Record<RegolaStato, Record<AzioneEvento, boolean>> = {
+  PREPARAZIONE:    { raccolta: true,  gestione: true,  consegna: false },
+  RACCOLTA:        { raccolta: true,  gestione: true,  consegna: true },
+  RACCOLTA_CHIUSA: { raccolta: false, gestione: true,  consegna: true },
+  SOSPESO:         { raccolta: false, gestione: false, consegna: false },
+  CONCLUSO:        { raccolta: false, gestione: false, consegna: false },
+  ANNULLATO:       { raccolta: false, gestione: false, consegna: false },
+}
+/** La prima azione che la regola non permette (null = tutto permesso). Regola sconosciuta: nulla. */
+export function azioneVietata(regola: string | null, azioni: Iterable<AzioneEvento>): AzioneEvento | null {
+  const p = PERMESSI_REGOLA[regola as RegolaStato]
+  for (const a of azioni) if (!p?.[a]) return a
+  return null
+}
+
+/**
+ * Che cosa tocca una modifica ai dati di una persona: si confrontano i dati
+ * di prima con quelli dopo, campo per campo. Una settimana nuova o tolta del
+ * tutto e' raccolta; il passaggio fra Prenotata, Frequentata e Tolta e' consegna.
+ */
+export function azioniScelta(prima: Record<string, unknown> | undefined, dopo: Record<string, unknown>): Set<AzioneEvento> {
+  const out = new Set<AzioneEvento>()
+  const p = prima ?? {}
+  const CLASSE: Record<string, AzioneEvento> = { opz: 'raccolta', q: 'raccolta', rif: 'raccolta', iscr: 'raccolta', consegnato: 'consegna', pagato: 'gestione', versato: 'gestione', note: 'gestione', scontoPers: 'gestione' }
+  const vuoto = (v: unknown) => v === undefined || v === null || v === '' || v === false || v === 0
+  for (const k of new Set([...Object.keys(p), ...Object.keys(dopo)])) {
+    if (k === 'fonte') continue
+    if (k === 'per') {
+      const a = (p['per'] ?? {}) as Record<string, string>, b = (dopo['per'] ?? {}) as Record<string, string>
+      for (const w of new Set([...Object.keys(a), ...Object.keys(b)])) {
+        const x = a[w] ?? '', y = b[w] ?? ''
+        if (x === y) continue
+        out.add(!x || !y ? 'raccolta' : 'consegna')
+      }
+      continue
+    }
+    const x = p[k], y = dopo[k]
+    if (JSON.stringify(x ?? null) === JSON.stringify(y ?? null) || (vuoto(x) && vuoto(y))) continue
+    out.add(CLASSE[k] ?? 'raccolta')
+  }
+  return out
+}
+
+/** Stato in Parametri: nome, colore, regola. */
+export const statoEventoSchema = z.object({
+  nome: riga(60, 1), colore: z.string().regex(/^#[0-9A-Fa-f]{6}$/), regola: z.enum(REGOLE_STATO),
+}).strict()
+
+// ── Copia di un evento (26.11.23) ────────────────────────────
+/** L'evento nuovo, i partecipanti da caricare e le scelte da riportare. */
+export const copiaEventoSchema = z.object({
+  da: z.string().uuid(),
+  evento: iniziativaSchema,
+  partecipanti: z.array(z.string().regex(/^([0-9]{1,10}|EXT-[0-9]{4,6}|FAM-[0-9]{4,6})$/)).max(20_000).default([]),
+  scelte: z.array(z.object({ socio: z.string().regex(/^([0-9]{1,10}|EXT-[0-9]{4,6}|FAM-[0-9]{4,6})$/), opz: ID_LOC }).strict()).max(20_000).default([]),
+}).strict()
+export type CopiaEvento = z.infer<typeof copiaEventoSchema>
 
 // ── Dati di una scelta (una persona in un evento) ────────────
 export const sceltaSchema = z.object({

@@ -70,6 +70,8 @@ export interface ColonnaElenco {
 }
 const tel = (f: (s: CralSocioRow) => string) => (s: CralSocioRow) => (contattabile(s.contatti) ? f(s) : '')
 export const COLONNE_ELENCO: ColonnaElenco[] = [
+  // 26.11.23: numero progressivo (1, 2, 3…) nell'ordine dell'elenco; il valore lo mette elencoSoci
+  { id: 'numero', nome: 'N.', larghezza: 5, val: () => '' },
   { id: 'id', nome: 'ID', larghezza: 10, val: s => s.id },
   { id: 'matricola', nome: 'Matricola', larghezza: 10, val: s => s.matricola ?? '' },
   { id: 'tessera', nome: 'Tessera', larghezza: 10, val: s => s.tessera },
@@ -101,14 +103,15 @@ const sicuro = (v: string, eTelefono: boolean) => (/^[=\-@\t\r]/.test(v) || (!eT
 export function elencoSoci(soci: CralSocioRow[], colonne: ColonnaElenco[], st: Pick<CralStato, 'sedi' | 'soci'>, formato: 'xlsx' | 'csv', separatore: ';' | ',', titolo: string): Buffer {
   const c = { sede: new Map(st.sedi.map(x => [x.id, x.nome])), persone: new Map(st.soci.map(x => [x.id, x])) }
   const righe = [...soci].sort((a, b) => `${a.cognome} ${a.nome}`.localeCompare(`${b.cognome} ${b.nome}`, 'it'))
-    .map(s => colonne.map(k => sicuro(k.val(s, c), k.id === 'telefono' || k.id === 'telefonoLeggibile')))
+    .map((s, i) => colonne.map(k => (k.id === 'numero' ? String(i + 1) : sicuro(k.val(s, c), k.id === 'telefono' || k.id === 'telefonoLeggibile'))))
   if (formato === 'csv') {
     const cella = (v: string) => (/["\n\r]/.test(v) || v.includes(separatore) ? `"${v.replace(/"/g, '""')}"` : v)
     return Buffer.from('\uFEFF' + [colonne.map(k => k.nome), ...righe].map(r => r.map(cella).join(separatore)).join('\r\n') + '\r\n', 'utf8')
   }
   const wb = XLSX.utils.book_new()
   // tutto testo: i numeri di telefono e le tessere non devono diventare numeri
-  const ws = XLSX.utils.aoa_to_sheet([colonne.map(k => k.nome), ...righe.map(r => r.map(v => ({ t: 's', v })))])
+  // il progressivo resta un numero, cosi' in Excel si ordina; tutto il resto testo
+  const ws = XLSX.utils.aoa_to_sheet([colonne.map(k => k.nome), ...righe.map(r => r.map((v, j) => (colonne[j]!.id === 'numero' ? { t: 'n', v: +v } : { t: 's', v })))])
   ws['!cols'] = colonne.map(k => ({ wch: k.larghezza }))
   XLSX.utils.book_append_sheet(wb, ws, titolo.replace(/[\\/?*[\]:]/g, ' ').slice(0, 31) || 'Elenco')
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
