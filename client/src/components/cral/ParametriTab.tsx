@@ -1,7 +1,7 @@
 // ============================================================
 // PAYROLL GANG SUITE — Modulo CRAL · scheda Parametri
 // Sedi, quota associativa per anno, tipi di evento,
-// tipologie di prodotto, numerazione della tessera.
+// tipologie di prodotto, confezioni, numerazione della tessera.
 // ============================================================
 
 import { useState } from 'react'
@@ -216,6 +216,12 @@ export function ParametriTab() {
           onRinomina={(id, nome) => void esegui(() => cralApi.aggiornaTipologia(id, { nome }), 'Tipologia rinominata')}
           onFlag={(id, attiva) => void esegui(() => cralApi.aggiornaTipologia(id, { attiva }), attiva ? 'Tipologia attivata' : 'Tipologia disattivata', 'info')}
           onAggiungi={async nome => !!(await esegui(() => cralApi.creaTipologia(nome), `Tipologia «${nome}» aggiunta`))} />
+        <ListaParametri titolo="Confezioni" sotto="Sacco, pacco, latta… Nel prodotto di un evento si sceglie il tipo e quanto contiene (kg, litri o pezzi, come si vende il prodotto). Il prezzo resta quello del prodotto. Una confezione usata non si cancella: si disattiva."
+          voci={db.confezioni.map(t => ({ id: t.id, nome: t.nome, flag: t.attiva }))} segnaposto="Es. Rete, Cassetta di legno…" flagLabel="attiva" maxLen={60}
+          usi={id => db.iniziative.reduce((a, i) => a + i.prodotti.reduce((b, p) => b + (p.confezioni ?? []).filter(f => f.tipo === id).length, 0), 0)}
+          onRinomina={(id, nome) => void esegui(() => cralApi.aggiornaConfezione(id, { nome }), 'Confezione rinominata')}
+          onFlag={(id, attiva) => void esegui(() => cralApi.aggiornaConfezione(id, { attiva }), attiva ? 'Confezione attivata' : 'Confezione disattivata', 'info')}
+          onAggiungi={async nome => !!(await esegui(() => cralApi.creaConfezione(nome), `Confezione «${nome}» aggiunta`))} />
       </div>
     </div>
   )

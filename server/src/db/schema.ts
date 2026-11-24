@@ -660,6 +660,14 @@ export const cralTipologieProdotto = pgTable('cral_tipologie_prodotto', {
   ordine: integer('ordine').notNull().default(0),
 })
 
+/** 0031: tipi di confezione dei prodotti a ordine (Sacco, Pacco, Latta…). */
+export const cralConfezioni = pgTable('cral_confezioni', {
+  id:     varchar('id', { length: 10 }).primaryKey(),
+  nome:   varchar('nome', { length: 60 }).notNull(),
+  attiva: boolean('attiva').notNull().default(true),
+  ordine: integer('ordine').notNull().default(0),
+})
+
 export const cralSoci = pgTable('cral_soci', {
   id:           varchar('id', { length: 12 }).primaryKey(),
   tipo:         varchar('tipo', { length: 3 }).notNull(),

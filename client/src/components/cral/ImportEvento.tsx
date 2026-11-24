@@ -9,7 +9,7 @@ import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { cralApi } from '../../api/endpoints'
 import type { Db, Iniziativa, PatchScelta, Persona } from './tipi'
 import {
-  destinatari, nomeTipologia, fmtEuro, fmtQ, nominativo, norm, normNome, parseEuro, prodLabel, spezzaNominativo, tipNome,
+  conDecimali, destinatari, nomeTipologia, fmtEuro, fmtQ, nominativo, norm, normNome, parseEuro, prodLabel, spezzaNominativo, tipNome,
 } from './logica'
 import { agganciaRiga } from './aggancio'
 import { Modelli, type VoceModello } from './ImportDati'
@@ -163,7 +163,7 @@ export function OrdiniImportModal({ ini, onClose }: { ini: Iniziativa; onClose: 
       for (const [p, j] of c.prod) {
         if (j < 0) continue
         const t = v(r, j); if (!t) continue
-        const okT = p.unita === 'kg' ? /^\d+([.,]\d{1,2})?$/.test(t) : /^\d+$/.test(t)
+        const okT = conDecimali(p) ? /^\d+([.,]\d{1,2})?$/.test(t) : /^\d+$/.test(t)
         if (!okT) { errori.push(`«${t}» non è una quantità valida (${prodLabel(db, p)})`); continue }
         const n = +t.replace(',', '.')
         if (p.max && n > p.max) errori.push(`${p.nome}: ${n} oltre il massimo di ${p.max}`); else if (n) q[p.id] = n

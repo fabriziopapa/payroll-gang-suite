@@ -42,6 +42,8 @@ export interface TipoEvento { id: string; nome: string; colore: string; pagament
 export type RegolaStato = 'PREPARAZIONE' | 'RACCOLTA' | 'RACCOLTA_CHIUSA' | 'SOSPESO' | 'CONCLUSO' | 'ANNULLATO'
 export interface StatoEvento { id: string; nome: string; colore: string; regola: RegolaStato; attivo: boolean; ordine: number }
 export interface Tipologia { id: string; nome: string; attiva: boolean; ordine: number }
+/** 0031: tipo di confezione (Sacco, Pacco, Latta…), in Parametri. */
+export interface TipoConfezione { id: string; nome: string; attiva: boolean; ordine: number }
 export interface ParametriTessera {
   formato: 'NUM' | 'PREF'; prefisso: string; cifre: number; prossimo: number
   riammissione: 'NUOVO' | 'SUFFISSO'; sepSuffisso: '' | '/' | '-' | '.'; cifreSuffisso: number
@@ -67,15 +69,20 @@ export interface Scelta {
   scontoPers?: ScontoPers
   /** 26.11.23.1: sede di consegna per questo evento; assente = la sede di lavoro della persona. */
   luogo?: string
+  /** 26.11.25: confezioni scelte a mano, prodotto → formato → numero; assente = calcolo automatico. */
+  conf?: Record<string, Record<string, number>>
   fonte?: 'manuale' | 'modulo' | 'predefinita' | 'copia'
 }
 /** Modifica di una scelta: null toglie la chiave (stessa regola del server). */
 export type PatchScelta = { [K in keyof Omit<Scelta, 'fonte'>]?: Scelta[K] | null }
 
 export interface Opzione { id: string; etichetta: string }
+/** 26.11.25: formato di confezione di un prodotto: tipo di Parametri e quanto contiene (nell'unità di vendita). */
+export interface Formato { id: string; tipo: string; q: number }
 export interface Prodotto {
-  id: string; tipologia: string; nome: string; prezzo: number; unita: 'pz' | 'cas' | 'kg'
+  id: string; tipologia: string; nome: string; prezzo: number; unita: 'pz' | 'cas' | 'kg' | 'lt'
   contenuto: number | null; contenutoUm: 'lt' | 'kg'; max: number | null
+  confezioni: Formato[]
 }
 export interface Periodo { id: string; nome: string; dal: string; al: string; posti: number | null }
 export interface Articolo { id: string; nome: string; prezzo: number }
@@ -122,6 +129,8 @@ export interface Db {
   sedi: Sede[]; tipi: TipoEvento[]; tipologie: Tipologia[]
   /** 0030: stati degli eventi, in ordine */
   stati: StatoEvento[]
+  /** 0031: tipi di confezione */
+  confezioni: TipoConfezione[]
   tessera: ParametriTessera; extProssimo: number; famProssimo: number
   soci: Persona[]
   /** Indice per ID: le ricerche nelle tabelle grandi non scorrono l'elenco. */
@@ -136,6 +145,8 @@ export interface StatoApi {
   sedi: Sede[]; tipi: TipoEvento[]; tipologie: Tipologia[]
   /** 0030 (un server più vecchio non li manda) */
   stati?: StatoEvento[]
+  /** 0031 */
+  confezioni?: TipoConfezione[]
   parametri: { tessera: ParametriTessera; extProssimo: number; famProssimo: number; prefissoTel?: string; modelliExport?: ModelloExport[] }
   soci: Persona[]
   iniziative: Array<Omit<Iniziativa, 'opzioni' | 'prodotti' | 'periodi' | 'articoli' | 'sconti' | 'scelte' | 'richieste'> & {
@@ -175,7 +186,7 @@ export interface Variazione {
 /** Testata dell'archivio (per mostrare cosa contiene prima di caricarlo). */
 export interface ArchivioTestata {
   formato: string; versione: number; app: string; ambiente: string; esportato: string; sezioni: SezioneLotto[]
-  sedi?: unknown[]; tabelle?: { tipi?: unknown[]; tipologie?: unknown[]; quoteAnno?: unknown[] }; soci?: unknown[]; quote?: unknown[]; eventi?: unknown[]
+  sedi?: unknown[]; tabelle?: { tipi?: unknown[]; tipologie?: unknown[]; confezioni?: unknown[]; quoteAnno?: unknown[] }; soci?: unknown[]; quote?: unknown[]; eventi?: unknown[]
 }
 
 const arr = <T>(x: unknown): T[] => (Array.isArray(x) ? (x as T[]) : [])
@@ -194,7 +205,8 @@ export function daStato(s: StatoApi): Db {
       ...resto,
       copiatoDa: i.copiatoDa ?? null,
       opzioni: arr<Opzione>(c['opzioni']),
-      prodotti: arr<Prodotto>(c['prodotti']),
+      // 26.11.25: i prodotti salvati prima non hanno i formati
+      prodotti: arr<Prodotto>(c['prodotti']).map(p => ({ ...p, confezioni: arr<Formato>(p.confezioni) })),
       periodi: arr<Periodo>(c['periodi']),
       articoli: arr<Articolo>(c['articoli']),
       sconti: (c['sconti'] && typeof c['sconti'] === 'object' ? c['sconti'] : {}) as Sconti,
@@ -204,7 +216,7 @@ export function daStato(s: StatoApi): Db {
     }
   })
   return {
-    sedi: s.sedi, tipi: s.tipi, tipologie: s.tipologie, stati: s.stati ?? STATI_DI_BASE,
+    sedi: s.sedi, tipi: s.tipi, tipologie: s.tipologie, stati: s.stati ?? STATI_DI_BASE, confezioni: s.confezioni ?? [],
     prefissoTel: s.parametri.prefissoTel ?? '39', modelliExport: s.parametri.modelliExport ?? [],
     tessera: s.parametri.tessera, extProssimo: s.parametri.extProssimo, famProssimo: s.parametri.famProssimo,
     soci: s.soci, perId: new Map(s.soci.map(p => [p.id, p])),

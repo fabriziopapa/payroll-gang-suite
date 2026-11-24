@@ -327,6 +327,14 @@ CREATE TABLE IF NOT EXISTS cral_tipologie_prodotto (
   ordine  INTEGER      NOT NULL DEFAULT 0
 );
 
+-- 0031: tipi di confezione (Sacco, Pacco, Latta…); i formati stanno nella config dell'evento
+CREATE TABLE IF NOT EXISTS cral_confezioni (
+  id      VARCHAR(10)  PRIMARY KEY CHECK (id ~ '^[A-Z0-9]{1,10}$'),
+  nome    VARCHAR(60)  NOT NULL CHECK (char_length(btrim(nome)) > 0),
+  attiva  BOOLEAN      NOT NULL DEFAULT TRUE,
+  ordine  INTEGER      NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS cral_soci (
   id             VARCHAR(12)   PRIMARY KEY CHECK (id ~ '^([0-9]{1,10}|EXT-[0-9]{4,6}|FAM-[0-9]{4,6})$'),
   tipo           VARCHAR(3)    NOT NULL CHECK (tipo IN ('SD', 'SE', 'EST', 'FAM')),
@@ -582,6 +590,7 @@ COMMENT ON TABLE cral_iniziative IS
   'Modulo CRAL: eventi. config JSONB = opzioni, prodotti, periodi (settimane), articoli (biglietti), sconti per tipologia; validato dal server (lib/cral.ts).';
 COMMENT ON TABLE cral_scelte IS
   'Modulo CRAL: una riga per persona e evento. dati JSONB = scelta, quantita, settimane, versato, pagato, consegnato, note, riferimento, sconto personale; validato dal server.';
+COMMENT ON TABLE cral_confezioni IS 'Modulo CRAL: tipi di confezione (Parametri). I formati dei prodotti stanno in cral_iniziative.config, la scelta a mano in cral_scelte.dati.conf (26.11.25).';
 
 -- Valori iniziali: solo su tabelle vuote, cosi' rilanciarla non duplica e
 -- non resuscita cio' che e' stato tolto nel frattempo.
@@ -619,6 +628,18 @@ SELECT v.id, v.nome, v.ordine FROM (VALUES
   ('PAS', 'Pasto', 5)
 ) AS v(id, nome, ordine)
 WHERE NOT EXISTS (SELECT 1 FROM cral_tipologie_prodotto);
+
+-- 0031
+INSERT INTO cral_confezioni (id, nome, ordine)
+SELECT v.id, v.nome, v.ordine FROM (VALUES
+  ('SAC', 'Sacco', 1),
+  ('PAC', 'Pacco', 2),
+  ('LAT', 'Latta', 3),
+  ('CAR', 'Cartone', 4),
+  ('BOT', 'Bottiglia', 5),
+  ('VAS', 'Vaschetta', 6)
+) AS v(id, nome, ordine)
+WHERE NOT EXISTS (SELECT 1 FROM cral_confezioni);
 
 INSERT INTO cral_quote_anno (anno, importo_cent)
 SELECT 2026, 6000 WHERE NOT EXISTS (SELECT 1 FROM cral_quote_anno);

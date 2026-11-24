@@ -889,6 +889,8 @@ export interface IVersamentiRepository {
 export interface CralSedeRow { id: string; nome: string; attiva: boolean; ordine: number }
 export interface CralTipoRow { id: string; nome: string; colore: string; pagamento: boolean; modo: string | null; attivo: boolean; ordine: number }
 export interface CralTipologiaRow { id: string; nome: string; attiva: boolean; ordine: number }
+/** 0031: tipo di confezione (Sacco, Pacco, Latta…). */
+export interface CralConfezioneRow { id: string; nome: string; attiva: boolean; ordine: number }
 /** 0030: stato di un evento, con la regola (fra sei fisse) che decide cosa si puo' fare. */
 export type CralRegolaStato = 'PREPARAZIONE' | 'RACCOLTA' | 'RACCOLTA_CHIUSA' | 'SOSPESO' | 'CONCLUSO' | 'ANNULLATO'
 export interface CralStatoEventoRow { id: string; nome: string; colore: string; regola: CralRegolaStato; attivo: boolean; ordine: number }
@@ -955,6 +957,8 @@ export interface CralStato {
   sedi: CralSedeRow[]; tipi: CralTipoRow[]; tipologie: CralTipologiaRow[]; parametri: CralParametriRow
   /** 0030 */
   stati: CralStatoEventoRow[]
+  /** 0031 */
+  confezioni: CralConfezioneRow[]
   soci: CralSocioRow[]; iniziative: CralIniziativaRow[]
   quoteAnno: Array<{ anno: number; importo: number }>
   quote: Record<string, Record<string, CralQuotaRow>>
@@ -1049,6 +1053,9 @@ export interface ICralRepository {
   aggiornaTipo(id: string, patch: { nome?: string; colore?: string; pagamento?: boolean; attivo?: boolean }): Promise<CralTipoRow | null>
   creaTipologia(nome: string): Promise<CralTipologiaRow>
   aggiornaTipologia(id: string, patch: { nome?: string; attiva?: boolean }): Promise<CralTipologiaRow | null>
+  /** 0031: tipi di confezione (Parametri). Uno in uso non si cancella: si disattiva. */
+  creaConfezione(nome: string): Promise<CralConfezioneRow>
+  aggiornaConfezione(id: string, patch: { nome?: string; attiva?: boolean }): Promise<CralConfezioneRow | null>
   /** 0030: stati degli eventi (Parametri). Uno stato in uso non si cancella: si disattiva. */
   creaStatoEvento(s: { nome: string; colore: string; regola: CralRegolaStato }): Promise<CralStatoEventoRow>
   aggiornaStatoEvento(id: string, patch: { nome?: string; colore?: string; regola?: CralRegolaStato; attivo?: boolean }): Promise<CralStatoEventoRow | null>
@@ -1070,7 +1077,7 @@ export interface ICralRepository {
   importaLibroSoci(ops: CralOperazioneImport[], file: string, userId: string | null): Promise<CralEsitoImport | CralErrore>
 
   iniziativa(id: string): Promise<CralIniziativaRow | null>
-  usiIniziativa(id: string): Promise<{ opz: Set<string>; prodotti: Set<string>; periodi: Set<string>; articoli: Set<string> }>
+  usiIniziativa(id: string): Promise<import('../lib/cral.js').UsiEvento>
   salvaIniziativa(id: string | null, i: Omit<CralIniziativaRow, 'id' | 'archiviata' | 'archiviataDa' | 'archiviataIl' | 'partecipanti' | 'scelte' | 'carichi' | 'richieste' | 'copiatoDa'>, userId: string | null): Promise<CralIniziativaRow | 'TIPO_SCONOSCIUTO' | 'STATO_SCONOSCIUTO' | null>
   archivia(id: string, archiviata: boolean, userId: string | null): Promise<boolean>
   /**

@@ -18,7 +18,7 @@ import { ALIMENTARI_VUOTI, CONTATTI_VUOTI, ID_ESIGENZE, ID_ORIGINI, MESSAGGI_CON
 import { z } from 'zod'
 import {
   MODALITA, REGOLE_STATO, rataMese, erroreDati, erroreIniziativa, iniziativaSchema, parametriTesseraSchema, riga, sceltaSchema, scontoPersonale,
-  tesseraNelFormato, usiTolti, type ConfigEvento, type ParametriTessera,
+  tesseraNelFormato, usiTolti, confezioniUsate, type ConfigEvento, type ParametriTessera, type UsiEvento,
 } from './cral.js'
 import { normalizza } from '../services/emolumenti/nominativi.js'
 import type { CralSocioRow, CralStato } from '../db/IRepository.js'
@@ -27,7 +27,7 @@ export const FORMATO_ARCHIVIO = 'pgs-cral-archivio'
 export const SEZIONI = ['sedi', 'tabelle', 'soci', 'quote', 'eventi'] as const
 export type Sezione = typeof SEZIONI[number]
 export const ORDINE_SEZIONI: Record<Sezione, number> = { sedi: 0, tabelle: 1, soci: 2, quote: 3, eventi: 4 }
-export type Entita = 'sede' | 'tipo' | 'tipologia' | 'stato' | 'tessera' | 'quotaAnno' | 'persona' | 'quota' | 'evento'
+export type Entita = 'sede' | 'tipo' | 'tipologia' | 'confezione' | 'stato' | 'tessera' | 'quotaAnno' | 'persona' | 'quota' | 'evento'
 
 // ── Formato dell'archivio ────────────────────────────────────
 const DATA       = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -48,12 +48,15 @@ export const tipoArch = z.object({
   modo: z.enum(MODALITA).nullable(), attivo: z.boolean(), ordine: z.number().int(),
 })
 export const tipologiaArch = z.object({ id: ID_COD, nome: riga(80, 1), attiva: z.boolean(), ordine: z.number().int() })
+// 0031: tipi di confezione (un archivio di prima non li ha)
+export const confezioneArch = z.object({ id: ID_COD, nome: riga(60, 1), attiva: z.boolean(), ordine: z.number().int() })
 // 0030: stati degli eventi (un archivio di prima non li ha: valgono BOZZA, APERTA e CHIUSA, che ci sono ovunque)
 export const statoEventoArch = z.object({
   id: ID_COD, nome: riga(60, 1), colore: z.string().regex(/^#[0-9A-Fa-f]{6}$/), regola: z.enum(REGOLE_STATO), attivo: z.boolean(), ordine: z.number().int(),
 })
 export const tabelleArch = z.object({
   tipi: z.array(tipoArch).max(200), tipologie: z.array(tipologiaArch).max(200), stati: z.array(statoEventoArch).max(100).optional(),
+  confezioni: z.array(confezioneArch).max(200).optional(),
   tessera: parametriTesseraSchema, extProssimo: z.number().int().min(1), famProssimo: z.number().int().min(1),
   quoteAnno: z.array(z.object({ anno: ANNO, importo: z.number().int().min(1).max(10_000_000) })).max(200),
 })
@@ -121,6 +124,7 @@ export const archivioSchema = z.object({
 export type SedeArch = z.infer<typeof sedeArch>
 export type TipoArch = z.infer<typeof tipoArch>
 export type TipologiaArch = z.infer<typeof tipologiaArch>
+export type ConfezioneArch = z.infer<typeof confezioneArch>
 export type StatoEventoArch = z.infer<typeof statoEventoArch>
 export type TabelleArch = z.infer<typeof tabelleArch>
 export type PersonaArch = z.infer<typeof personaArch>
@@ -262,6 +266,14 @@ export function confrontaArchivio(src: Archivio, dst: Archivio, sezioni: Sezione
       if (!d) { out.push({ sezione: 'tabelle', entita: 'tipologia', chiave: t.id, tipo: 'NUOVO', delicata: false, etichetta: `Tipologia di prodotto · ${t.nome}`, campi: [{ campo: 'nome', etichetta: 'Nome', prima: null, dopo: t.nome }], record: t }); continue }
       const campi = campiDiversi(d, t, { nome: 'Nome', attiva: 'Attiva' })
       if (campi.length) out.push({ sezione: 'tabelle', entita: 'tipologia', chiave: t.id, tipo: 'MODIFICA', delicata: false, etichetta: `Tipologia di prodotto · ${d.nome}`, campi, record: t })
+    }
+    // 0031: tipi di confezione
+    const confDst = new Map((dst.tabelle?.confezioni ?? []).map(t => [t.id, t]))
+    for (const t of src.tabelle.confezioni ?? []) {
+      const d = confDst.get(t.id)
+      if (!d) { out.push({ sezione: 'tabelle', entita: 'confezione', chiave: t.id, tipo: 'NUOVO', delicata: false, etichetta: `Confezione · ${t.nome}`, campi: [{ campo: 'nome', etichetta: 'Nome', prima: null, dopo: t.nome }], record: t }); continue }
+      const campi = campiDiversi(d, t, { nome: 'Nome', attiva: 'Attiva' })
+      if (campi.length) out.push({ sezione: 'tabelle', entita: 'confezione', chiave: t.id, tipo: 'MODIFICA', delicata: false, etichetta: `Confezione · ${d.nome}`, campi, record: t })
     }
     // 0030: stati degli eventi. Cambiare la regola di uno stato cambia cosa si puo' fare negli eventi: delicata
     for (const t of src.tabelle.stati ?? []) {
@@ -563,14 +575,16 @@ function confrontaEvento(e: EventoArch, d: EventoArch, personaNota: (id: string)
   }]
 }
 
-function usiDi(e: EventoArch) {
+function usiDi(e: EventoArch): UsiEvento {
   const opz = new Set<string>(), prodotti = new Set<string>(), periodi = new Set<string>()
   for (const { dati } of e.scelte) {
     if (dati.opz) opz.add(dati.opz)
     for (const [k, n] of Object.entries(dati.q ?? {})) if (n > 0) prodotti.add(k)
     for (const [k, v] of Object.entries(dati.per ?? {})) if (v) periodi.add(k)
   }
-  return { opz, prodotti, periodi, articoli: new Set([...e.carichi, ...e.richieste].map(x => x.art)) }
+  // 26.11.25: i formati scelti a mano qui
+  const confezioni = confezioniUsate(e.scelte.map(x => x.dati), e.config as ConfigEvento)
+  return { opz, prodotti, periodi, articoli: new Set([...e.carichi, ...e.richieste].map(x => x.art)), confezioni }
 }
 const riassuntoConfig = (c: ConfigEvento): string =>
   [`${c.opzioni.length} opzioni`, `${c.prodotti.length} prodotti`, `${c.periodi.length} settimane`, `${c.articoli.length} articoli`, `${Object.keys(c.sconti).length} sconti`].join(', ')
@@ -840,6 +854,7 @@ export function archivioDaStato(st: CralStato, meta: { app: string; ambiente: st
     tipi: st.tipi.map(t => ({ id: t.id, nome: t.nome, colore: t.colore, pagamento: t.pagamento, modo: t.modo as TipoArch['modo'], attivo: t.attivo, ordine: t.ordine })),
     tipologie: st.tipologie.map(t => ({ id: t.id, nome: t.nome, attiva: t.attiva, ordine: t.ordine })),
     stati: st.stati.map(s => ({ id: s.id, nome: s.nome, colore: s.colore, regola: s.regola, attivo: s.attivo, ordine: s.ordine })),
+    confezioni: st.confezioni.map(t => ({ id: t.id, nome: t.nome, attiva: t.attiva, ordine: t.ordine })),
     tessera: st.parametri.tessera, extProssimo: st.parametri.extProssimo, famProssimo: st.parametri.famProssimo,
     quoteAnno: st.quoteAnno.map(q => ({ anno: q.anno, importo: q.importo })),
   }

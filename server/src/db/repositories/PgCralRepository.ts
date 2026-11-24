@@ -11,16 +11,16 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import * as schema from '../schema.js'
 import type {
-  ICralRepository, CralModelloExport, CralPatchContatti, CralStato, CralSedeRow, CralTipoRow, CralTipologiaRow, CralParametriRow, CralTesseraParam,
+  ICralRepository, CralModelloExport, CralPatchContatti, CralStato, CralSedeRow, CralTipoRow, CralTipologiaRow, CralConfezioneRow, CralParametriRow, CralTesseraParam,
   CralStatoEventoRow, CralRegolaStato, CralSocioRow, CralIniziativaRow, CralCaricoRow, CralRichiestaRow, CralQuotaRow, CralStatoQuota, CralVoceAllinea, CralAnagraficaRow,
   CralNuovaPersona, CralModificaPersona, CralOperazioneImport, CralEsitoImport, CralErrore, CralAzioneStato,
   CralLottoRow, CralVariazioneRow, CralEsitoApplica, CralEsitoProva, CralOrigineLotto,
 } from '../IRepository.js'
 import { ALIMENTARI_VUOTI, CONTATTI_VUOTI, alimentariDopo, contattiDopo, type Alimentari, type Contatti } from '../../lib/cralContatti.js'
-import { MODALITA_CON_LUOGO, baseTessera, erroreDati, prossimoDopo, quotaDopoModifica, rataMese, tesseraNelFormato, tesseraRiammissione, usiTolti, type ConfigEvento } from '../../lib/cral.js'
+import { MODALITA_CON_LUOGO, baseTessera, confezioniUsate, erroreDati, prossimoDopo, quotaDopoModifica, rataMese, tesseraNelFormato, tesseraRiammissione, usiTolti, type ConfigEvento, type UsiEvento } from '../../lib/cral.js'
 import {
   ORDINE_SEZIONI, anniEsentiDopoRipristino, personaDaRiga, statoDi, uguale, valorePersona,
-  type CampoVar, type EventoArch, type PersonaArch, type QuotaArch, type SedeArch, type StatoComposto, type StatoEventoArch, type TipoArch, type TipologiaArch,
+  type CampoVar, type ConfezioneArch, type EventoArch, type PersonaArch, type QuotaArch, type SedeArch, type StatoComposto, type StatoEventoArch, type TipoArch, type TipologiaArch,
   type Variazione,
 } from '../../lib/cralLotti.js'
 
@@ -87,7 +87,7 @@ export class PgCralRepository implements ICralRepository {
 
   // ── Lettura di tutto lo stato (poche centinaia di righe) ──
   async stato(): Promise<CralStato> {
-    const [sedi, tipi, tipologie, parametri, soci, legami, storico, iniz, part, scelte, carichi, richieste, quoteAnno, quote, utenti, stati] = await Promise.all([
+    const [sedi, tipi, tipologie, parametri, soci, legami, storico, iniz, part, scelte, carichi, richieste, quoteAnno, quote, utenti, stati, confezioni] = await Promise.all([
       this.db.select().from(schema.cralSedi).orderBy(asc(schema.cralSedi.ordine), asc(schema.cralSedi.nome)),
       this.db.select().from(schema.cralTipi).orderBy(asc(schema.cralTipi.ordine), asc(schema.cralTipi.nome)),
       this.db.select().from(schema.cralTipologieProdotto).orderBy(asc(schema.cralTipologieProdotto.ordine), asc(schema.cralTipologieProdotto.nome)),
@@ -104,6 +104,7 @@ export class PgCralRepository implements ICralRepository {
       this.db.select().from(schema.cralQuote),
       this.db.select({ id: schema.users.id, username: schema.users.username }).from(schema.users),
       this.db.select().from(schema.cralStatiEvento).orderBy(asc(schema.cralStatiEvento.ordine), asc(schema.cralStatiEvento.nome)),
+      this.db.select().from(schema.cralConfezioni).orderBy(asc(schema.cralConfezioni.ordine), asc(schema.cralConfezioni.nome)),
     ])
     const nomeUtente = new Map(utenti.map(u => [u.id, u.username]))
     const leg = raggruppa(legami, l => l.familiareId)
@@ -116,6 +117,7 @@ export class PgCralRepository implements ICralRepository {
     for (const r of quote) (q[String(r.anno)] ??= {})[r.socioId] = toQuota(r)
     return {
       sedi: sedi.map(toSede), tipi: tipi.map(toTipo), tipologie: tipologie.map(toTipologia), parametri, stati: stati.map(toStatoEvento),
+      confezioni: confezioni.map(toConfezione),
       soci: soci.map(s => toSocio(s, leg.get(s.id) ?? [], sto.get(s.id) ?? [], nomeUtente)),
       iniziative: iniz.map(i => toIniz(i, prt.get(i.id) ?? [], sce.get(i.id) ?? [], car.get(i.id) ?? [], ric.get(i.id) ?? [], nomeUtente)),
       quoteAnno: quoteAnno.map(a => ({ anno: a.anno, importo: a.importoCent })),
@@ -298,6 +300,23 @@ export class PgCralRepository implements ICralRepository {
   async aggiornaTipologia(id: string, patch: { nome?: string; attiva?: boolean }): Promise<CralTipologiaRow | null> {
     const [r] = await this.db.update(schema.cralTipologieProdotto).set(patch).where(eq(schema.cralTipologieProdotto.id, id)).returning()
     return r ? toTipologia(r) : null
+  }
+
+  // 0031: tipi di confezione, come le tipologie
+  async creaConfezione(nome: string): Promise<CralConfezioneRow> {
+    return this.db.transaction(async tx => {
+      await tx.execute(lucchetto)
+      const esistenti = await tx.select({ id: schema.cralConfezioni.id, ordine: schema.cralConfezioni.ordine }).from(schema.cralConfezioni)
+      const [r] = await tx.insert(schema.cralConfezioni).values({
+        id: nuovoCodice(nome, new Set(esistenti.map(e => e.id))), nome, ordine: Math.max(0, ...esistenti.map(e => e.ordine)) + 1,
+      }).returning()
+      return toConfezione(r!)
+    })
+  }
+
+  async aggiornaConfezione(id: string, patch: { nome?: string; attiva?: boolean }): Promise<CralConfezioneRow | null> {
+    const [r] = await this.db.update(schema.cralConfezioni).set(patch).where(eq(schema.cralConfezioni.id, id)).returning()
+    return r ? toConfezione(r) : null
   }
 
   // ── Persone ────────────────────────────────────────────────
@@ -622,8 +641,9 @@ export class PgCralRepository implements ICralRepository {
     return toIniz(i, part, sce, car, ric, new Map(utenti.map(u => [u.id, u.username])))
   }
 
-  async usiIniziativa(id: string, conn: Conn = this.db): Promise<{ opz: Set<string>; prodotti: Set<string>; periodi: Set<string>; articoli: Set<string> }> {
+  async usiIniziativa(id: string, conn: Conn = this.db): Promise<UsiEvento> {
     const sce = await conn.select({ dati: schema.cralScelte.dati }).from(schema.cralScelte).where(eq(schema.cralScelte.iniziativaId, id))
+    const [ini] = await conn.select({ config: schema.cralIniziative.config }).from(schema.cralIniziative).where(eq(schema.cralIniziative.id, id))
     const car = await conn.select({ art: schema.cralCarichi.articolo }).from(schema.cralCarichi).where(eq(schema.cralCarichi.iniziativaId, id))
     const ric = await conn.select({ art: schema.cralRichieste.articolo }).from(schema.cralRichieste).where(eq(schema.cralRichieste.iniziativaId, id))
     const opz = new Set<string>(), prodotti = new Set<string>(), periodi = new Set<string>()
@@ -633,7 +653,9 @@ export class PgCralRepository implements ICralRepository {
       for (const [k, n] of Object.entries(d.q ?? {})) if (n > 0) prodotti.add(k)
       for (const [k, v] of Object.entries(d.per ?? {})) if (v) periodi.add(k)
     }
-    return { opz, prodotti, periodi, articoli: new Set([...car, ...ric].map(x => x.art)) }
+    // 26.11.25: i formati scelti a mano, con la misura di adesso
+    const confezioni = ini ? confezioniUsate(sce.map(x => x.dati as { conf?: Record<string, Record<string, number>> }), ini.config as ConfigEvento) : new Map<string, number>()
+    return { opz, prodotti, periodi, articoli: new Set([...car, ...ric].map(x => x.art)), confezioni }
   }
 
   async salvaIniziativa(
@@ -1101,6 +1123,7 @@ export class PgCralRepository implements ICralRepository {
     switch (v.entita) {
       case 'sede': return this.applicaSede(tx, v.tipo, d.record as SedeArch, campi)
       case 'tipo': case 'tipologia': return this.applicaTabella(tx, v.entita, v.tipo, d.record as TipoArch | TipologiaArch, campi)
+      case 'confezione': return this.applicaConfezione(tx, v.tipo, d.record as ConfezioneArch, campi)
       case 'stato': return this.applicaStatoEvento(tx, v.tipo, d.record as StatoEventoArch, campi)
       case 'tessera': return this.applicaTessera(tx, d.record as CralTesseraParam, campi)
       case 'quotaAnno': return this.applicaQuotaAnno(tx, v.tipo, d.record as { anno: number; importo: number }, campi, c)
@@ -1145,6 +1168,18 @@ export class PgCralRepository implements ICralRepository {
     }
     if (!cur) throw new Salta('la tipologia non c\'è più')
     return this.aggiornaCampi(campi, toTipologia(cur) as unknown as Record<string, unknown>, set => tx.update(schema.cralTipologieProdotto).set(set).where(eq(schema.cralTipologieProdotto.id, t.id)))
+  }
+
+  /** 0031: un tipo di confezione arrivato da un altro ambiente. */
+  private async applicaConfezione(tx: TX, tipo: string, t: ConfezioneArch, campi: CampoVar[]) {
+    const [cur] = await tx.select().from(schema.cralConfezioni).where(eq(schema.cralConfezioni.id, t.id))
+    if (tipo !== 'MODIFICA') {
+      if (cur) throw new Salta('la confezione c\'è già')
+      await tx.insert(schema.cralConfezioni).values({ id: t.id, nome: t.nome, attiva: t.attiva, ordine: t.ordine })
+      return { fatti: 1, saltati: [] }
+    }
+    if (!cur) throw new Salta('la confezione non c\'è più')
+    return this.aggiornaCampi(campi, toConfezione(cur) as unknown as Record<string, unknown>, set => tx.update(schema.cralConfezioni).set(set).where(eq(schema.cralConfezioni.id, t.id)))
   }
 
   /** 0030: uno stato degli eventi arrivato da un altro ambiente. */
@@ -1482,6 +1517,9 @@ function toStatoEvento(r: typeof schema.cralStatiEvento.$inferSelect): CralStato
   return { id: r.id, nome: r.nome, colore: r.colore, regola: r.regola as CralRegolaStato, attivo: r.attivo, ordine: r.ordine }
 }
 function toTipologia(r: typeof schema.cralTipologieProdotto.$inferSelect): CralTipologiaRow {
+  return { id: r.id, nome: r.nome, attiva: r.attiva, ordine: r.ordine }
+}
+function toConfezione(r: typeof schema.cralConfezioni.$inferSelect): CralConfezioneRow {
   return { id: r.id, nome: r.nome, attiva: r.attiva, ordine: r.ordine }
 }
 function toAnag(r: Record<string, unknown>): CralAnagraficaRow {

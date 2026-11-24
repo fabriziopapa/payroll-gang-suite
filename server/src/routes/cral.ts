@@ -12,6 +12,7 @@
 //   POST   /sedi | PATCH /sedi/:id             sedi di consegna
 //   POST   /tipi | PATCH /tipi/:id             tipi di evento
 //   POST   /tipologie | PATCH /tipologie/:id   tipologie di prodotto
+//   POST   /confezioni | PATCH /confezioni/:id tipi di confezione (0031)
 //   POST   /stati-evento | PATCH /stati-evento/:id   stati degli eventi (0030: nome, colore, regola, attivo)
 //   PUT    /stati-evento/ordine                { ids[] } ordine degli stati
 //   PUT    /parametri/tessera                  formato della tessera
@@ -305,6 +306,21 @@ export async function cralRoutes(app: FastifyInstance): Promise<void> {
     if (!r) return reply.code(404).send({ error: 'TIPOLOGIA_NON_TROVATA' })
     await audit(request, 'CRAL_TIPOLOGIA_MODIFICATA', id, { campi: Object.keys(b) })
     return reply.send({ tipologia: r })
+  })
+  // 0031: tipi di confezione (Sacco, Pacco, Latta…). Uno in uso non si cancella: si disattiva
+  app.post('/confezioni', admin, async (request, reply) => {
+    const { nome } = z.object({ nome: riga(60, 1) }).parse(request.body)
+    const r = await repo.creaConfezione(nome)
+    await audit(request, 'CRAL_CONFEZIONE_CREATA', r.id, {})
+    return reply.code(201).send({ confezione: r })
+  })
+  app.patch('/confezioni/:id', admin, async (request, reply) => {
+    const { id } = z.object({ id: ID_TIPO }).parse(request.params)
+    const b = z.object({ nome: riga(60, 1).optional(), attiva: z.boolean().optional() }).strict().parse(request.body)
+    const r = await repo.aggiornaConfezione(id, b)
+    if (!r) return reply.code(404).send({ error: 'CONFEZIONE_NON_TROVATA' })
+    await audit(request, 'CRAL_CONFEZIONE_MODIFICATA', id, { campi: Object.keys(b) })
+    return reply.send({ confezione: r })
   })
   app.put('/parametri/tessera', admin, async (request, reply) => {
     const t = parametriTesseraSchema.parse(request.body)

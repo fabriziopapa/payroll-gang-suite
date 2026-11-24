@@ -6,7 +6,7 @@ import { apiFetch } from './client'
 import type { AppSettings, VoceConfig } from '../types'
 import type {
   AnagraficaPgs, ArchivioTestata, Carico, EsitoProva, Iniziativa, Legame, Lotto, ModelloExport, ParametriTessera, PatchScelta, Persona, QuotaSocio, Richiesta,
-  RegolaStato, ScontoPers, Sede, SezioneLotto, StatoApi, StatoEvento, TipoEvento, Tipologia, Variazione,
+  RegolaStato, ScontoPers, Sede, SezioneLotto, StatoApi, StatoEvento, TipoConfezione, TipoEvento, Tipologia, Variazione,
 } from '../components/cral/tipi'
 
 // ── Tipi risposta dal server ──────────────────────────────────
@@ -1334,6 +1334,10 @@ export const cralApi = {
   ordinaStatiEvento: (ids: string[]) => apiFetch<{ ok: true }>('/cral/stati-evento/ordine', corpo('PUT', { ids })),
   aggiornaTipologia: (id: string, p: { nome?: string; attiva?: boolean }) =>
     apiFetch<{ tipologia: Tipologia }>(`/cral/tipologie/${enc(id)}`, corpo('PATCH', p)),
+  /** 0031: tipi di confezione */
+  creaConfezione: (nome: string) => apiFetch<{ confezione: TipoConfezione }>('/cral/confezioni', corpo('POST', { nome })),
+  aggiornaConfezione: (id: string, p: { nome?: string; attiva?: boolean }) =>
+    apiFetch<{ confezione: TipoConfezione }>(`/cral/confezioni/${enc(id)}`, corpo('PATCH', p)),
   salvaTessera: (t: ParametriTessera) => apiFetch<unknown>('/cral/parametri/tessera', corpo('PUT', t)),
 
   creaPersona: (p: CralNuovaPersonaApi) => apiFetch<{ socio: Persona }>('/cral/soci', corpo('POST', p)),

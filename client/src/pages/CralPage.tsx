@@ -38,6 +38,15 @@ function unisci(prima: Scelta | undefined, patch: PatchScelta, fonte: Scelta['fo
   for (const [k, v] of Object.entries(patch)) { if (v === null || v === undefined) delete out[k]; else out[k] = v }
   if (out['q']) out['q'] = Object.fromEntries(Object.entries(out['q'] as Record<string, number>).filter(([, n]) => n > 0))
   if (out['per']) out['per'] = Object.fromEntries(Object.entries(out['per'] as Record<string, string>).filter(([, s]) => s))
+  // 26.11.25: una quantità riscritta senza confezioni torna al calcolo automatico (come il server)
+  if (out['conf']) {
+    const q = (out['q'] ?? {}) as Record<string, number>, q0 = prima?.q ?? {}
+    const tocca = patch.q !== undefined && patch.conf === undefined
+    const conf = Object.fromEntries(Object.entries(out['conf'] as Record<string, Record<string, number>>)
+      .filter(([pid, m]) => (q[pid] ?? 0) > 0 && Object.values(m).some(n => n > 0) && !(tocca && (q[pid] ?? 0) !== (q0[pid] ?? 0))))
+    if (Object.keys(conf).length) out['conf'] = conf
+    else delete out['conf']
+  }
   out['fonte'] = fonte
   return out as Scelta
 }

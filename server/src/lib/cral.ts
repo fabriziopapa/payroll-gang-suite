@@ -65,10 +65,20 @@ export const configSchema = z.object({
     tipologia:   z.string().max(10),
     nome:        riga(120, 1),
     prezzo:      CENT,
-    unita:       z.enum(['pz', 'cas', 'kg']),
+    // 26.11.25: «al litro» (decimali come al kg)
+    unita:       z.enum(['pz', 'cas', 'kg', 'lt']),
     contenuto:   z.number().positive().max(100_000).nullable().default(null),
     contenutoUm: z.enum(['lt', 'kg']).default('lt'),
     max:         z.number().int().positive().max(100_000).nullable().default(null),
+    /**
+     * 26.11.25: formati di confezione (es. sacco da 2 kg): tipo di Parametri e quanto contiene,
+     * nell'unita' in cui si vende il prodotto. Il prezzo resta quello del prodotto.
+     */
+    confezioni:  z.array(z.object({
+      id:   ID_LOC,
+      tipo: z.string().regex(/^[A-Z0-9]{1,10}$/),
+      q:    z.number().positive().max(100_000),
+    }).strict()).max(10).default([]),
   })).max(100).default([]),
   periodi: z.array(z.object({
     id:    ID_LOC,
@@ -117,7 +127,12 @@ export function erroreIniziativa(i: IniziativaInput): string | null {
       if (c.opzioni.length < 2) return 'OPZIONI_INSUFFICIENTI'
       if (i.predefinita && !c.opzioni.some(o => o.id === i.predefinita)) return 'PREDEFINITA_SCONOSCIUTA'
       break
-    case 'ORDINE':    if (!c.prodotti.length) return 'NESSUN_PRODOTTO'; break
+    case 'ORDINE':
+      if (!c.prodotti.length) return 'NESSUN_PRODOTTO'
+      if (!c.prodotti.every(p => unici(p.confezioni))) return 'ID_RIPETUTI'
+      // a cassetta si contano le cassette: niente confezioni
+      if (c.prodotti.some(p => p.unita === 'cas' && p.confezioni.length)) return 'CONFEZIONI_NON_AMMESSE'
+      break
     case 'TURNI':     if (!c.periodi.length) return 'NESSUN_PERIODO'; if (i.quota <= 0) return 'QUOTA_MANCANTE'; break
     case 'MAGAZZINO': if (!c.articoli.length) return 'NESSUN_ARTICOLO'; break
   }
@@ -213,6 +228,11 @@ export const sceltaSchema = z.object({
   scontoPers: scontoPersonale.nullable().optional(),
   /** 26.11.23.1: sede di consegna per questo evento; assente = la sede di lavoro della persona. */
   luogo:      ID_SEDE.nullable().optional(),
+  /**
+   * 26.11.25: confezioni scelte a mano, prodotto → formato → numero. Assente per un prodotto = il calcolo
+   * automatico (il minimo di confezioni), che non si salva. La quantita' e' sempre la loro somma.
+   */
+  conf:       z.record(ID_LOC, z.record(ID_LOC, z.number().int().min(0).max(100_000))).nullable().optional(),
 }).strict()
 export type DatiScelta = z.infer<typeof sceltaSchema>
 
@@ -226,6 +246,15 @@ export function unisciDati(prima: DatiScelta, patch: DatiScelta): DatiScelta {
   // quantita' a zero e settimane vuote non servono: si tolgono
   if (out['q']) out['q'] = Object.fromEntries(Object.entries(out['q'] as Record<string, number>).filter(([, n]) => n > 0))
   if (out['per']) out['per'] = Object.fromEntries(Object.entries(out['per'] as Record<string, string>).filter(([, s]) => s))
+  // 26.11.25: una quantita' riscritta (a mano o da file) senza confezioni torna al calcolo automatico
+  if (out['conf']) {
+    const q = (out['q'] ?? {}) as Record<string, number>, q0 = prima.q ?? {}
+    const tocca = patch.q !== undefined && patch.conf === undefined
+    const conf = Object.fromEntries(Object.entries(out['conf'] as Record<string, Record<string, number>>)
+      .filter(([pid, m]) => (q[pid] ?? 0) > 0 && Object.values(m).some(n => n > 0) && !(tocca && (q[pid] ?? 0) !== (q0[pid] ?? 0))))
+    if (Object.keys(conf).length) out['conf'] = conf
+    else delete out['conf']
+  }
   return out as DatiScelta
 }
 
@@ -235,8 +264,20 @@ export function erroreDati(d: DatiScelta, c: ConfigEvento): string | null {
   for (const [pid, n] of Object.entries(d.q ?? {})) {
     const p = c.prodotti.find(x => x.id === pid)
     if (!p) return 'PRODOTTO_SCONOSCIUTO'
-    if (p.unita !== 'kg' && !Number.isInteger(n)) return 'QUANTITA_NON_INTERA'
+    if (p.unita !== 'kg' && p.unita !== 'lt' && !Number.isInteger(n)) return 'QUANTITA_NON_INTERA'
     if (p.max && n > p.max) return 'OLTRE_IL_MASSIMO'
+  }
+  // 26.11.25: confezioni a mano solo di formati del prodotto, e la quantita' e' la loro somma
+  for (const [pid, m] of Object.entries(d.conf ?? {})) {
+    const p = c.prodotti.find(x => x.id === pid)
+    if (!p) return 'PRODOTTO_SCONOSCIUTO'
+    let tot = 0
+    for (const [fid, n] of Object.entries(m)) {
+      const f = (p.confezioni ?? []).find(x => x.id === fid)
+      if (!f) return 'CONFEZIONE_SCONOSCIUTA'
+      tot += n * f.q
+    }
+    if (Math.abs(tot - (d.q?.[pid] ?? 0)) > 0.005) return 'CONFEZIONI_NON_TORNANO'
   }
   for (const pid of Object.keys(d.per ?? {})) if (!c.periodi.some(x => x.id === pid)) return 'PERIODO_SCONOSCIUTO'
   return null
@@ -257,13 +298,37 @@ export function erroreLuogo(nuovo: string | null | undefined, prima: unknown, mo
   return s.attiva ? null : 'SEDE_NON_ATTIVA'
 }
 
+/**
+ * Che cosa di un evento e' gia' usato dalle persone. `confezioni` (26.11.25): i formati scelti a mano,
+ * «prodotto|formato» → quanto contiene oggi (assente negli usi calcolati prima della 26.11.25).
+ */
+export interface UsiEvento { opz: Set<string>; prodotti: Set<string>; periodi: Set<string>; articoli: Set<string>; confezioni?: Map<string, number> }
+
+/** I formati di confezione scelti a mano nelle scelte di un evento, con quanto contengono nella config di adesso. */
+export function confezioniUsate(scelte: Iterable<{ conf?: Record<string, Record<string, number>> | null }>, config: ConfigEvento): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const d of scelte) for (const [pid, m] of Object.entries(d.conf ?? {})) for (const [fid, n] of Object.entries(m)) {
+    if (n <= 0) continue
+    // la config letta dal database prima della 26.11.25 non ha i formati
+    const f = (config.prodotti ?? []).find(p => p.id === pid)?.confezioni?.find(x => x.id === fid)
+    if (f) out.set(`${pid}|${fid}`, f.q)
+  }
+  return out
+}
+
 /** Ciò che una modifica della config toglierebbe pur essendo già usato. */
-export function usiTolti(nuova: ConfigEvento, usati: { opz: Set<string>; prodotti: Set<string>; periodi: Set<string>; articoli: Set<string> }): string | null {
+export function usiTolti(nuova: ConfigEvento, usati: UsiEvento): string | null {
   const manca = (ids: Set<string>, xs: Array<{ id: string }>) => [...ids].some(id => !xs.some(x => x.id === id))
   if (manca(usati.opz, nuova.opzioni)) return 'OPZIONE_IN_USO'
   if (manca(usati.prodotti, nuova.prodotti)) return 'PRODOTTO_IN_USO'
   if (manca(usati.periodi, nuova.periodi)) return 'PERIODO_IN_USO'
   if (manca(usati.articoli, nuova.articoli)) return 'ARTICOLO_IN_USO'
+  // un formato scelto a mano non si toglie e non cambia misura: le quantita' di quelle persone ne dipendono
+  for (const [k, q] of usati.confezioni ?? []) {
+    const [pid, fid] = k.split('|')
+    const f = nuova.prodotti.find(p => p.id === pid)?.confezioni?.find(x => x.id === fid)
+    if (!f || Math.abs(f.q - q) > 1e-9) return 'CONFEZIONE_IN_USO'
+  }
   return null
 }
 

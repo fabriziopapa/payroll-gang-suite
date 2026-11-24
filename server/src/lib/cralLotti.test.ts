@@ -329,3 +329,30 @@ test('sede di consegna (26.11.23.1): viaggia con la scelta, si ritrova per nome;
   // una sede di consegna non valida nel formato non passa dal controllo del file
   assert.ok(!archivioSchema.safeParse(JSON.parse(JSON.stringify(A({ ...src, eventi: [ev([{ socio: '090001', dati: { luogo: 'nola!' } as never, fonte: 'manuale' }])] })))).success)
 })
+
+test('confezioni (0031): l\'archivio porta i tipi; un evento che toglierebbe un formato scelto a mano qui resta fermo', () => {
+  const SAC = { id: 'SAC', nome: 'Sacco', attiva: true, ordine: 1 }
+  const tab = (confezioni?: Array<typeof SAC>) => ({ tipi: [{ id: 'VEN', nome: 'Vendita', colore: '#DB2777', pagamento: true, modo: null, attivo: true, ordine: 1 }], tipologie: [], ...(confezioni ? { confezioni } : {}), tessera: TESSERA, extProssimo: 1, famProssimo: 1, quoteAnno: [] })
+  const ID = '55555555-5555-4555-8555-555555555555'
+  const prodotto = (fs: Array<{ id: string; tipo: string; q: number }>) => ({ id: 'CA', tipologia: 'TER', nome: 'Castagne', prezzo: 400, unita: 'kg' as const, contenuto: null, contenutoUm: 'kg' as const, max: null, confezioni: fs })
+  const ev = (fs: Array<{ id: string; tipo: string; q: number }>, scelte: EventoArch['scelte'] = []): EventoArch => ({
+    id: ID, tipo: 'VEN', titolo: 'Castagne', anno: 2026, data: '2026-12-18', scadenza: null, stato: 'APERTA', modalita: 'ORDINE', modoPart: 'GRUPPI',
+    gruppi: ['SD'], sedi: [], predefinita: null, fornitore: '', pagamento: '', note: '', quota: 0,
+    config: { opzioni: [], prodotti: [prodotto(fs)], periodi: [], articoli: [], sconti: {} }, archiviata: false, archiviataDa: null, archiviataIl: null,
+    partecipanti: [], scelte, carichi: [], richieste: [],
+  })
+  const due = [{ id: 'F1', tipo: 'SAC', q: 1 }, { id: 'F2', tipo: 'SAC', q: 2 }]
+  const src = A({ tabelle: tab([{ ...SAC, nome: 'Sacchetto' }, { id: 'RET', nome: 'Rete', attiva: true, ordine: 7 }]), eventi: [ev([due[1]!])] })
+  const dst = A({ tabelle: tab([SAC]), eventi: [ev(due, [{ socio: '123', fonte: 'manuale', dati: { q: { CA: 3 }, conf: { CA: { F1: 3 } } } }])] })
+  assert.ok(archivioSchema.safeParse(JSON.parse(JSON.stringify(src))).success)
+  const vs = confrontaArchivio(src, dst, ['tabelle', 'eventi'], new Set()).variazioni
+  const di = (k: string) => vs.find(v => v.chiave === k)!
+  assert.equal(di('RET').tipo, 'NUOVO'); assert.equal(di('RET').entita, 'confezione')
+  assert.deepEqual(di('SAC').campi.map(c => c.campo), ['nome'])
+  assert.match(di(ID).campi.find(c => c.campo === 'config')?.blocco ?? '', /CONFEZIONE_IN_USO/)
+  // un archivio di prima della 0031 si legge: niente tipi di confezione, prodotti senza formati
+  const vecchio = JSON.parse(JSON.stringify(A({ tabelle: tab(), eventi: [ev([])] })))
+  delete vecchio.eventi[0].config.prodotti[0].confezioni
+  const letto = archivioSchema.parse(vecchio)
+  assert.deepEqual(letto.eventi![0]!.config.prodotti[0]!.confezioni, [])
+})

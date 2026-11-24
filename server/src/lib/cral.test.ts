@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  abbina, allineaQuoteSchema, applicaSconto, azioneVietata, azioniScelta, baseTessera, copiaEventoSchema, erroreLuogo, PERMESSI_REGOLA, statoEventoSchema, configSchema, erroreAllinea, erroreDati, erroreIniziativa, formatTessera, iniziativaSchema,
+  abbina, allineaQuoteSchema, applicaSconto, azioneVietata, azioniScelta, baseTessera, confezioniUsate, copiaEventoSchema, erroreLuogo, PERMESSI_REGOLA, statoEventoSchema, configSchema, erroreAllinea, erroreDati, erroreIniziativa, formatTessera, iniziativaSchema,
   numeroTessera, prossimoDopo, quotaDopoModifica, rataMese, sceltaSchema, versato, spezzaNominativo, tesseraDaFile, tesseraNelFormato, tesseraRiammissione, unisciDati, usiTolti,
   type AnagraficaCral, type ParametriTessera,
 } from './cral.js'
@@ -240,4 +240,64 @@ test('sede di consegna (26.11.23.1): una sede dell\'elenco, attiva, solo dove si
   const da = '11111111-1111-4111-8111-111111111111'
   assert.ok(copiaEventoSchema.safeParse({ da, evento: ev, scelte: [{ socio: '090001', luogo: 'S1' }, { socio: '090002', opz: 'O1' }, { socio: '090003', opz: 'O1', luogo: 'S1' }] }).success)
   assert.ok(!copiaEventoSchema.safeParse({ da, evento: ev, scelte: [{ socio: '090001' }] }).success)
+})
+
+// ── Confezioni (26.11.25) ────────────────────────────────────
+const cConf = configSchema.parse({
+  prodotti: [
+    { id: 'CA', tipologia: 'TER', nome: 'Castagne', prezzo: 400, unita: 'kg', confezioni: [{ id: 'F1', tipo: 'SAC', q: 1 }, { id: 'F2', tipo: 'SAC', q: 2 }] },
+    { id: 'OL', tipologia: 'OLI', nome: 'Olio sfuso', prezzo: 900, unita: 'lt' },
+  ],
+})
+
+test('confezioni: formati nella config, «al litro» con i decimali, niente confezioni a cassetta', () => {
+  assert.deepEqual(cConf.prodotti[1]!.confezioni, [])
+  assert.equal(erroreDati({ q: { OL: 2.5 } }, cConf), null)
+  const base = { tipo: 'VEN', titolo: 'Castagne', anno: 2026, data: '2026-12-01', scadenza: null, stato: 'BOZZA', modalita: 'ORDINE', modoPart: 'GRUPPI', gruppi: ['SD'], sedi: [], predefinita: null, fornitore: '', pagamento: '', note: '', quota: 0 }
+  const prod = (x: Record<string, unknown>) => iniziativaSchema.parse({ ...base, config: { prodotti: [{ id: 'P', tipologia: 'TER', nome: 'X', prezzo: 100, unita: 'kg', ...x }] } })
+  assert.equal(erroreIniziativa(prod({ confezioni: [{ id: 'F1', tipo: 'SAC', q: 1 }] })), null)
+  assert.equal(erroreIniziativa(prod({ confezioni: [{ id: 'F1', tipo: 'SAC', q: 1 }, { id: 'F1', tipo: 'PAC', q: 2 }] })), 'ID_RIPETUTI')
+  assert.equal(erroreIniziativa(prod({ unita: 'cas', confezioni: [{ id: 'F1', tipo: 'SAC', q: 1 }] })), 'CONFEZIONI_NON_AMMESSE')
+  assert.throws(() => prod({ confezioni: [{ id: 'F1', tipo: 'sacco', q: 1 }] }))
+  assert.throws(() => prod({ confezioni: [{ id: 'F1', tipo: 'SAC', q: 0 }] }))
+})
+
+test('confezioni a mano: formati del prodotto e quantità che torna', () => {
+  assert.equal(erroreDati({ q: { CA: 4 }, conf: { CA: { F1: 4, F2: 0 } } }, cConf), null)
+  assert.equal(erroreDati({ q: { CA: 4 }, conf: { CA: { F2: 2 } } }, cConf), null)
+  assert.equal(erroreDati({ q: { CA: 3 }, conf: { CA: { F2: 2 } } }, cConf), 'CONFEZIONI_NON_TORNANO')
+  assert.equal(erroreDati({ q: { CA: 2 }, conf: { CA: { F9: 1 } } }, cConf), 'CONFEZIONE_SCONOSCIUTA')
+  assert.equal(erroreDati({ q: { CA: 2 }, conf: { XX: { F1: 2 } } }, cConf), 'PRODOTTO_SCONOSCIUTO')
+  assert.throws(() => sceltaSchema.parse({ conf: { CA: { F1: 1.5 } } }))
+})
+
+test('confezioni a mano: la quantità riscritta senza confezioni torna al calcolo automatico', () => {
+  const prima = sceltaSchema.parse({ q: { CA: 4, OL: 1 }, conf: { CA: { F1: 4 } }, pagato: true })
+  // un altro campo: la scelta a mano resta
+  assert.deepEqual(unisciDati(prima, sceltaSchema.parse({ note: 'x' })).conf, { CA: { F1: 4 } })
+  // la stessa quantità (es. il file ricaricato): resta
+  assert.deepEqual(unisciDati(prima, sceltaSchema.parse({ q: { CA: 4, OL: 2 } })).conf, { CA: { F1: 4 } })
+  // quantità diversa: si toglie
+  assert.equal(unisciDati(prima, sceltaSchema.parse({ q: { CA: 5, OL: 1 } })).conf, undefined)
+  // quantità e confezioni insieme: valgono quelle mandate
+  assert.deepEqual(unisciDati(prima, sceltaSchema.parse({ q: { CA: 6, OL: 1 }, conf: { CA: { F2: 3 } } })).conf, { CA: { F2: 3 } })
+  // prodotto tolto dall'ordine o confezioni tutte a zero: niente
+  assert.equal(unisciDati(prima, sceltaSchema.parse({ q: { OL: 1 }, conf: { CA: { F1: 4 } } })).conf, undefined)
+  assert.equal(unisciDati(prima, sceltaSchema.parse({ conf: { CA: { F1: 0 } } })).conf, undefined)
+  // «Automatico»
+  assert.equal(unisciDati(prima, sceltaSchema.parse({ conf: null })).conf, undefined)
+})
+
+test('confezioni a mano: un formato usato non si toglie e non cambia misura', () => {
+  const usate = confezioniUsate([{ conf: { CA: { F1: 4, F2: 0 } } }, { conf: { CA: { F2: 1 } } }, {}], cConf)
+  assert.deepEqual([...usate.entries()].sort(), [['CA|F1', 1], ['CA|F2', 2]])
+  const usi = { opz: new Set<string>(), prodotti: new Set(['CA']), periodi: new Set<string>(), articoli: new Set<string>(), confezioni: usate }
+  assert.equal(usiTolti(cConf, usi), null)
+  const senza = (fs: Array<{ id: string; tipo: string; q: number }>) => ({ ...cConf, prodotti: cConf.prodotti.map(p => p.id === 'CA' ? { ...p, confezioni: fs } : p) })
+  assert.equal(usiTolti(senza([{ id: 'F1', tipo: 'SAC', q: 1 }]), usi), 'CONFEZIONE_IN_USO')
+  assert.equal(usiTolti(senza([{ id: 'F1', tipo: 'SAC', q: 1 }, { id: 'F2', tipo: 'SAC', q: 2.5 }]), usi), 'CONFEZIONE_IN_USO')
+  // il tipo si può cambiare (sacco → pacco): la misura è la stessa
+  assert.equal(usiTolti(senza([{ id: 'F1', tipo: 'PAC', q: 1 }, { id: 'F2', tipo: 'SAC', q: 2 }, { id: 'F3', tipo: 'SAC', q: 5 }]), usi), null)
+  // config letta dal database prima della 26.11.25 (senza formati): nessun uso
+  assert.equal(confezioniUsate([{ conf: { CA: { F1: 1 } } }], { ...cConf, prodotti: [{ ...cConf.prodotti[0]!, confezioni: undefined as never }] }).size, 0)
 })

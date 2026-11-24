@@ -460,3 +460,67 @@ test('sede di consegna (26.11.23.1): riepiloghi, report e copia', () => {
   // verso i campi estivi le sedi di consegna non vanno
   assert.deepEqual(L.preparaCopia(d, ini, { ...base, modalita: 'TURNI', luoghi: true }).scelte, [])
 })
+
+// ── Confezioni (26.11.25) ────────────────────────────────────
+test('confezioni: il minimo di confezioni, e il resto quando non si compone', () => {
+  assert.deepEqual(L.componi(3, [1, 2]), { n: [1, 1], resto: 0 })
+  assert.deepEqual(L.componi(16, [1, 2]), { n: [0, 8], resto: 0 })
+  assert.deepEqual(L.componi(5, [1, 2]), { n: [1, 2], resto: 0 })
+  assert.deepEqual(L.componi(7, [2, 5]), { n: [1, 1], resto: 0 })
+  assert.deepEqual(L.componi(3, [2, 5]), { n: [1, 0], resto: 1 })
+  assert.deepEqual(L.componi(1, [2, 5]), { n: [0, 0], resto: 1 })
+  assert.deepEqual(L.componi(1.5, [0.5, 1]), { n: [1, 1], resto: 0 })
+  // quantità enormi: si arriva comunque al conto giusto
+  const g = L.componi(50_000, [1, 2])
+  assert.equal(g.n[0]! + g.n[1]! * 2, 50_000); assert.equal(g.resto, 0)
+})
+
+test('confezioni: automatiche, a mano, colonne per formato e somma per sede', () => {
+  const ca = { id: 'CA', tipologia: 'TER', nome: 'Castagne', prezzo: 400, unita: 'kg' as const, contenuto: null, contenutoUm: 'kg' as const, max: null,
+    confezioni: [{ id: 'F1', tipo: 'SAC', q: 1 }, { id: 'F2', tipo: 'SAC', q: 2 }] }
+  const pt = { ...ca, id: 'PT', nome: 'Patate', prezzo: 100, confezioni: [{ id: 'G2', tipo: 'SAC', q: 2 }] }
+  const ol = { ...ca, id: 'OL', nome: 'Olio', unita: 'pz' as const, confezioni: [] }
+  const ini = evento({ modalita: 'ORDINE', gruppi: ['SD'], prodotti: [ca, pt, ol], scelte: {
+    '090001': { q: { CA: 5, PT: 3, OL: 1 } },
+    '090002': { q: { CA: 4 }, conf: { CA: { F1: 4 } } },
+  } })
+  const d = db({ confezioni: [{ id: 'SAC', nome: 'Sacco', attiva: true, ordine: 1 }] })
+  const a = L.confezioniDi(ini, '090001', ca)!
+  assert.deepEqual(a, { n: { F1: 1, F2: 2 }, resto: 0, mano: false })
+  assert.equal(L.breveConfezioni(ca, a), '1×1 kg + 2×2 kg')
+  assert.deepEqual(L.confezioniDi(ini, '090002', ca), { n: { F1: 4, F2: 0 }, resto: 0, mano: true })
+  assert.deepEqual(L.confezioniDi(ini, '090001', pt), { n: { G2: 1 }, resto: 1, mano: false })
+  assert.equal(L.testoConfezioni(d, pt, L.confezioniDi(ini, '090001', pt)!), '1 × Sacco 2 kg + 1 kg non confezionabili')
+  assert.equal(L.confezioniDi(ini, '090001', ol), null)
+  assert.equal(L.confezioniDi(ini, '090002', pt), null)
+  // a cassetta niente confezioni, anche se la config le avesse
+  assert.deepEqual(L.formati({ ...ca, unita: 'cas' }), [])
+  const ids = ['090001', '090002']
+  const cols = L.colonneOrdine(ini, ids)
+  assert.deepEqual(cols.map(c => `${c.p.id}${c.f ? ':' + c.f.id : c.resto ? ':R' : ''}`), ['CA:F1', 'CA:F2', 'PT:G2', 'PT:R', 'OL'])
+  assert.deepEqual(cols.map(c => L.valoreColonna(ini, ids, c)), [5, 2, 1, 1, 1])
+  // le righe per sede sanno chi ha ordinato: le confezioni si sommano per sede di consegna
+  const righe = L.righeOrdiniPerSede(d, ini)
+  assert.deepEqual(righe.map(([k, r]) => [k, r.ids]), [['S1', ['090001']], ['S2', ['090002']]])
+  assert.equal(L.valoreColonna(ini, righe[1]![1].ids, cols[0]!), 4)
+})
+
+test('confezioni nei report: ordine al fornitore, per sede e per persona', () => {
+  const ca = { id: 'CA', tipologia: 'TER', nome: 'Castagne', prezzo: 400, unita: 'kg' as const, contenuto: null, contenutoUm: 'kg' as const, max: null,
+    confezioni: [{ id: 'F1', tipo: 'SAC', q: 1 }, { id: 'F2', tipo: 'SAC', q: 2 }] }
+  const ini = evento({ id: 'ev', modalita: 'ORDINE', gruppi: ['SD'], prodotti: [ca], scelte: { '090001': { q: { CA: 5 } }, '090002': { q: { CA: 4 }, conf: { CA: { F1: 4 } } } } })
+  const d = db({ iniziative: [ini], confezioni: [{ id: 'SAC', nome: 'Sacco', attiva: true, ordine: 1 }] })
+  const cfg: CfgReport = {
+    tipo: 'fornitore', ini: 'ev', sedi: [], origine: '', pred: true, tessera: false, consegnato: false, pagato: false, note: false, firma: false,
+    colSoci: { sede: true, id: false, nom: true }, sedeScelte: false, ordinaPer: 'nom', paginaPerSede: false, soloMancanti: false, inclusiVuoti: false,
+    soloDaPagare: false, soloSaldo: false, includiTolte: false, presenze: false, aCarico: false, perRif: false, eta: false, anno: 2026, qmodo: '', mesi: false, statoRic: '',
+  }
+  const f = costruisciReport(d, cfg, '2026-11-25')
+  assert.equal(f.intest.at(-1), 'Confezioni')
+  assert.equal(f.righe[0]!.at(-1), '5 × Sacco 1 kg + 2 × Sacco 2 kg')
+  const r = costruisciReport(d, { ...cfg, tipo: 'riepilogo' }, '2026-11-25')
+  assert.deepEqual(r.intest, ['Sede di consegna', 'Ordini', 'Terra · Castagne · Sacco 1 kg', 'Terra · Castagne · Sacco 2 kg', 'Importo €'])
+  assert.deepEqual(r.righe.at(-1), ['Totale complessivo', 2, '5', '2', '36,00'])
+  const p = costruisciReport(d, { ...cfg, tipo: 'scelte' }, '2026-11-25')
+  assert.deepEqual(p.righe.map(x => x[1]), ['4 (4×1 kg)', '5 (1×1 kg + 2×2 kg)'])
+})

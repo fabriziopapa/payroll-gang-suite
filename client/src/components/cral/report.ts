@@ -10,6 +10,7 @@ import { annullato, conLuogo, consegnaAltrove, partecipantiEffettivi, riepilogoA
 import type { Db, Iniziativa, Persona, QuotaSocio, Richiesta, StatoPeriodo } from './tipi'
 import {
   CAT_SCONTO_1, GRUPPI, MESI, nomeTipologia, MODI_QUOTA, TIPOLOGIE, aCaricoDi, catSconto, conScontiIni, contenutoTot, contiMagazzino, descrScontoPers,
+  breveConfezioni, colonneOrdine, confezioniDi, etichettaFormato, formati, sommaConfezioni, testoConfezioni, umDi, valoreColonna, type ColonnaOrdine,
   destinatari, dovutoTurni, eSocio, eta, fmtData, fmtImp, fmtQ, fmtSconto, gruppiProdotti, haOrdinato, importoRichiesta, iscrittoTurni,
   movimentiMagazzino, nettoSocio, nomeDi, nominativo, ordineRichieste, pagaPer, perUnita, periodiDovuti, persDi, persona, qta, quotaAnno,
   quotaDi, quotaSocio, regolaCat, regolaTurni, riepilogo, righeOrdiniPerSede, rifDi, scontoOrdine, scontoRichiesta, sedeNome, sociQuota, statoQuota,
@@ -214,6 +215,7 @@ function costruisciBase(db: Db, cfg: CfgReport, oggiIso: string): Report {
     if (cfg.tipo === 'fornitore') {
       const dest = destinatari(db, ini).filter(sediOk)
       const righe: Cella[][] = [], bold = new Set<number>()
+      const conConf = ini.prodotti.some(p => formati(p).length)
       let totE = 0
       for (const g of gruppiProdotti(ini)) {
         let se = 0, sc = 0, um = ''
@@ -221,14 +223,16 @@ function costruisciBase(db: Db, cfg: CfgReport, oggiIso: string): Report {
           const n = dest.reduce((a, s) => a + qta(ini, s.id, p.id), 0)
           const imp = Math.round(n * p.prezzo); const c = contenutoTot(p, n)
           se += imp; if (c != null) { sc += c; um = p.contenutoUm }
-          righe.push([tipNome(db, g.tip), p.nome, `${fmtImp(p.prezzo)}${perUnita(p)}`, `${fmtQ(n)}${p.unita === 'kg' ? ' kg' : p.unita === 'cas' ? (n === 1 ? ' cassetta' : ' cassette') : ''}`, fmtImp(imp), c != null ? `${fmtQ(c)} ${p.contenutoUm}` : ''])
+          // 26.11.25: per i prodotti con i formati, quante confezioni di ciascuno (e il resto non confezionabile)
+          const conf = formati(p).length && n ? testoConfezioni(db, p, sommaConfezioni(ini, dest.map(s => s.id), p)) : ''
+          righe.push([tipNome(db, g.tip), p.nome, `${fmtImp(p.prezzo)}${perUnita(p)}`, `${fmtQ(n)}${p.unita === 'kg' ? ' kg' : p.unita === 'lt' ? ' lt' : p.unita === 'cas' ? (n === 1 ? ' cassetta' : ' cassette') : ''}`, fmtImp(imp), c != null ? `${fmtQ(c)} ${p.contenutoUm}` : '', ...(conConf ? [conf] : [])])
         }
-        bold.add(righe.length); righe.push([`Subtotale ${tipNome(db, g.tip)}`, '', '', '', fmtImp(se), um ? `${fmtQ(sc)} ${um}` : '']); totE += se
+        bold.add(righe.length); righe.push([`Subtotale ${tipNome(db, g.tip)}`, '', '', '', fmtImp(se), um ? `${fmtQ(sc)} ${um}` : '', ...(conConf ? [''] : [])]); totE += se
       }
-      bold.add(righe.length); righe.push(['Totale complessivo', '', '', '', fmtImp(totE), ''])
+      bold.add(righe.length); righe.push(['Totale complessivo', '', '', '', fmtImp(totE), '', ...(conConf ? [''] : [])])
       const netti = dest.filter(s => haOrdinato(ini, s.id)).reduce((a, s) => a + nettoSocio(db, ini, s.id), 0)
-      if (netti !== totE) { righe.push(['Sconti ai soci (a carico del CRAL)', '', '', '', fmtImp(netti - totE), '']); bold.add(righe.length); righe.push(['Da incassare dai soci', '', '', '', fmtImp(netti), '']) }
-      return { titolo: `${ini.titolo} · ordine al fornitore${ini.fornitore ? ` (${ini.fornitore})` : ''}`, intest: ['Tipologia', 'Prodotto', 'Prezzo €', 'Quantità', 'Importo €', 'Contenuto'], bold, numCols: new Set([2, 3, 4, 5]), righe }
+      if (netti !== totE) { righe.push(['Sconti ai soci (a carico del CRAL)', '', '', '', fmtImp(netti - totE), '', ...(conConf ? [''] : [])]); bold.add(righe.length); righe.push(['Da incassare dai soci', '', '', '', fmtImp(netti), '', ...(conConf ? [''] : [])]) }
+      return { titolo: `${ini.titolo} · ordine al fornitore${ini.fornitore ? ` (${ini.fornitore})` : ''}`, intest: ['Tipologia', 'Prodotto', 'Prezzo €', 'Quantità', 'Importo €', 'Contenuto', ...(conConf ? ['Confezioni'] : [])], bold, numCols: new Set([2, 3, 4, 5]), righe }
     }
     if (cfg.tipo === 'scelte') {
       const perSede = cfg.sedeScelte
@@ -245,7 +249,7 @@ function costruisciBase(db: Db, cfg: CfgReport, oggiIso: string): Report {
       const righe: Cella[][] = soci.map(s => {
         const o = haOrdinato(ini, s.id), sc = ini.scelte[s.id], pp = persDi(ini, s.id)
         return [...(perSede ? [sedeNome(db, sedeDi(s))] : []), ...(cfg.tessera ? [s.tessera] : []), nominativo(s), ...(altra ? [sedeNome(db, perSede ? s.sede : sedeDi(s))] : []), ...(cfg.eta ? [etaDi(s, ini.data)] : []),
-          ...ini.prodotti.map(p => qta(ini, s.id, p.id) ? fmtQ(qta(ini, s.id, p.id)) : ''),
+          ...ini.prodotti.map(p => { const n = qta(ini, s.id, p.id); if (!n) return ''; const c = confezioniDi(ini, s.id, p); return c ? `${fmtQ(n)} (${[breveConfezioni(p, c), ...(c.resto > 0 ? [`non confez. ${fmtQ(c.resto)} ${umDi(p)}`] : [])].filter(Boolean).join(' + ')})` : fmtQ(n) }),
           ...(cs ? [o ? fmtImp(totaleSocio(ini, s.id)) : '', o ? (pp ? descrScontoPers(pp) : fmtSconto(scontoOrdine(db, ini, s.id))) : ''] : []),
           o ? fmtImp(nettoSocio(db, ini, s.id)) : '', ...(cfg.pagato ? [o ? (sc?.pagato ? 'Sì' : 'No') : ''] : []), ...(cfg.consegnato ? [o ? (sc?.consegnato ? 'Sì' : 'No') : ''] : []),
           ...(cfg.note ? [sc?.note ?? ''] : []), ...(cfg.firma ? [''] : [])]
@@ -253,11 +257,16 @@ function costruisciBase(db: Db, cfg: CfgReport, oggiIso: string): Report {
       return { titolo: `${ini.titolo} · ordini per persona`, intest, sopra, breve, gruppi: perSede, righe }
     }
     const righeS = righeOrdiniPerSede(db, ini).filter(([k]) => !cfg.sedi.length || cfg.sedi.includes(k))
-    const out: Cella[][] = righeS.map(([k, r]) => [k === '__NOSEDE' ? 'Sede non indicata' : sedeNome(db, k), r.n, ...ini.prodotti.map(p => fmtQ(r.q[p.id] ?? 0)), fmtImp(r.eur)])
-    if (out.length) out.push(['Totale complessivo', righeS.reduce((a, [, r]) => a + r.n, 0), ...ini.prodotti.map(p => fmtQ(righeS.reduce((a, [, r]) => a + (r.q[p.id] ?? 0), 0))), fmtImp(righeS.reduce((a, [, r]) => a + r.eur, 0))])
+    // 26.11.25: per i prodotti con le confezioni una colonna per formato (e «non confezionato» se serve)
+    const tutti = righeS.flatMap(([, r]) => r.ids)
+    const cols = colonneOrdine(ini, tutti)
+    const val = (ids: string[], c: ColonnaOrdine) => { const v = valoreColonna(ini, ids, c); return c.resto && v ? `${fmtQ(v)} ${umDi(c.p)}` : fmtQ(v) }
+    const sotto = (c: ColonnaOrdine) => (c.f ? ` · ${etichettaFormato(db, c.p, c.f)}` : c.resto ? ' · non confezionato' : '')
+    const out: Cella[][] = righeS.map(([k, r]) => [k === '__NOSEDE' ? 'Sede non indicata' : sedeNome(db, k), r.n, ...cols.map(c => val(r.ids, c)), fmtImp(r.eur)])
+    if (out.length) out.push(['Totale complessivo', righeS.reduce((a, [, r]) => a + r.n, 0), ...cols.map(c => val(tutti, c)), fmtImp(righeS.reduce((a, [, r]) => a + r.eur, 0))])
     return {
-      titolo: `${ini.titolo} · quantità per sede di consegna`, intest: ['Sede di consegna', 'Ordini', ...ini.prodotti.map(p => `${tipNome(db, p.tipologia)} · ${p.nome}`), 'Importo €'],
-      sopra: ['', '', ...ini.prodotti.map(p => tipNome(db, p.tipologia)), ''], breve: ['Sede di consegna', 'Ordini', ...ini.prodotti.map(p => p.nome), 'Importo €'], totale: true, righe: out,
+      titolo: `${ini.titolo} · quantità per sede di consegna`, intest: ['Sede di consegna', 'Ordini', ...cols.map(c => `${tipNome(db, c.p.tipologia)} · ${c.p.nome}${sotto(c)}`), 'Importo €'],
+      sopra: ['', '', ...cols.map(c => tipNome(db, c.p.tipologia)), ''], breve: ['Sede di consegna', 'Ordini', ...cols.map(c => `${c.p.nome}${sotto(c)}`), 'Importo €'], totale: true, righe: out,
     }
   }
 
@@ -300,7 +309,7 @@ function tipiBase(ini: Iniziativa | undefined): Array<[TipoReport, string, strin
   return [
     ['riepilogo', 'Quantità per sede', ord ? 'Pezzi per prodotto e importo, sede di consegna per sede' : "Pivot sede di consegna × scelta, con totale: l'ordine al fornitore"],
     ['scelte', ord ? 'Ordini per persona' : m === 'NESSUNA' ? 'Consegne per persona' : 'Scelte per persona', ord ? 'Quantità, totale €, pagato, note: il foglio degli ordini' : 'Nominativo, sede e scelta: la lista di consegna'],
-    ...(ord ? [['fornitore', 'Ordine al fornitore', 'Per prodotto: prezzo, quantità, importo e litri/kg, con subtotali per tipologia'] as [TipoReport, string, string]] : []),
+    ...(ord ? [['fornitore', 'Ordine al fornitore', 'Per prodotto: prezzo, quantità, importo, litri/kg e confezioni, con subtotali per tipologia'] as [TipoReport, string, string]] : []),
     SOCI, QUOTE,
   ]
 }

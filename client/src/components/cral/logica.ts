@@ -8,7 +8,7 @@
 
 import { ESIGENZE } from './contatti'
 import type {
-  CatSconto, Db, Iniziativa, Modalita, ParametriTessera, Persona, Prodotto, Relazione, Richiesta,
+  CatSconto, Db, Formato, Iniziativa, Modalita, ParametriTessera, Persona, Prodotto, Relazione, Richiesta,
   ScontoPers, ScontoRegola, StatoPeriodo, TipoPersona, QuotaSocio, StatoQuota, Gruppo, RegolaStato, StatoEvento,
 } from './tipi.ts'
 
@@ -155,7 +155,9 @@ export const qta = (ini: Iniziativa, sid: string, pid: string): number => ini.sc
 export const totaleSocio = (ini: Iniziativa, sid: string): number => ini.prodotti.reduce((a, p) => a + Math.round(qta(ini, sid, p.id) * p.prezzo), 0)
 export const tipNome = (db: Db, id: string): string => db.tipologie.find(t => t.id === id)?.nome ?? id
 export const prodLabel = (db: Db, p: Prodotto): string => `${tipNome(db, p.tipologia)} · ${p.nome}`
-export const perUnita = (p: Prodotto): string => (p.unita === 'kg' ? '/kg' : p.unita === 'cas' ? '/cassetta' : '')
+export const perUnita = (p: Prodotto): string => (p.unita === 'kg' ? '/kg' : p.unita === 'lt' ? '/lt' : p.unita === 'cas' ? '/cassetta' : '')
+/** 26.11.25: al kg e al litro le quantità hanno i decimali. */
+export const conDecimali = (p: Pick<Prodotto, 'unita'>): boolean => p.unita === 'kg' || p.unita === 'lt'
 /** Prodotti raggruppati per tipologia, nell'ordine in cui compaiono: per le intestazioni a due livelli. */
 export function gruppiProdotti(ini: Iniziativa): Array<{ tip: string; prod: Prodotto[] }> {
   const g: Array<{ tip: string; prod: Prodotto[] }> = []
@@ -165,6 +167,89 @@ export function gruppiProdotti(ini: Iniziativa): Array<{ tip: string; prod: Prod
 export const contenutoTot = (p: Prodotto, n: number): number | null => (p.contenuto ? n * p.contenuto : null)
 export const pezziSocio = (ini: Iniziativa, sid: string): number => ini.prodotti.reduce((a, p) => a + qta(ini, sid, p.id), 0)
 export const haOrdinato = (ini: Iniziativa, sid: string): boolean => pezziSocio(ini, sid) > 0
+
+// ── Confezioni (26.11.25) ────────────────────────────────────
+// Un prodotto può avere dei formati (es. castagne in sacchi da 1 e da 2 kg). A ogni persona si propone
+// il numero minimo di confezioni che fa esattamente la sua quantità; se non si può, il più possibile e
+// il resto «non confezionabile». Si sceglie anche a mano (Scelta.conf): allora la quantità è la somma.
+/** Unità in cui si misura un prodotto (e i suoi formati). */
+export const umDi = (p: Pick<Prodotto, 'unita'>): string => (p.unita === 'kg' ? 'kg' : p.unita === 'lt' ? 'lt' : 'pz')
+/** I formati validi di un prodotto: a cassetta non ce ne sono. */
+export const formati = (p: Prodotto): Formato[] => (p.unita === 'cas' ? [] : (p.confezioni ?? []).filter(f => f.q > 0))
+export const nomeConfezione = (db: Pick<Db, 'confezioni'>, id: string): string => db.confezioni.find(c => c.id === id)?.nome ?? id
+/** «Sacco 2 kg» */
+export const etichettaFormato = (db: Pick<Db, 'confezioni'>, p: Prodotto, f: Formato): string => `${nomeConfezione(db, f.tipo)} ${fmtQ(f.q)} ${umDi(p)}`
+
+/**
+ * Il minimo di confezioni che fa esattamente `q` con le misure date; se non si può, quelle che si
+ * avvicinano di più per difetto e il resto. Si conta in centesimi (0,5 kg = 50).
+ */
+export function componi(q: number, misure: number[]): { n: number[]; resto: number } {
+  const S = misure.map(m => Math.round(m * 100)), n = misure.map(() => 0)
+  let T = Math.max(0, Math.round(q * 100))
+  // quantità enormi: il grosso col formato più grande, il calcolo esatto sull'ultimo tratto
+  const big = Math.max(0, ...S), kb = S.indexOf(big), LIM = 200_000
+  if (big > 0 && T > LIM) { const k = Math.min(Math.floor((T - LIM) / big) + 1, Math.floor(T / big)); n[kb] = k; T -= k * big }
+  const INF = 1e9, dp = new Array<number>(T + 1).fill(INF), da = new Array<number>(T + 1).fill(-1)
+  dp[0] = 0
+  for (let t = 1; t <= T; t++) for (let i = 0; i < S.length; i++) {
+    const s = S[i]!
+    if (s > 0 && s <= t && dp[t - s]! + 1 < dp[t]!) { dp[t] = dp[t - s]! + 1; da[t] = i }
+  }
+  let b = T
+  while (b > 0 && dp[b] === INF) b--
+  for (let t = b; t > 0; t -= S[da[t]!]!) n[da[t]!]!++
+  return { n, resto: (T - b) / 100 }
+}
+
+export interface ConfPersona { n: Record<string, number>; resto: number; mano: boolean }
+/** Le confezioni di una persona per un prodotto (null: il prodotto non ha formati o la persona non l'ha ordinato). */
+export function confezioniDi(ini: Pick<Iniziativa, 'scelte'>, sid: string, p: Prodotto): ConfPersona | null {
+  const fs = formati(p)
+  const q = ini.scelte[sid]?.q?.[p.id] ?? 0
+  if (!fs.length || q <= 0) return null
+  const m = ini.scelte[sid]?.conf?.[p.id]
+  if (m) {
+    const n = Object.fromEntries(fs.map(f => [f.id, m[f.id] ?? 0]))
+    const tot = fs.reduce((a, f) => a + (n[f.id] ?? 0) * f.q, 0)
+    return { n, resto: Math.max(0, Math.round((q - tot) * 100) / 100), mano: true }
+  }
+  const r = componi(q, fs.map(f => f.q))
+  return { n: Object.fromEntries(fs.map((f, i) => [f.id, r.n[i] ?? 0])), resto: r.resto, mano: false }
+}
+/** «2×2 kg + 1×1 kg» (per il tag sotto la quantità). */
+export const breveConfezioni = (p: Prodotto, c: ConfPersona): string =>
+  formati(p).filter(f => c.n[f.id]).map(f => `${c.n[f.id]}×${fmtQ(f.q)} ${umDi(p)}`).join(' + ')
+/** «2 Sacco 2 kg + 1 Sacco 1 kg» (report e titoli). */
+export const testoConfezioni = (db: Pick<Db, 'confezioni'>, p: Prodotto, c: ConfPersona): string =>
+  [...formati(p).filter(f => c.n[f.id]).map(f => `${c.n[f.id]} × ${etichettaFormato(db, p, f)}`), ...(c.resto > 0 ? [`${fmtQ(c.resto)} ${umDi(p)} non confezionabili`] : [])].join(' + ')
+/** Confezioni di più persone sommate: per formato e il resto. */
+export function sommaConfezioni(ini: Pick<Iniziativa, 'scelte'>, sids: string[], p: Prodotto): ConfPersona {
+  const out: ConfPersona = { n: Object.fromEntries(formati(p).map(f => [f.id, 0])), resto: 0, mano: false }
+  for (const sid of sids) {
+    const c = confezioniDi(ini, sid, p)
+    if (!c) continue
+    for (const [k, v] of Object.entries(c.n)) out.n[k] = (out.n[k] ?? 0) + v
+    out.resto = Math.round((out.resto + c.resto) * 100) / 100
+  }
+  return out
+}
+/** Colonne di una tabella per sede: per i prodotti con formati una per formato (più «non confezionato» se serve). */
+export interface ColonnaOrdine { p: Prodotto; f: Formato | null; resto: boolean }
+export function colonneOrdine(ini: Iniziativa, sids: string[]): ColonnaOrdine[] {
+  return ini.prodotti.flatMap(p => {
+    const fs = formati(p)
+    if (!fs.length) return [{ p, f: null, resto: false }]
+    const r = sids.some(sid => (confezioniDi(ini, sid, p)?.resto ?? 0) > 0)
+    return [...fs.map(f => ({ p, f, resto: false })), ...(r ? [{ p, f: null, resto: true }] : [])]
+  })
+}
+/** Il valore di una colonna per un gruppo di persone: quantità, confezioni di un formato o resto. */
+export function valoreColonna(ini: Iniziativa, sids: string[], c: ColonnaOrdine): number {
+  if (!c.f && !c.resto) return sids.reduce((a, sid) => a + qta(ini, sid, c.p.id), 0)
+  const s = sommaConfezioni(ini, sids, c.p)
+  return c.resto ? s.resto : s.n[c.f!.id] ?? 0
+}
 
 // ── Sconti ───────────────────────────────────────────────────
 // Due livelli: regola per tipologia (nell'evento) e sconto personale sulla
@@ -220,16 +305,17 @@ export function contiOrdine(db: Db, ini: Iniziativa): ContiOrdine {
   const incassato = ord.filter(s => ini.scelte[s.id]?.pagato).reduce((a, s) => a + nettoSocio(db, ini, s.id), 0)
   return { dest, ord, lordo, sconti: lordo - totale, totale, incassato, pezzi: ord.reduce((a, s) => a + pezziSocio(ini, s.id), 0) }
 }
-export interface RigaSede { q: Record<string, number>; eur: number; n: number }
+/** `ids`: chi ha ordinato in quella sede (per le colonne delle confezioni, 26.11.25). */
+export interface RigaSede { q: Record<string, number>; eur: number; n: number; ids: string[] }
 export function righeOrdiniPerSede(db: Db, ini: Iniziativa): Array<[string, RigaSede]> {
   const m = new Map<string, RigaSede>()
   for (const s of destinatari(db, ini)) {
     if (!haOrdinato(ini, s.id)) continue
     const k = sedeConsegna(ini, s) ?? '__NOSEDE'
     let r = m.get(k)
-    if (!r) { r = { q: Object.fromEntries(ini.prodotti.map(p => [p.id, 0])), eur: 0, n: 0 }; m.set(k, r) }
+    if (!r) { r = { q: Object.fromEntries(ini.prodotti.map(p => [p.id, 0])), eur: 0, n: 0, ids: [] }; m.set(k, r) }
     for (const p of ini.prodotti) r.q[p.id] = (r.q[p.id] ?? 0) + qta(ini, s.id, p.id)
-    r.eur += nettoSocio(db, ini, s.id); r.n++
+    r.eur += nettoSocio(db, ini, s.id); r.n++; r.ids.push(s.id)
   }
   const ordine = [...db.sedi.map(s => s.id), '__NOSEDE']
   return [...m.entries()].sort((a, b) => ordine.indexOf(a[0]) - ordine.indexOf(b[0]))

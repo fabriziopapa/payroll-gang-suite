@@ -6,7 +6,7 @@
 
 import { nomiEsigenze } from './contatti'
 import { EsportaElenco } from './Esporta'
-import { useState, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import { cralApi, type CralIniziativaBody } from '../../api/endpoints'
 import type { Gruppo, Iniziativa, Modalita, Persona, Prodotto, PatchScelta } from './tipi'
 import {
@@ -15,6 +15,7 @@ import {
   riassuntoSconti, riepilogo, righeOrdiniPerSede, sedeBreve, sedeNome, tipNome, totaleSocio,
   REGOLE, annullato, frasePermessi, permessi, statoDi, type CopiaPronta,
   conLuogo, consegnaAltrove, sedeConsegna,
+  breveConfezioni, colonneOrdine, conDecimali, confezioniDi, etichettaFormato, formati, nomeConfezione, testoConfezioni, umDi, valoreColonna, type ColonnaOrdine,
 } from './logica'
 import { CopiaEventoModal } from './CopiaEvento'
 import { ScontiTipologia, ScontoPersonaleModal, scontiDaTxt, scontiInTxt, scontiTxtOk, type ScontiTxt } from './Sconti'
@@ -92,7 +93,11 @@ export function IniziativeTab() {
 }
 
 // ── Maschera dell'evento ─────────────────────────────────────
-type ProdTxt = Prodotto & { prezzoTxt: string; maxTxt: string; contTxt: string }
+type ProdTxt = Prodotto & { prezzoTxt: string; maxTxt: string; contTxt: string
+  /** 26.11.25: formati di confezione come si scrivono (quanto contiene, con la virgola) */
+  formTxt: Array<{ id: string; tipo: string; qTxt: string }> }
+/** Un numero positivo con la virgola o il punto (formati di confezione). */
+const misuraOk = (t: string) => /^\d+([.,]\d{1,2})?$/.test(t.trim()) && +t.trim().replace(',', '.') > 0
 interface FormEvento {
   tipo: string; titolo: string; anno: number; data: string; scadenza: string; stato: Iniziativa['stato']; modalita: Modalita
   modoPart: Iniziativa['modoPart']; gruppi: Gruppo[]; sedi: string[]; predefinita: string | null
@@ -117,7 +122,7 @@ function IniziativaModal({ id, onClose, onCreata, copia }: { id: string | null; 
       stato: b?.stato ?? 'BOZZA', modalita: b?.modalita ?? 'SCELTA', modoPart: b?.modoPart ?? 'GRUPPI', gruppi: b?.gruppi ?? ['SD', 'SE'], sedi: b?.sedi ?? [],
       predefinita: b?.predefinita ?? null, fornitore: b?.fornitore ?? '', pagamento: b?.pagamento ?? '', note: b?.note ?? '',
       opzioni: b?.opzioni.length ? b.opzioni.map(o => ({ ...o })) : [{ id: 'O1', etichetta: '' }, { id: 'O2', etichetta: '' }],
-      prodotti: (b?.prodotti ?? []).map(p => ({ ...p, prezzoTxt: fmtImp(p.prezzo), maxTxt: p.max ? String(p.max) : '', contTxt: p.contenuto ? fmtQ(p.contenuto) : '' })),
+      prodotti: (b?.prodotti ?? []).map(p => ({ ...p, prezzoTxt: fmtImp(p.prezzo), maxTxt: p.max ? String(p.max) : '', contTxt: p.contenuto ? fmtQ(p.contenuto) : '', formTxt: (p.confezioni ?? []).map(c => ({ id: c.id, tipo: c.tipo, qTxt: fmtQ(c.q) })) })),
       periodi: (b?.periodi ?? []).map(p => ({ id: p.id, nome: p.nome, dal: p.dal, al: p.al, postiTxt: p.posti ? String(p.posti) : '' })),
       articoli: (b?.articoli ?? []).map(a => ({ id: a.id, nome: a.nome, prezzoTxt: fmtImp(a.prezzo) })),
       quotaTxt: b?.quota ? fmtImp(b.quota) : '', scontiTxt: scontiInTxt(b?.sconti ?? {}),
@@ -131,9 +136,12 @@ function IniziativaModal({ id, onClose, onCreata, copia }: { id: string | null; 
   const ordinati = new Set(scelte.flatMap(v => Object.entries(v.q ?? {}).filter(([, n]) => n > 0).map(([k]) => k)))
   const usatiPer = new Set(scelte.flatMap(v => Object.entries(v.per ?? {}).filter(([, s]) => s).map(([k]) => k)))
   const usatiArt = new Set([...(esistente?.carichi ?? []), ...(esistente?.richieste ?? [])].map(x => x.art))
+  // 26.11.25: formati scelti a mano da qualcuno («prodotto|formato»): non si tolgono e non cambiano misura
+  const usatiForm = new Set(scelte.flatMap(v => Object.entries(v.conf ?? {}).flatMap(([pid, m]) => Object.entries(m).filter(([, n]) => n > 0).map(([fid]) => `${pid}|${fid}`))))
+  const [formAperti, setFormAperti] = useState<string | null>(null)
   const inUso = !!esistente && (scelte.length > 0 || esistente.carichi.length > 0 || esistente.richieste.length > 0)
   const opzOk = mod !== 'SCELTA' || (f.opzioni.length >= 2 && f.opzioni.every(o => o.etichetta.trim()))
-  const prodOk = mod !== 'ORDINE' || (f.prodotti.length >= 1 && f.prodotti.every(p => p.nome.trim() && parseEuro(p.prezzoTxt) !== null && (!p.maxTxt || /^\d+$/.test(p.maxTxt)) && (!p.contTxt || /^\d+([.,]\d+)?$/.test(p.contTxt))))
+  const prodOk = mod !== 'ORDINE' || (f.prodotti.length >= 1 && f.prodotti.every(p => p.nome.trim() && parseEuro(p.prezzoTxt) !== null && (!p.maxTxt || /^\d+$/.test(p.maxTxt)) && (!p.contTxt || /^\d+([.,]\d+)?$/.test(p.contTxt)) && (p.unita === 'cas' || p.formTxt.every(x => misuraOk(x.qTxt)))))
   const turOk = mod !== 'TURNI' || (f.periodi.length >= 1 && f.periodi.every(p => p.nome.trim() && p.dal && p.al && p.al >= p.dal && (!p.postiTxt || /^\d+$/.test(p.postiTxt))) && (parseEuro(f.quotaTxt) ?? 0) > 0)
   const magOk = mod !== 'MAGAZZINO' || (f.articoli.length >= 1 && f.articoli.every(a => a.nome.trim() && parseEuro(a.prezzoTxt || '0') !== null))
   const ok = !!f.titolo.trim() && !!f.data && opzOk && prodOk && turOk && magOk && scontiTxtOk(f.scontiTxt) && (f.modoPart === 'SINGOLI' || f.gruppi.length > 0) && !salvo
@@ -141,7 +149,8 @@ function IniziativaModal({ id, onClose, onCreata, copia }: { id: string | null; 
   const nAgg = esistente ? aggiunti(db, { ...esistente, modoPart: 'GRUPPI', gruppi: f.gruppi, sedi: f.sedi }).length : 0
   const setOpz = (k: string, v: string) => setF({ ...f, opzioni: f.opzioni.map(o => o.id === k ? { ...o, etichetta: v } : o) })
   const setProd = (k: string, p: Partial<ProdTxt>) => setF({ ...f, prodotti: f.prodotti.map(x => x.id === k ? { ...x, ...p } : x) })
-  const prodVuoto = (): ProdTxt => ({ id: nuovoId('P'), tipologia: db.tipologie.find(t => t.attiva)?.id ?? '', nome: '', prezzo: 0, unita: 'pz', contenuto: null, contenutoUm: 'lt', max: null, prezzoTxt: '', maxTxt: '', contTxt: '' })
+  const prodVuoto = (): ProdTxt => ({ id: nuovoId('P'), tipologia: db.tipologie.find(t => t.attiva)?.id ?? '', nome: '', prezzo: 0, unita: 'pz', contenuto: null, contenutoUm: 'lt', max: null, confezioni: [], prezzoTxt: '', maxTxt: '', contTxt: '', formTxt: [] })
+  const setForm = (k: string, fid: string, x: Partial<ProdTxt['formTxt'][number]>) => setF({ ...f, prodotti: f.prodotti.map(p => p.id !== k ? p : { ...p, formTxt: p.formTxt.map(y => y.id === fid ? { ...y, ...x } : y) }) })
   const conModo = (g: FormEvento, m: Modalita): FormEvento => ({
     ...g, modalita: m,
     prodotti: m === 'ORDINE' && !g.prodotti.length ? [prodVuoto()] : g.prodotti,
@@ -163,7 +172,8 @@ function IniziativaModal({ id, onClose, onCreata, copia }: { id: string | null; 
       quota: mod === 'TURNI' ? parseEuro(f.quotaTxt) ?? 0 : 0,
       config: {
         opzioni: mod === 'SCELTA' ? f.opzioni.map(o => ({ id: o.id, etichetta: o.etichetta.trim() })) : [],
-        prodotti: mod === 'ORDINE' ? f.prodotti.map(({ prezzoTxt, maxTxt, contTxt, ...p }) => ({ ...p, nome: p.nome.trim(), prezzo: parseEuro(prezzoTxt) ?? 0, max: maxTxt ? +maxTxt : null, contenuto: contTxt ? +contTxt.replace(',', '.') : null })) : [],
+        prodotti: mod === 'ORDINE' ? f.prodotti.map(({ prezzoTxt, maxTxt, contTxt, formTxt, ...p }) => ({ ...p, nome: p.nome.trim(), prezzo: parseEuro(prezzoTxt) ?? 0, max: maxTxt ? +maxTxt : null, contenuto: contTxt ? +contTxt.replace(',', '.') : null,
+          confezioni: p.unita === 'cas' ? [] : formTxt.map(x => ({ id: x.id, tipo: x.tipo, q: +x.qTxt.trim().replace(',', '.') })) })) : [],
         periodi: mod === 'TURNI' ? f.periodi.map(({ postiTxt, ...p }) => ({ ...p, nome: p.nome.trim(), posti: postiTxt ? +postiTxt : null })) : [],
         articoli: mod === 'MAGAZZINO' ? f.articoli.map(({ prezzoTxt, ...a }) => ({ ...a, nome: a.nome.trim(), prezzo: parseEuro(prezzoTxt || '0') ?? 0 })) : [],
         sconti: ['ORDINE', 'TURNI', 'MAGAZZINO'].includes(mod) ? scontiDaTxt(f.scontiTxt, mod) : {},
@@ -254,23 +264,53 @@ function IniziativaModal({ id, onClose, onCreata, copia }: { id: string | null; 
           </>}
           {mod === 'ORDINE' && <>
             <Scorrevole><table className="w-full text-sm">
-              <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500"><th className="py-1.5 pr-2 font-semibold">Tipologia</th><th className="py-1.5 px-2 font-semibold">Prodotto / formato</th><th className="py-1.5 px-2 font-semibold">Prezzo €</th><th className="py-1.5 px-2 font-semibold">Si vende</th><th className="py-1.5 px-2 font-semibold">Contenuto</th><th className="py-1.5 px-2 font-semibold">Max a testa</th><th /></tr></thead>
+              <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500"><th className="py-1.5 pr-2 font-semibold">Tipologia</th><th className="py-1.5 px-2 font-semibold">Prodotto / formato</th><th className="py-1.5 px-2 font-semibold">Prezzo €</th><th className="py-1.5 px-2 font-semibold">Si vende</th><th className="py-1.5 px-2 font-semibold">Contenuto</th><th className="py-1.5 px-2 font-semibold">Confezioni</th><th className="py-1.5 px-2 font-semibold">Max a testa</th><th /></tr></thead>
               <tbody>{f.prodotti.map(p => {
                 const errP = p.prezzoTxt !== '' && parseEuro(p.prezzoTxt) === null
+                const um = umDi(p), aperto = formAperti === p.id && p.unita !== 'cas'
+                const usatoForm = p.formTxt.some(x => usatiForm.has(`${p.id}|${x.id}`))
+                const riass = p.formTxt.filter(x => misuraOk(x.qTxt)).map(x => `${nomeConfezione(db, x.tipo)} ${x.qTxt.trim()} ${um}`).join(' · ')
+                const errF = p.formTxt.some(x => !misuraOk(x.qTxt))
                 return (
-                  <tr key={p.id}>
+                  <Fragment key={p.id}><tr>
                     <td className="py-1 pr-2 w-44"><select className={inputCls + ' py-1.5'} value={p.tipologia} onChange={e => setProd(p.id, { tipologia: e.target.value })}>{db.tipologie.filter(t => t.attiva || t.id === p.tipologia).map(t => <option key={t.id} value={t.id}>{t.nome}</option>)}</select></td>
                     <td className="py-1 px-2 min-w-[200px]"><input className={inputCls + ' py-1.5'} maxLength={120} value={p.nome} placeholder="Es. Latta da 5 lt" onChange={e => setProd(p.id, { nome: e.target.value })} /></td>
                     <td className="py-1 px-2 w-28"><input inputMode="decimal" className={inputCls + ' py-1.5 text-right tabular-nums ' + (errP ? 'border-red-600' : '')} value={p.prezzoTxt} placeholder="0,00" onChange={e => setProd(p.id, { prezzoTxt: e.target.value })} /></td>
-                    <td className="py-1 px-2 w-28"><select className={inputCls + ' py-1.5'} value={p.unita} onChange={e => setProd(p.id, { unita: e.target.value as Prodotto['unita'] })}><option value="pz">al pezzo</option><option value="cas">a cassetta</option><option value="kg">al kg</option></select></td>
+                    <td className="py-1 px-2 w-28"><select className={inputCls + ' py-1.5'} value={p.unita} onChange={e => { const u = e.target.value as Prodotto['unita']; setProd(p.id, { unita: u, ...(u === 'cas' ? { formTxt: [] } : {}) }) }}><option value="pz">al pezzo</option><option value="cas" disabled={usatoForm} title={usatoForm ? 'Qualcuno ha scelto le confezioni a mano' : undefined}>a cassetta</option><option value="kg">al kg</option><option value="lt">al litro</option></select></td>
                     <td className="py-1 px-2 w-36"><div className="flex gap-1"><input inputMode="decimal" className={inputW + ' py-1.5 text-right tabular-nums w-16'} value={p.contTxt} placeholder="—" title="Quanto contiene un pezzo, per sommare litri o kg (es. latta da 5 lt)" onChange={e => setProd(p.id, { contTxt: e.target.value })} /><select className={inputW + ' py-1.5 w-16 px-1'} value={p.contenutoUm} onChange={e => setProd(p.id, { contenutoUm: e.target.value as Prodotto['contenutoUm'] })}><option value="lt">lt</option><option value="kg">kg</option></select></div></td>
+                    <td className="py-1 px-2 w-44"><button type="button" disabled={p.unita === 'cas'} aria-expanded={aperto} title={p.unita === 'cas' ? 'A cassetta si contano le cassette: niente confezioni' : riass || 'Formati di confezione (es. sacco da 2 kg): PGS propone a ognuno il minimo di confezioni'}
+                      className={`w-full max-w-[11rem] truncate text-left rounded-md border px-2.5 py-1.5 text-xs disabled:opacity-40 ${aperto ? 'border-pink-600 bg-pink-950/30 text-pink-100' : errF ? 'border-red-600 text-red-300' : riass ? 'border-slate-700 text-slate-200 hover:border-slate-500' : 'border-dashed border-slate-700 text-slate-500 hover:text-slate-300'}`}
+                      onClick={() => setFormAperti(aperto ? null : p.id)}>{p.unita === 'cas' ? '—' : riass || '+ Confezioni'}</button></td>
                     <td className="py-1 px-2 w-24"><input inputMode="numeric" className={inputCls + ' py-1.5 text-right tabular-nums'} value={p.maxTxt} placeholder="—" onChange={e => setProd(p.id, { maxTxt: e.target.value.replace(/\D/g, '') })} /></td>
                     <td className="py-1 pl-1"><button title={ordinati.has(p.id) ? 'Già ordinato da qualcuno: non si toglie' : 'Togli prodotto'} disabled={ordinati.has(p.id) || f.prodotti.length <= 1} className="p-2 rounded-md text-slate-500 hover:text-red-400 disabled:opacity-30" onClick={() => setF({ ...f, prodotti: f.prodotti.filter(x => x.id !== p.id) })}><Ico d={D.trash} /></button></td>
-                  </tr>)
+                  </tr>
+                  {aperto && <tr><td colSpan={8} className="pb-3 pt-1">
+                    <div className="ml-2 rounded-lg border border-pink-900/70 bg-pink-950/10 p-3 flex flex-col gap-2">
+                      <p className={etichettaCls}>Confezioni di {p.nome.trim() || 'questo prodotto'} · quanto contiene ciascuna, in {um === 'kg' ? 'kg' : um === 'lt' ? 'litri' : 'pezzi'}</p>
+                      {p.formTxt.map(x => {
+                        const usato = usatiForm.has(`${p.id}|${x.id}`)
+                        return (
+                          <div key={x.id} className="flex flex-wrap items-center gap-2">
+                            <select className={inputW + ' py-1.5 w-44'} value={x.tipo} aria-label="Tipo di confezione" onChange={e => setForm(p.id, x.id, { tipo: e.target.value })}>
+                              {db.confezioni.filter(c => c.attiva || c.id === x.tipo).map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                              {!db.confezioni.some(c => c.id === x.tipo) && <option value={x.tipo}>{x.tipo}</option>}</select>
+                            <span className="text-xs text-slate-500">da</span>
+                            <input inputMode="decimal" disabled={usato} aria-label="Quanto contiene" className={inputW + ' py-1.5 w-20 text-right tabular-nums ' + (misuraOk(x.qTxt) ? '' : 'border-red-600')} value={x.qTxt} placeholder="2" onChange={e => setForm(p.id, x.id, { qTxt: e.target.value })} />
+                            <span className="text-xs text-slate-300 w-6">{um}</span>
+                            <button disabled={usato} title={usato ? 'Scelto a mano da qualcuno: non si toglie' : 'Togli formato'} className="p-2 rounded-md text-slate-500 hover:text-red-400 disabled:opacity-30" onClick={() => setProd(p.id, { formTxt: p.formTxt.filter(y => y.id !== x.id) })}><Ico d={D.trash} /></button>
+                            {usato && <span className="text-[11px] text-pink-300">in uso in una scelta a mano: misura fissa, non si toglie</span>}
+                          </div>)
+                      })}
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button className={btnPiccoloSec} disabled={p.formTxt.length >= 10 || !db.confezioni.some(c => c.attiva)} onClick={() => setProd(p.id, { formTxt: [...p.formTxt, { id: nuovoId('F'), tipo: db.confezioni.find(c => c.attiva)?.id ?? '', qTxt: '' }] })}><Ico d={D.plus} cls="w-3.5 h-3.5" />Aggiungi formato</button>
+                        <span className="text-xs text-slate-500">Il prezzo resta quello del prodotto ({fmtEuro(parseEuro(p.prezzoTxt) ?? 0)}{um === 'pz' ? ' al pezzo' : `/${um}`}). Senza formati il prodotto si vende come prima. I tipi (sacco, pacco…) si personalizzano in Parametri.</span>
+                      </div>
+                    </div></td></tr>}
+                  </Fragment>)
               })}</tbody>
             </table></Scorrevole>
             <button className={btnPiccoloSec + ' self-start'} onClick={() => setF({ ...f, prodotti: [...f.prodotti, prodVuoto()] })}><Ico d={D.plus} cls="w-3.5 h-3.5" />Aggiungi prodotto</button>
-            <p className="text-xs text-slate-500">Ogni riga è un prodotto con il suo prezzo: per l'olio, una riga per ogni varietà e formato. «Al kg» accetta quantità decimali (1,5 kg); «a cassetta» conta le cassette. Il contenuto serve a sommare litri o kg nell'ordine al fornitore. Prezzo 0,00 = omaggio. Le tipologie si personalizzano in Parametri.</p>
+            <p className="text-xs text-slate-500">Ogni riga è un prodotto con il suo prezzo: per l'olio, una riga per ogni varietà e formato. «Al kg» e «al litro» accettano quantità decimali (1,5 kg); «a cassetta» conta le cassette. Con le <b className="text-slate-400">confezioni</b> (es. sacchi da 1 e da 2 kg) PGS propone a ognuno il minimo di confezioni, che si corregge a mano sulla persona. Il contenuto serve a sommare litri o kg nell'ordine al fornitore. Prezzo 0,00 = omaggio. Le tipologie si personalizzano in Parametri.</p>
             <div className="grid sm:grid-cols-2 gap-4"><Campo label="Fornitore"><input className={inputCls} maxLength={160} value={f.fornitore} placeholder="A chi va l'ordine complessivo" onChange={e => setF({ ...f, fornitore: e.target.value })} /></Campo>
               <Campo label="Come si paga"><input className={inputCls} maxLength={300} value={f.pagamento} placeholder="Es. contanti al ritiro, oppure bonifico al CRAL entro la scadenza" onChange={e => setF({ ...f, pagamento: e.target.value })} /></Campo></div>
           </>}
@@ -329,17 +369,22 @@ function TabellaOrdini({ ini }: { ini: Iniziativa }) {
   const { db } = useCral()
   const righe = righeOrdiniPerSede(db, ini)
   if (!righe.length) return <p className="px-5 py-6 text-sm text-slate-500">Ancora nessun ordine.</p>
-  const tq: Record<string, number> = Object.fromEntries(ini.prodotti.map(p => [p.id, righe.reduce((a, [, r]) => a + (r.q[p.id] ?? 0), 0)]))
   const te = righe.reduce((a, [, r]) => a + r.eur, 0), tn = righe.reduce((a, [, r]) => a + r.n, 0)
+  // 26.11.25: per i prodotti con le confezioni una colonna per formato (e «non confezionato» se qualcosa resta fuori)
+  const tutti = righe.flatMap(([, r]) => r.ids)
+  const cols = colonneOrdine(ini, tutti)
+  const nCol = (g: { prod: Prodotto[] }) => cols.filter(c => g.prod.includes(c.p)).length
+  const cella = (ids: string[], c: ColonnaOrdine) => { const v = valoreColonna(ini, ids, c); return c.resto ? (v ? `${fmtQ(v)} ${umDi(c.p)}` : '0') : fmtQ(v) }
+  const tono = (ids: string[], c: ColonnaOrdine) => (valoreColonna(ini, ids, c) ? (c.resto ? 'text-amber-300' : 'text-slate-200') : 'text-slate-600')
   return (
     <Scorrevole><table className="w-full text-sm">
       <thead className="text-[11px] uppercase tracking-wider text-slate-500 bg-slate-900/60">
-        <tr><th rowSpan={2} className="px-5 py-2 font-semibold text-left align-bottom">Sede di consegna</th><th rowSpan={2} className={thCls + ' text-right align-bottom'}>Ordini</th>{gruppiProdotti(ini).map(g => <th key={g.tip} colSpan={g.prod.length} className="px-3 pt-2 pb-1 font-semibold text-center text-pink-300/90 border-b border-slate-800">{tipNome(db, g.tip)}</th>)}<th rowSpan={2} className="px-5 py-2 font-semibold text-right align-bottom">Importo</th></tr>
-        <tr>{ini.prodotti.map(p => <th key={p.id} className="px-3 pb-2 pt-1 font-semibold text-right normal-case tracking-normal whitespace-nowrap">{p.nome}</th>)}</tr></thead>
+        <tr><th rowSpan={2} className="px-5 py-2 font-semibold text-left align-bottom">Sede di consegna</th><th rowSpan={2} className={thCls + ' text-right align-bottom'}>Ordini</th>{gruppiProdotti(ini).map(g => <th key={g.tip} colSpan={nCol(g)} className="px-3 pt-2 pb-1 font-semibold text-center text-pink-300/90 border-b border-slate-800">{tipNome(db, g.tip)}</th>)}<th rowSpan={2} className="px-5 py-2 font-semibold text-right align-bottom">Importo</th></tr>
+        <tr>{cols.map(c => <th key={`${c.p.id}|${c.f?.id ?? (c.resto ? 'R' : '')}`} className="px-3 pb-2 pt-1 font-semibold text-right normal-case tracking-normal whitespace-nowrap">{c.p.nome}{(c.f || c.resto) && <div className={`font-normal ${c.resto ? 'text-amber-400/90' : 'text-pink-200/80'}`}>{c.f ? etichettaFormato(db, c.p, c.f) : 'non confezionato'}</div>}</th>)}</tr></thead>
       <tbody className="divide-y divide-slate-800/70 tabular-nums">
         {righe.map(([k, r]) => <tr key={k}><td className="px-5 py-2 text-slate-200 whitespace-nowrap">{k === '__NOSEDE' ? <span className="text-amber-400">Sede non indicata</span> : sedeNome(db, k)}</td><td className="px-3 py-2 text-right text-slate-400">{r.n}</td>
-          {ini.prodotti.map(p => <td key={p.id} className={`px-3 py-2 text-right ${r.q[p.id] ? 'text-slate-200' : 'text-slate-600'}`}>{fmtQ(r.q[p.id] ?? 0)}</td>)}<td className="px-5 py-2 text-right text-white font-medium whitespace-nowrap">{fmtEuro(r.eur)}</td></tr>)}
-        <tr className="bg-slate-800/40 font-semibold"><td className="px-5 py-2 text-white">Totale complessivo</td><td className="px-3 py-2 text-right text-white">{tn}</td>{ini.prodotti.map(p => <td key={p.id} className="px-3 py-2 text-right text-white">{fmtQ(tq[p.id] ?? 0)}</td>)}<td className="px-5 py-2 text-right text-white whitespace-nowrap">{fmtEuro(te)}</td></tr>
+          {cols.map(c => <td key={`${c.p.id}|${c.f?.id ?? (c.resto ? 'R' : '')}`} className={`px-3 py-2 text-right whitespace-nowrap ${tono(r.ids, c)}`}>{cella(r.ids, c)}</td>)}<td className="px-5 py-2 text-right text-white font-medium whitespace-nowrap">{fmtEuro(r.eur)}</td></tr>)}
+        <tr className="bg-slate-800/40 font-semibold"><td className="px-5 py-2 text-white">Totale complessivo</td><td className="px-3 py-2 text-right text-white">{tn}</td>{cols.map(c => <td key={`${c.p.id}|${c.f?.id ?? (c.resto ? 'R' : '')}`} className={`px-3 py-2 text-right whitespace-nowrap ${c.resto ? 'text-amber-300' : 'text-white'}`}>{cella(tutti, c)}</td>)}<td className="px-5 py-2 text-right text-white whitespace-nowrap">{fmtEuro(te)}</td></tr>
       </tbody>
     </table></Scorrevole>
   )
@@ -444,6 +489,58 @@ function SedeConsegnaModal({ ini, tutti, filtrati, onClose }: { ini: Iniziativa;
   )
 }
 
+// ── Confezioni della persona (26.11.25) ──────────────────────
+/**
+ * Le confezioni di una persona per un prodotto: di partenza il calcolo automatico (il minimo di confezioni);
+ * con + e − si scelgono a mano e la quantità diventa la loro somma. «Automatico» torna al calcolo.
+ */
+function ConfezioniModal({ ini, sid, pid, attivo, onClose, onPatch }: { ini: Iniziativa; sid: string; pid: string; attivo: boolean; onClose: () => void; onPatch: (p: PatchScelta) => void }) {
+  const { db } = useCral()
+  const s = db.perId.get(sid), p = ini.prodotti.find(x => x.id === pid)
+  if (!s || !p) return null
+  const fs = formati(p), um = umDi(p), sc = ini.scelte[sid]
+  const q = qta(ini, sid, pid)
+  const cp = confezioniDi(ini, sid, p) ?? { n: Object.fromEntries(fs.map(f => [f.id, 0])), resto: 0, mano: !!sc?.conf?.[pid] }
+  const inConf = fs.reduce((a, f) => a + (cp.n[f.id] ?? 0) * f.q, 0)
+  function cambia(fid: string, d: number) {
+    const n = Object.fromEntries(fs.map(f => [f.id, Math.max(0, (cp.n[f.id] ?? 0) + (f.id === fid ? d : 0))]))
+    const tot = Math.round(fs.reduce((a, f) => a + (n[f.id] ?? 0) * f.q, 0) * 100) / 100
+    if (p!.max && tot > p!.max) { avviso(`Massimo ${p!.max} per persona per «${p!.nome}»`, 'warning'); return }
+    const { [pid]: _x, ...altre } = sc?.conf ?? {}
+    const { [pid]: _y, ...altreQ } = sc?.q ?? {}
+    onPatch(tot > 0
+      ? { q: { ...altreQ, [pid]: tot }, conf: { ...altre, [pid]: n } }
+      : { q: altreQ, conf: Object.keys(altre).length ? altre : null })
+  }
+  function automatico() {
+    const { [pid]: _x, ...altre } = sc?.conf ?? {}
+    onPatch({ conf: Object.keys(altre).length ? altre : null })
+  }
+  return (
+    <Modale titolo={`Confezioni · ${p.nome}`} sotto={nominativo(s)} onClose={onClose}
+      piedi={<><button className={btnSecondario} disabled={!attivo || !cp.mano} onClick={automatico} title="Torna al numero minimo di confezioni per la quantità di adesso">Automatico</button><button className={btnPrimario} onClick={onClose}>Fatto</button></>}>
+      <div className="flex flex-col gap-3">
+        <p className="text-xs text-slate-400">{cp.mano ? 'Scelte a mano: la quantità è la somma delle confezioni. «Automatico» torna al minimo di confezioni.' : 'Calcolo automatico: il minimo di confezioni per la quantità ordinata. Cambia i numeri per sceglierle a mano (la quantità segue).'}</p>
+        <div className="divide-y divide-slate-800 border-y border-slate-800">
+          {fs.map(f => (
+            <div key={f.id} className="flex items-center gap-3 py-2">
+              <span className="flex-1 text-sm text-slate-100">{etichettaFormato(db, p, f)}</span>
+              <button className={btnPiccoloSec + ' w-9 justify-center'} disabled={!attivo || !(cp.n[f.id] ?? 0)} aria-label={`Una ${etichettaFormato(db, p, f)} in meno`} onClick={() => cambia(f.id, -1)}>−</button>
+              <span className="w-8 text-center font-semibold tabular-nums text-white">{cp.n[f.id] ?? 0}</span>
+              <button className={btnPiccoloSec + ' w-9 justify-center'} disabled={!attivo} aria-label={`Una ${etichettaFormato(db, p, f)} in più`} onClick={() => cambia(f.id, 1)}>+</button>
+            </div>))}
+        </div>
+        <div className="flex flex-wrap justify-between gap-2 text-sm tabular-nums">
+          <span className="text-slate-400">Ordinati {fmtQ(q)} {um} · in confezioni {fmtQ(inConf)} {um}</span>
+          <span className="text-white font-medium">{fmtEuro(Math.round(q * p.prezzo))}</span>
+        </div>
+        {cp.resto > 0 && <p className="text-xs"><span className="rounded-full px-2 py-0.5 bg-amber-950/70 text-amber-300">non confezionabile · {fmtQ(cp.resto)} {um}</span> <span className="text-slate-500">non entra in nessun formato: resta da consegnare a parte, o si sceglie a mano.</span></p>}
+        {!attivo && <p className="text-xs text-amber-400">Lo stato dell'evento non permette di cambiare gli ordini.</p>}
+      </div>
+    </Modale>
+  )
+}
+
 function IniziativaDettaglio({ id, onBack, onApri }: { id: string; onBack: () => void; onApri: (id: string) => void }) {
   const [esporta, setEsporta] = useState(false)
   const { db, esegui, scelta } = useCral()
@@ -464,6 +561,7 @@ function IniziativaDettaglio({ id, onBack, onApri }: { id: string; onBack: () =>
   const [copiaDa, setCopiaDa] = useState(false)
   const [copia, setCopia] = useState<CopiaPronta | null>(null)
   const [luogoBlocco, setLuogoBlocco] = useState(false)
+  const [confAperta, setConfAperta] = useState<{ sid: string; pid: string } | null>(null)
   if (!ini) return null
   const mod = ini.modalita
   const singoli = ini.modoPart === 'SINGOLI'
@@ -506,7 +604,7 @@ function IniziativaDettaglio({ id, onBack, onApri }: { id: string; onBack: () =>
   // la fonte («modulo», «predef.») resta finché non si cambia a mano la scelta o le quantità
   const aggiorna = (sid: string, patch: PatchScelta) => scelta(ini.id, sid, patch, 'opz' in patch || 'q' in patch ? 'manuale' : (ini.scelte[sid]?.fonte ?? 'manuale'))
   const setQta = (s: Persona, p: Prodotto, v: string) => {
-    let n = Math.max(0, p.unita === 'kg' ? Math.round((parseFloat(v.replace(',', '.')) || 0) * 100) / 100 : (parseInt(v, 10) || 0))
+    let n = Math.max(0, conDecimali(p) ? Math.round((parseFloat(v.replace(',', '.')) || 0) * 100) / 100 : (parseInt(v, 10) || 0))
     if (p.max && n > p.max) { n = p.max; avviso(`Massimo ${p.max} per persona per «${p.nome}»`, 'warning') }
     aggiorna(s.id, { q: { ...(ini.scelte[s.id]?.q ?? {}), [p.id]: n } })
   }
@@ -594,7 +692,17 @@ function IniziativaDettaglio({ id, onBack, onApri }: { id: string; onBack: () =>
                           {sc?.opz && sc.fonte === 'modulo' && <span title="Arrivata dalle risposte del modulo" className="text-[10px] text-cyan-400 uppercase tracking-wider">modulo</span>}
                           {sc?.opz && sc.fonte === 'predefinita' && <span className="text-[10px] text-indigo-400 uppercase tracking-wider">predef.</span>}
                           {sc?.opz && sc.fonte === 'copia' && <span title="Riportata dall'evento copiato: si cambia a mano" className="text-[10px] text-amber-300 uppercase tracking-wider">da copia</span>}</div></td>}
-                        {mod === 'ORDINE' && ini.prodotti.map(p => <td key={p.id} className="px-2 py-1.5 text-center"><input type="number" min="0" step={p.unita === 'kg' ? '0.5' : '1'} max={p.max ?? undefined} disabled={!perm.raccolta} className={inputW + ' py-1 w-16 text-center tabular-nums ' + (qta(ini, s.id, p.id) ? 'border-pink-700 text-white' : 'text-slate-500')} value={qta(ini, s.id, p.id)} onChange={e => setQta(s, p, e.target.value)} aria-label={`${prodLabel(db, p)} per ${nominativo(s)}`} /></td>)}
+                        {mod === 'ORDINE' && ini.prodotti.map(p => {
+                          const cp = confezioniDi(ini, s.id, p)
+                          const breve = cp ? breveConfezioni(p, cp) : ''
+                          return <td key={p.id} className="px-2 py-1.5 text-center align-top"><input type="number" min="0" step={conDecimali(p) ? '0.5' : '1'} max={p.max ?? undefined} disabled={!perm.raccolta} className={inputW + ' py-1 w-16 text-center tabular-nums ' + (qta(ini, s.id, p.id) ? 'border-pink-700 text-white' : 'text-slate-500')} value={qta(ini, s.id, p.id)} onChange={e => setQta(s, p, e.target.value)} aria-label={`${prodLabel(db, p)} per ${nominativo(s)}`} />
+                            {cp && <div className="flex flex-col items-center gap-0.5 mt-1">
+                              {breve && <button type="button" onClick={() => setConfAperta({ sid: s.id, pid: p.id })} title={`${cp.mano ? 'Scelte a mano' : 'Automatico'}: ${testoConfezioni(db, p, { ...cp, resto: 0 })}. Clic per cambiare`}
+                                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] whitespace-nowrap ${cp.mano ? 'bg-pink-950/70 text-pink-200 hover:bg-pink-900/60' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>{breve}{cp.mano && <Ico d={D.edit} cls="w-3 h-3" />}</button>}
+                              {cp.resto > 0 && <button type="button" onClick={() => setConfAperta({ sid: s.id, pid: p.id })} title={`${fmtQ(cp.resto)} ${umDi(p)} non entrano in nessuna confezione. Clic per sceglierle a mano`}
+                                className="rounded-full px-2 py-0.5 text-[11px] whitespace-nowrap bg-amber-950/70 text-amber-300 hover:bg-amber-900/60">non confez. · {fmtQ(cp.resto)} {umDi(p)}</button>}
+                            </div>}</td>
+                        })}
                         {mod === 'ORDINE' && <><td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{ordinato ? <>{nettoSocio(db, ini, s.id) !== totaleSocio(ini, s.id) && <div className="text-[11px] text-slate-500 line-through">{fmtEuro(totaleSocio(ini, s.id))}</div>}<span className="text-white">{fmtEuro(nettoSocio(db, ini, s.id))}</span>
                           <div><button disabled={!perm.gestione} className={`text-[11px] ${persDi(ini, s.id) ? 'text-amber-300' : 'text-slate-500 hover:text-slate-300'}`} onClick={() => setSpOrd(s)}>{etichettaPers(persDi(ini, s.id), regolaCat(ini, catPersona(s, db)))}</button></div></> : <span className="text-slate-600">—</span>}</td>
                           <td className="px-3 py-2 text-center"><input type="checkbox" disabled={!perm.gestione || !ordinato} className="accent-emerald-500 w-4 h-4" checked={!!sc?.pagato} onChange={e => aggiorna(s.id, { pagato: e.target.checked })} aria-label={`Pagato da ${nominativo(s)}`} /></td>
@@ -610,6 +718,7 @@ function IniziativaDettaglio({ id, onBack, onApri }: { id: string; onBack: () =>
       {spOrd && <ScontoPersonaleModal titolo={`Sconto · ${nominativo(spOrd)}`} sotto="Sull'ordine intero" regola={regolaCat(ini, catPersona(spOrd, db))} valore={persDi(ini, spOrd.id)} lordo={totaleSocio(ini, spOrd.id)} onClose={() => setSpOrd(null)}
         onSalva={v => { aggiorna(spOrd.id, { scontoPers: v }); setSpOrd(null); avviso(v ? 'Sconto personale salvato' : 'Sconto automatico') }} />}
       {edit && <IniziativaModal id={id} onClose={() => setEdit(false)} />}
+      {confAperta && <ConfezioniModal ini={ini} sid={confAperta.sid} pid={confAperta.pid} attivo={perm.raccolta} onClose={() => setConfAperta(null)} onPatch={patch => aggiorna(confAperta.sid, patch)} />}
       {luogoBlocco && <SedeConsegnaModal ini={ini} tutti={dest} filtrati={lista} onClose={() => setLuogoBlocco(false)} />}
       {copiaDa && <CopiaEventoModal ini={ini} onClose={() => setCopiaDa(false)} onAvanti={c => { setCopiaDa(false); setCopia(c) }} />}
       {copia && <IniziativaModal id={null} copia={copia} onClose={() => setCopia(null)} onCreata={nuovo => onApri(nuovo)} />}

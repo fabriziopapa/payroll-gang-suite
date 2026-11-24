@@ -97,10 +97,10 @@ export function costruisciModello(t: TracciatoModello, st: Pick<CralStato, 'tipo
     const prod = cfg.prodotti ?? []
     // «Tipologia - Prodotto»: l'intestazione che l'import riconosce
     const col = prod.map(p => `${tip.get(p.tipologia) ?? p.tipologia} - ${p.nome}`)
-    const q = (k: number) => prod.map((p, j) => (j === k % Math.max(1, prod.length) ? (p.unita === 'kg' ? '1,5' : '2') : ''))
+    const q = (k: number) => prod.map((p, j) => (j === k % Math.max(1, prod.length) ? (p.unita === 'kg' || p.unita === 'lt' ? '1,5' : '2') : ''))
     return fine('T3', 'Ordini', [...chiavi, ...col, 'PAGATO', 'NOTE'], righePersone(col.length + 2),
       [es('090123', '', '', '', [...q(0), 'SI', '']), es('', '333 123 4567', '', '', [...q(1), '', '']), es('', '', '', 'ROSSI Carla', [...q(0), '', 'ritira il collega'])],
-      [{ nome: 'Prodotti', intest: ['Colonna', 'Quantità', 'Massimo a testa'], righe: prod.map((p, j) => [col[j]!, p.unita === 'kg' ? 'in kg, anche con la virgola' : 'numero intero', p.max ? String(p.max) : '']) }])
+      [{ nome: 'Prodotti', intest: ['Colonna', 'Quantità', 'Massimo a testa'], righe: prod.map((p, j) => [col[j]!, p.unita === 'kg' ? 'in kg, anche con la virgola' : p.unita === 'lt' ? 'in litri, anche con la virgola' : 'numero intero', p.max ? String(p.max) : '']) }])
   }
   // T5
   const per = cfg.periodi ?? []

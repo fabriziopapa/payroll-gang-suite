@@ -63,7 +63,7 @@ interface Caricamento {
 function righeCral(a: Archivio): Record<string, number> {
   const r: Record<string, number> = {}
   if (a.sedi) r['sedi'] = a.sedi.length
-  if (a.tabelle) r['tabelle'] = a.tabelle.tipi.length + a.tabelle.tipologie.length + a.tabelle.quoteAnno.length + 1
+  if (a.tabelle) r['tabelle'] = a.tabelle.tipi.length + a.tabelle.tipologie.length + (a.tabelle.confezioni?.length ?? 0) + a.tabelle.quoteAnno.length + 1
   if (a.soci) r['soci'] = a.soci.length
   if (a.quote) r['quote'] = a.quote.length
   if (a.eventi) r['eventi'] = a.eventi.length
