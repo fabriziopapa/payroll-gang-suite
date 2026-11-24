@@ -125,6 +125,7 @@ payroll-gang-suite/
 ├── .env.example                 # Variabili d'ambiente, documentate una per una
 ├── .githooks/pre-commit         # Guardrail PII e segreti (CF, matricole, idAb, chiavi)
 ├── pgs-diagnosi-trasferimento.sh # Diagnosi di sola lettura e soli conteggi (pesi, cifratura, orfani, limiti del proxy): `bash pgs-diagnosi-trasferimento.sh` da root
+├── pgs-diagnosi-ordini.sh       # Diagnosi di sola lettura degli eventi CRAL a ordine (prodotti, quantita', pagati/consegnati), senza persone: `bash pgs-diagnosi-ordini.sh [TITOLO]` da root
 └── LICENSE
 ```
 
@@ -531,6 +532,8 @@ L'impronta dello schema non guarda il **testo** dei vincoli `CHECK` ne' le esten
 Audit (entita' `trasferimento`): `TRASFERIMENTO_EXPORT` (file, dimensione, impronta, conteggi; mai la frase), `TRASFERIMENTO_FILE_APERTO`, `TRASFERIMENTO_FILE_RIFIUTATO`, `TRASFERIMENTO_CONFRONTO`; `OTP_CONFERMA_FALLITA` (entita' `users`); `CRAL_LOTTO_PROVA` (entita' `cral`).
 
 `pgs-diagnosi-trasferimento.sh` (da root, sola lettura, stampa solo numeri) dice in che stato e' un ambiente prima di un trasferimento: pesi, cifratura dei campi protetti, riferimenti gia' orfani, contatori, limiti del proxy.
+
+`pgs-diagnosi-ordini.sh` (da root, sola lettura, nessun nome ne' matricola) mostra gli eventi CRAL in modalita' Ordine: come sono impostati i prodotti, ordini e totali per prodotto, quali quantita' sono state chieste e da quante persone, pagati e consegnati, chiavi presenti nei dati delle scelte. Con un argomento filtra per titolo: `bash pgs-diagnosi-ordini.sh OLIO`.
 
 ---
 
