@@ -16,6 +16,10 @@ function numeroRicordato(): { numero: boolean; numeroPerGruppo: boolean } {
   catch { return { numero: false, numeroPerGruppo: true } }
 }
 function ricordaNumero(v: { numero: boolean; numeroPerGruppo: boolean }) { try { localStorage.setItem(CHIAVE_NUM, JSON.stringify(v)) } catch { /* browser senza memoria: vale per questa volta */ } }
+// 26.11.25.2: anche la griglia si ricorda in questo browser (spenta di partenza)
+const CHIAVE_GRIGLIA = 'pgs.cral.report.griglia'
+function grigliaRicordata(): boolean { try { return localStorage.getItem(CHIAVE_GRIGLIA) === '1' } catch { return false } }
+function ricordaGriglia(v: boolean) { try { localStorage.setItem(CHIAVE_GRIGLIA, v ? '1' : '0') } catch { /* browser senza memoria */ } }
 import { Campo, D, Ico, Interruttore, avviso, btnPrimario, btnSecondario, cardCls, chipCls, etichettaCls, inputCls, scarica, sceltaCls, useCral, Scorrevole } from './ui'
 
 export function ReportTab() {
@@ -26,7 +30,7 @@ export function ReportTab() {
     tipo: 'riepilogo', ini: prima, sedi: [], origine: '', pred: true, tessera: true, consegnato: true, pagato: true, note: true, firma: false,
     colSoci: { sede: true, id: true, nom: true }, sedeScelte: true, ordinaPer: 'nom', paginaPerSede: true, soloMancanti: false, inclusiVuoti: false,
     soloDaPagare: false, soloSaldo: false, includiTolte: false, presenze: true, aCarico: true, perRif: true, eta: false, anno: +oggi().slice(0, 4), qmodo: '', mesi: true, statoRic: '',
-    ...numeroRicordato(),
+    ...numeroRicordato(), griglia: grigliaRicordata(),
   })
   const [pdfInCorso, setPdfInCorso] = useState(false)
   const oggiIso = oggi()
@@ -35,6 +39,7 @@ export function ReportTab() {
   const set = (p: Partial<CfgReport>) => {
     const n = { ...cfg, ...p }
     if ('numero' in p || 'numeroPerGruppo' in p) ricordaNumero({ numero: !!n.numero, numeroPerGruppo: !!n.numeroPerGruppo })
+    if ('griglia' in p) ricordaGriglia(!!n.griglia)
     setCfg(n)
   }
   const senzaIni = cfg.tipo === 'soci' || cfg.tipo === 'quote'
@@ -123,6 +128,9 @@ export function ReportTab() {
           <Interruttore on={!!cfg.numero} onChange={v => set({ numero: v })} label="Numero progressivo (1, 2, 3…)" />
           {cfg.numero && rep.gruppi && <Interruttore on={!!cfg.numeroPerGruppo} onChange={v => set({ numeroPerGruppo: v })} label={`Ricomincia da 1 in ogni ${cfg.tipo === 'settimane' ? 'settimana' : modR === 'TURNI' ? 'famiglia' : 'sede'}`} />}
           {cfg.numero && <p className="text-[11px] text-slate-500 pl-11">Colonna «N.» in anteprima, CSV e PDF. Totali e subtotali non si contano.</p>}</div>}
+        <div className="flex flex-col gap-1">
+          <Interruttore on={!!cfg.griglia} onChange={v => set({ griglia: v })} label="Griglia (linee verticali fra le colonne)" />
+          {cfg.griglia && <p className="text-[11px] text-slate-500 pl-11">In anteprima e nel PDF; il CSV non ha linee.</p>}</div>
         <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-800">
           <button className={btnPrimario} disabled={!rep.righe.length} onClick={() => scarica(`${nomeBase}.csv`, new Blob([csv()], { type: 'text/csv;charset=utf-8' }))}><Ico d={D.download} />CSV</button>
           <button className={btnPrimario} disabled={!rep.righe.length || pdfInCorso} onClick={() => void pdf()}><Ico d={D.download} />{pdfInCorso ? 'PDF…' : 'PDF'}</button>
@@ -132,7 +140,7 @@ export function ReportTab() {
       </div>
       <div className={`${cardCls} overflow-hidden min-w-0`}>
         <div className="px-5 py-3 border-b border-slate-800 flex flex-wrap items-center gap-2"><p className="text-sm font-medium text-white flex-1">{rep.titolo}</p><span className="text-xs text-slate-500 tabular-nums">{rep.totale ? Math.max(0, rep.righe.length - 1) : rep.righe.length} righe</span></div>
-        <Scorrevole className="max-h-[640px]"><table className="w-full text-sm">
+        <Scorrevole className="max-h-[640px]"><table className={`w-full text-sm ${cfg.griglia ? 'border-collapse border border-slate-700 [&_th]:border [&_th]:border-slate-700 [&_td]:border [&_td]:border-slate-800' : ''}`}>
           <thead className="sticky top-0 bg-slate-900 text-left text-[11px] uppercase tracking-wider text-slate-500">
             {rep.sopra && <tr>{(() => {
               const out: Array<{ t: string; n: number }> = []

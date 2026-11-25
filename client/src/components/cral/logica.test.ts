@@ -533,3 +533,12 @@ test('confezioni nei report: ordine al fornitore, per sede e per persona', () =>
   const g = costruisciReport(d, { ...cfg, tipo: 'scelte', sedeScelte: true }, '2026-11-25')
   assert.deepEqual(g.righe.map(x => x.slice(0, 5)), [['Sede Uno', 'ROSSI Luca', '5', '1', '2'], ['Sede Uno', 'Totale sede', '5', '1', '2'], ['Sede Due', 'BIANCHI Giulia', '4', '4', ''], ['Sede Due', 'Totale sede', '4', '4', '']])
 })
+
+test('report: il PDF si genera con e senza griglia (26.11.25.2)', async () => {
+  const { creaPdf } = await import('./report.ts')
+  const rep = { titolo: 'Prova', intest: ['Sede', 'Nominativo', 'Castagne', 'Firma per ritiro'], sopra: ['', '', 'Terra', ''], gruppi: true, righe: [['S1', 'ROSSI Luca', '5', ''], ['S1', 'Totale sede', '5', '']], bold: new Set([1]) }
+  for (const griglia of [false, true]) {
+    const b = await creaPdf(rep, { firma: true, paginaPerSede: false, griglia }, 'prova', '2026-11-25')
+    assert.ok(b.size > 1000)
+  }
+})

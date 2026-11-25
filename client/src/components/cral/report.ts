@@ -30,6 +30,8 @@ export interface CfgReport {
   numero?: boolean; numeroPerGruppo?: boolean
   /** 26.11.23.1: per chi ritira altrove, l'altra sede accanto (la sede di lavoro se si raggruppa, se no quella di consegna). */
   sedeAltra?: boolean
+  /** 26.11.25.2: griglia (linee verticali fra le colonne e bordo) in anteprima e PDF; spenta di partenza */
+  griglia?: boolean
 }
 export type Cella = string | number
 export interface Report {
@@ -344,7 +346,7 @@ function tipiBase(ini: Iniziativa | undefined): Array<[TipoReport, string, strin
 export const testoPdf = (v: Cella): string => String(v).replace(/−/g, '-').replace(/≠/g, '<>').replace(/→/g, '->').replace(/[●•]/g, '*')
   .replace(/[^\u0000-ÿ€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ]/g, '?')
 
-export async function creaPdf(rep: Report, cfg: Pick<CfgReport, 'firma' | 'paginaPerSede'>, utente: string, oggiIso: string): Promise<Blob> {
+export async function creaPdf(rep: Report, cfg: Pick<CfgReport, 'firma' | 'paginaPerSede' | 'griglia'>, utente: string, oggiIso: string): Promise<Blob> {
   const { jsPDF } = await import('jspdf')
   const conGruppi = !!rep.gruppi
   const intest = (rep.breve ?? rep.intest).slice(conGruppi ? 1 : 0)
@@ -367,7 +369,17 @@ export async function creaPdf(rep: Report, cfg: Pick<CfgReport, 'firma' | 'pagin
   })
   const somma = pesi.reduce((a, b) => a + b, 0) || 1
   const larg = pesi.map(p => (p / somma) * LARGH)
+  // 26.11.25.2: bordi delle colonne, per la griglia
+  const xs = larg.reduce<number[]>((a, w) => [...a, a[a.length - 1]! + w], [X0])
   let y = 0
+  /** Griglia: linee verticali sui bordi dati, per la riga che sta fra y0 e y1 (e la linea sopra, se `sopra`). */
+  const verticali = (bordi: number[], conSopra = false) => {
+    if (!cfg.griglia) return
+    const y0 = y - hRiga + 1.4, y1 = y + 1.4
+    doc.setDrawColor(170, 176, 186); doc.setLineWidth(0.2)
+    for (const x of bordi) doc.line(x, y0, x, y1)
+    if (conSopra) doc.line(X0, y0, X0 + LARGH, y0)
+  }
   const cella = (t: string, x: number, w: number, destra: boolean) => {
     let s = testoPdf(t)
     while (s && doc.getTextWidth(s) > w - 2.4) s = s.slice(0, -1)
@@ -384,16 +396,19 @@ export async function creaPdf(rep: Report, cfg: Pick<CfgReport, 'firma' | 'pagin
     if (sopra?.some(Boolean)) {
       doc.setFillColor(224, 231, 255)
       let x = X0, k = 0
+      const bordi = [X0]
       while (k < nCol) {
         let j = k + 1; while (j < nCol && sopra[j] && sopra[j] === sopra[k]) j++
         const w = larg.slice(k, j).reduce((a, b) => a + b, 0)
         if (sopra[k]) { doc.rect(x, y - hRiga + 1.4, w, hRiga, 'F'); cella(sopra[k]!, x, w, false) }
-        x += w; k = j
+        x += w; k = j; bordi.push(x)
       }
+      verticali(bordi, true)
       y += hRiga
     }
     doc.setFillColor(79, 70, 229); doc.rect(X0, y - hRiga + 1.4, LARGH, hRiga, 'F'); doc.setTextColor(255)
     let x = X0; intest.forEach((h, k) => { cella(h, x, larg[k]!, num(k)); x += larg[k]! })
+    verticali(xs, !sopra?.some(Boolean))
     doc.setTextColor(0); doc.setFont('helvetica', 'normal'); y += hRiga
   }
   const riga = (r: Cella[], grassetto: boolean) => {
@@ -402,7 +417,8 @@ export async function creaPdf(rep: Report, cfg: Pick<CfgReport, 'firma' | 'pagin
     if (grassetto) { doc.setFillColor(241, 245, 249); doc.rect(X0, y - hRiga + 1.4, LARGH, hRiga, 'F') }
     let x = X0
     r.forEach((c, k) => { if (k < nCol) { cella(String(c), x, larg[k]!, num(k)); x += larg[k]! } })
-    doc.setDrawColor(210, 214, 220); doc.line(X0, y + 1.4, X0 + LARGH, y + 1.4)
+    doc.setDrawColor(210, 214, 220); doc.setLineWidth(0.2); doc.line(X0, y + 1.4, X0 + LARGH, y + 1.4)
+    verticali(xs)
     y += hRiga
   }
   if (!conGruppi) {

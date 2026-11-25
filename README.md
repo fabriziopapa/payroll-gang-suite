@@ -1,7 +1,7 @@
 # Payroll Gang Suite
 
 [![License](https://img.shields.io/badge/license-Proprietary%20%C2%A9%202026%20Fabrizio%20Papa-ef4444?style=flat-square)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-26.11.25.1-0ea5e9?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-26.11.25.2-0ea5e9?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-22c55e?style=flat-square)]()
 
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)]()
@@ -475,6 +475,8 @@ Serve il **motivo** (resta sulla quota e si vede in elenco e nella scheda della 
 
 Elenco soci, quote associative e, per ogni evento, riepilogo per sede, scelte/ordini/consegne per persona, ordine al fornitore, iscritti e quote per famiglia, elenco per settimana (foglio presenze), giacenze, richieste e registro di magazzino. Interruttori per colonna (tessera, firma, note, pagato, consegnato, **età**: a oggi per gli elenchi, alla data dell'evento o della richiesta per gli eventi), raggruppamento per sede, una pagina per sede. Dalla 26.11.23.1 i report di un evento raggruppano, filtrano e contano per **sede di consegna** (la sede di lavoro se non c'e'); per chi ritira altrove un interruttore aggiunge accanto l'altra sede (la sede di lavoro se si raggruppa, se no quella di consegna). Elenco soci e quote restano per sede di lavoro. **CSV** (`;`, UTF-8 con BOM) e **PDF** A4 generati nel browser.
 
+**Griglia** (dalla 26.11.25.2): interruttore «Griglia (linee verticali fra le colonne)» in tutti i report, spento di partenza e ricordato nel browser. Acceso, l'anteprima e il PDF hanno le linee verticali fra le colonne e il bordo della tabella (anche intestazioni a due livelli, totali e subtotali; con la colonna «Firma» la casella e' chiusa sui quattro lati). Il CSV non ha linee.
+
 **Numero progressivo** (dalla 26.11.23): interruttore «Numero progressivo (1, 2, 3…)» nei report a elenco (persone, settimane, richieste, movimenti, soci, quote), spento di partenza e ricordato nel browser. Aggiunge la colonna «N.» in anteprima, CSV e PDF; con i raggruppamenti ricomincia da 1 in ogni sede (o settimana, o famiglia), a scelta; totali e subtotali non si contano. Lo stesso in *Esporta elenco…*: colonna «N.» (numerica nell'Excel).
 
 ### Cosa salva PGS
@@ -685,6 +687,14 @@ Copiare `.env.example` → `.env`. Valori obbligatori:
 
 
 > Convenzione versioni: gli aggiornamenti di **sicurezza** usano il suffisso **`.S`** (es. `26.08.08.S`) per distinguerli dai rilasci funzionali.
+
+### 26.11.25.2
+**Modulo CRAL: griglia nei report**
+
+- **Interruttore «Griglia (linee verticali fra le colonne)»** nella scheda *Report*, per tutti i tipi di report (quantita' per sede, scelte/ordini per persona, ordine al fornitore, elenco soci, quote, esigenze alimentari, campi estivi, magazzino). Spento di partenza, ricordato nel browser come il numero progressivo.
+- **Acceso**: in anteprima e nel PDF linee verticali fra tutte le colonne e bordo della tabella, anche sull'intestazione a due livelli (tipologia sopra il prodotto), sulle righe di totale e subtotale e nei report raggruppati per sede. Con la colonna «Firma» la casella e' chiusa su quattro lati. Il CSV non cambia.
+- Client: `report.ts` (`CfgReport.griglia`, linee nel PDF), `ReportTab.tsx` (interruttore, griglia in anteprima). Nessuna migrazione, server invariato.
+- Test: client 141, typecheck e build. Anteprima provata in Chrome; PDF generato e controllato a vista, raggruppato e no, con la firma.
 
 ### 26.11.25.1
 **Modulo CRAL: confezioni nei report, col totale e per persona**
