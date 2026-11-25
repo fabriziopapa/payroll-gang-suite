@@ -234,15 +234,37 @@ export function sommaConfezioni(ini: Pick<Iniziativa, 'scelte'>, sids: string[],
   }
   return out
 }
-/** Colonne di una tabella per sede: per i prodotti con formati una per formato (più «non confezionato» se serve). */
+/**
+ * Colonne di una tabella per sede o per persona: la quantità di ogni prodotto e, per i prodotti con formati,
+ * subito dopo una colonna per formato (più «non confezionato» se a qualcuno resta qualcosa fuori).
+ */
 export interface ColonnaOrdine { p: Prodotto; f: Formato | null; resto: boolean }
 export function colonneOrdine(ini: Iniziativa, sids: string[]): ColonnaOrdine[] {
   return ini.prodotti.flatMap(p => {
     const fs = formati(p)
     if (!fs.length) return [{ p, f: null, resto: false }]
     const r = sids.some(sid => (confezioniDi(ini, sid, p)?.resto ?? 0) > 0)
-    return [...fs.map(f => ({ p, f, resto: false })), ...(r ? [{ p, f: null, resto: true }] : [])]
+    return [{ p, f: null, resto: false }, ...fs.map(f => ({ p, f, resto: false })), ...(r ? [{ p, f: null, resto: true }] : [])]
   })
+}
+/** Sottotitolo di una colonna: «totale kg», «Sacco 2 kg», «non confezionato» (vuoto per i prodotti senza formati). */
+export const sottoColonna = (db: Pick<Db, 'confezioni'>, c: ColonnaOrdine): string =>
+  c.f ? etichettaFormato(db, c.p, c.f) : c.resto ? 'non confezionato' : formati(c.p).length ? `totale ${umDi(c.p)}` : ''
+/** Il valore di una colonna come si stampa: il resto con l'unità, zero come «0» (o vuoto se `vuotoSeZero`). */
+export function cellaColonna(ini: Iniziativa, sids: string[], c: ColonnaOrdine, vuotoSeZero = false): string {
+  const v = valoreColonna(ini, sids, c)
+  if (!v) return vuotoSeZero ? '' : '0'
+  return c.resto ? `${fmtQ(v)} ${umDi(c.p)}` : fmtQ(v)
+}
+/** Plurali dei tipi di partenza; per gli altri «26 × Rete». */
+const PLURALI: Record<string, [string, string]> = {
+  sacco: ['sacco', 'sacchi'], pacco: ['pacco', 'pacchi'], latta: ['latta', 'latte'], cartone: ['cartone', 'cartoni'],
+  bottiglia: ['bottiglia', 'bottiglie'], vaschetta: ['vaschetta', 'vaschette'], cassetta: ['cassetta', 'cassette'], scatola: ['scatola', 'scatole'],
+}
+/** «26 sacchi», «1 pacco», «3 × Rete». */
+export function contaConfezioni(db: Pick<Db, 'confezioni'>, tipo: string, n: number): string {
+  const nome = nomeConfezione(db, tipo), pl = PLURALI[nome.trim().toLowerCase()]
+  return pl ? `${n} ${n === 1 ? pl[0] : pl[1]}` : `${n} × ${nome}`
 }
 /** Il valore di una colonna per un gruppo di persone: quantità, confezioni di un formato o resto. */
 export function valoreColonna(ini: Iniziativa, sids: string[], c: ColonnaOrdine): number {

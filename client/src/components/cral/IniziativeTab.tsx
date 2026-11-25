@@ -15,7 +15,7 @@ import {
   riassuntoSconti, riepilogo, righeOrdiniPerSede, sedeBreve, sedeNome, tipNome, totaleSocio,
   REGOLE, annullato, frasePermessi, permessi, statoDi, type CopiaPronta,
   conLuogo, consegnaAltrove, sedeConsegna,
-  breveConfezioni, colonneOrdine, conDecimali, confezioniDi, etichettaFormato, formati, nomeConfezione, testoConfezioni, umDi, valoreColonna, type ColonnaOrdine,
+  breveConfezioni, colonneOrdine, conDecimali, sottoColonna, confezioniDi, etichettaFormato, formati, nomeConfezione, testoConfezioni, umDi, valoreColonna, type ColonnaOrdine,
 } from './logica'
 import { CopiaEventoModal } from './CopiaEvento'
 import { ScontiTipologia, ScontoPersonaleModal, scontiDaTxt, scontiInTxt, scontiTxtOk, type ScontiTxt } from './Sconti'
@@ -380,7 +380,7 @@ function TabellaOrdini({ ini }: { ini: Iniziativa }) {
     <Scorrevole><table className="w-full text-sm">
       <thead className="text-[11px] uppercase tracking-wider text-slate-500 bg-slate-900/60">
         <tr><th rowSpan={2} className="px-5 py-2 font-semibold text-left align-bottom">Sede di consegna</th><th rowSpan={2} className={thCls + ' text-right align-bottom'}>Ordini</th>{gruppiProdotti(ini).map(g => <th key={g.tip} colSpan={nCol(g)} className="px-3 pt-2 pb-1 font-semibold text-center text-pink-300/90 border-b border-slate-800">{tipNome(db, g.tip)}</th>)}<th rowSpan={2} className="px-5 py-2 font-semibold text-right align-bottom">Importo</th></tr>
-        <tr>{cols.map(c => <th key={`${c.p.id}|${c.f?.id ?? (c.resto ? 'R' : '')}`} className="px-3 pb-2 pt-1 font-semibold text-right normal-case tracking-normal whitespace-nowrap">{c.p.nome}{(c.f || c.resto) && <div className={`font-normal ${c.resto ? 'text-amber-400/90' : 'text-pink-200/80'}`}>{c.f ? etichettaFormato(db, c.p, c.f) : 'non confezionato'}</div>}</th>)}</tr></thead>
+        <tr>{cols.map(c => <th key={`${c.p.id}|${c.f?.id ?? (c.resto ? 'R' : '')}`} className="px-3 pb-2 pt-1 font-semibold text-right normal-case tracking-normal whitespace-nowrap">{c.p.nome}{sottoColonna(db, c) && <div className={`font-normal ${c.resto ? 'text-amber-400/90' : c.f ? 'text-pink-200/80' : 'text-slate-400'}`}>{sottoColonna(db, c)}</div>}</th>)}</tr></thead>
       <tbody className="divide-y divide-slate-800/70 tabular-nums">
         {righe.map(([k, r]) => <tr key={k}><td className="px-5 py-2 text-slate-200 whitespace-nowrap">{k === '__NOSEDE' ? <span className="text-amber-400">Sede non indicata</span> : sedeNome(db, k)}</td><td className="px-3 py-2 text-right text-slate-400">{r.n}</td>
           {cols.map(c => <td key={`${c.p.id}|${c.f?.id ?? (c.resto ? 'R' : '')}`} className={`px-3 py-2 text-right whitespace-nowrap ${tono(r.ids, c)}`}>{cella(r.ids, c)}</td>)}<td className="px-5 py-2 text-right text-white font-medium whitespace-nowrap">{fmtEuro(r.eur)}</td></tr>)}
