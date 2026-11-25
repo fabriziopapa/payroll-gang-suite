@@ -10,7 +10,7 @@ import { annullato, conLuogo, consegnaAltrove, partecipantiEffettivi, riepilogoA
 import type { Db, Iniziativa, Persona, QuotaSocio, Richiesta, StatoPeriodo } from './tipi'
 import {
   CAT_SCONTO_1, GRUPPI, MESI, nomeTipologia, MODI_QUOTA, TIPOLOGIE, aCaricoDi, catSconto, conScontiIni, contenutoTot, contiMagazzino, descrScontoPers,
-  cellaColonna, colonneOrdine, contaConfezioni, etichettaFormato, formati, sommaConfezioni, sottoColonna, umDi, type ColonnaOrdine,
+  cellaColonna, colonneOrdine, contaConfezioni, etichettaFormato, formati, misura, sommaConfezioni, sottoColonna, umFormato, type ColonnaOrdine,
   destinatari, dovutoTurni, eSocio, eta, fmtData, fmtImp, fmtQ, fmtSconto, gruppiProdotti, haOrdinato, importoRichiesta, iscrittoTurni,
   movimentiMagazzino, nettoSocio, nomeDi, nominativo, ordineRichieste, pagaPer, perUnita, periodiDovuti, persDi, persona, qta, quotaAnno,
   quotaDi, quotaSocio, regolaCat, regolaTurni, riepilogo, righeOrdiniPerSede, rifDi, scontoOrdine, scontoRichiesta, sedeNome, sociQuota, statoQuota,
@@ -227,9 +227,9 @@ function costruisciBase(db: Db, cfg: CfgReport, oggiIso: string): Report {
           righe.push([tipNome(db, g.tip), p.nome, `${fmtImp(p.prezzo)}${perUnita(p)}`, `${fmtQ(n)}${p.unita === 'kg' ? ' kg' : p.unita === 'lt' ? ' lt' : p.unita === 'cas' ? (n === 1 ? ' cassetta' : ' cassette') : ''}`, fmtImp(imp), c != null ? `${fmtQ(c)} ${p.contenutoUm}` : ''])
           // 26.11.25.1: sotto il prodotto, una riga per formato (quante confezioni e quanto fanno) e il resto non confezionabile
           if (formati(p).length && n) {
-            const sc2 = sommaConfezioni(ini, dest.map(s => s.id), p), u = umDi(p)
-            for (const f of formati(p)) righe.push([tipNome(db, g.tip), `↳ ${etichettaFormato(db, p, f)}`, '', contaConfezioni(db, f.tipo, sc2.n[f.id] ?? 0), '', `${fmtQ((sc2.n[f.id] ?? 0) * f.q)} ${u}`])
-            if (sc2.resto > 0) righe.push([tipNome(db, g.tip), '↳ non confezionato', '', '', '', `${fmtQ(sc2.resto)} ${u}`])
+            const sc2 = sommaConfezioni(ini, dest.map(s => s.id), p), u = umFormato(p)
+            for (const f of formati(p)) righe.push([tipNome(db, g.tip), `↳ ${etichettaFormato(db, p, f)}`, '', contaConfezioni(db, f.tipo, sc2.n[f.id] ?? 0), '', `${fmtQ(misura(p, (sc2.n[f.id] ?? 0) * f.q))} ${u}`])
+            if (sc2.resto > 0) righe.push([tipNome(db, g.tip), '↳ non confezionato', '', '', '', `${fmtQ(misura(p, sc2.resto))} ${u}`])
           }
         }
         bold.add(righe.length); righe.push([`Subtotale ${tipNome(db, g.tip)}`, '', '', '', fmtImp(se), um ? `${fmtQ(sc)} ${um}` : '']); totE += se
@@ -343,7 +343,7 @@ function tipiBase(ini: Iniziativa | undefined): Array<[TipoReport, string, strin
 
 // ── PDF (jspdf, tabelle disegnate a mano come negli allegati dei versamenti) ──
 /** Il carattere standard del PDF copre WinAnsi: i simboli fuori si sostituiscono. */
-export const testoPdf = (v: Cella): string => String(v).replace(/−/g, '-').replace(/≠/g, '<>').replace(/→/g, '->').replace(/[●•]/g, '*')
+export const testoPdf = (v: Cella): string => String(v).replace(/−/g, '-').replace(/≠/g, '<>').replace(/→/g, '->').replace(/↳/g, '›').replace(/[●•]/g, '*')
   .replace(/[^\u0000-ÿ€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ]/g, '?')
 
 export async function creaPdf(rep: Report, cfg: Pick<CfgReport, 'firma' | 'paginaPerSede' | 'griglia'>, utente: string, oggiIso: string): Promise<Blob> {

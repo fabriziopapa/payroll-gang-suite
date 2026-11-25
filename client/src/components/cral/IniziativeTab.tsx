@@ -15,7 +15,7 @@ import {
   riassuntoSconti, riepilogo, righeOrdiniPerSede, sedeBreve, sedeNome, tipNome, totaleSocio,
   REGOLE, annullato, frasePermessi, permessi, statoDi, type CopiaPronta,
   conLuogo, consegnaAltrove, sedeConsegna,
-  breveConfezioni, colonneOrdine, conDecimali, sottoColonna, confezioniDi, etichettaFormato, formati, nomeConfezione, testoConfezioni, umDi, valoreColonna, type ColonnaOrdine,
+  breveConfezioni, colonneOrdine, conDecimali, sottoColonna, misura, umFormato, confezioniDi, etichettaFormato, formati, nomeConfezione, testoConfezioni, umDi, valoreColonna, type ColonnaOrdine,
 } from './logica'
 import { CopiaEventoModal } from './CopiaEvento'
 import { ScontiTipologia, ScontoPersonaleModal, scontiDaTxt, scontiInTxt, scontiTxtOk, type ScontiTxt } from './Sconti'
@@ -98,6 +98,16 @@ type ProdTxt = Prodotto & { prezzoTxt: string; maxTxt: string; contTxt: string
   formTxt: Array<{ id: string; tipo: string; qTxt: string }> }
 /** Un numero positivo con la virgola o il punto (formati di confezione). */
 const misuraOk = (t: string) => /^\d+([.,]\d{1,2})?$/.test(t.trim()) && +t.trim().replace(',', '.') > 0
+/**
+ * 26.11.25.3: al pezzo con un contenuto (es. 1 kg) i formati si scrivono nell'unità del contenuto
+ * (sacco da 2 kg) e si salvano in pezzi (2): il fattore è il contenuto, altrimenti 1.
+ */
+const contForm = (p: Pick<ProdTxt, 'unita' | 'contTxt'>): number => (p.unita === 'pz' && /^\d+([.,]\d+)?$/.test(p.contTxt.trim()) ? +p.contTxt.trim().replace(',', '.') : 0)
+const fattoreForm = (p: Pick<ProdTxt, 'unita' | 'contTxt'>): number => contForm(p) || 1
+const umForm = (p: Pick<ProdTxt, 'unita' | 'contTxt' | 'contenutoUm'>): string => (contForm(p) > 0 ? p.contenutoUm : umDi(p))
+/** In pezzi un formato dev'essere un numero intero di pezzi. */
+const pezziForm = (p: Pick<ProdTxt, 'unita' | 'contTxt'>, t: string): number => Math.round(+t.trim().replace(',', '.') / fattoreForm(p) * 1e6) / 1e6
+const formaOk = (p: Pick<ProdTxt, 'unita' | 'contTxt'>, t: string): boolean => misuraOk(t) && (p.unita !== 'pz' || Number.isInteger(pezziForm(p, t)))
 interface FormEvento {
   tipo: string; titolo: string; anno: number; data: string; scadenza: string; stato: Iniziativa['stato']; modalita: Modalita
   modoPart: Iniziativa['modoPart']; gruppi: Gruppo[]; sedi: string[]; predefinita: string | null
@@ -122,7 +132,7 @@ function IniziativaModal({ id, onClose, onCreata, copia }: { id: string | null; 
       stato: b?.stato ?? 'BOZZA', modalita: b?.modalita ?? 'SCELTA', modoPart: b?.modoPart ?? 'GRUPPI', gruppi: b?.gruppi ?? ['SD', 'SE'], sedi: b?.sedi ?? [],
       predefinita: b?.predefinita ?? null, fornitore: b?.fornitore ?? '', pagamento: b?.pagamento ?? '', note: b?.note ?? '',
       opzioni: b?.opzioni.length ? b.opzioni.map(o => ({ ...o })) : [{ id: 'O1', etichetta: '' }, { id: 'O2', etichetta: '' }],
-      prodotti: (b?.prodotti ?? []).map(p => ({ ...p, prezzoTxt: fmtImp(p.prezzo), maxTxt: p.max ? String(p.max) : '', contTxt: p.contenuto ? fmtQ(p.contenuto) : '', formTxt: (p.confezioni ?? []).map(c => ({ id: c.id, tipo: c.tipo, qTxt: fmtQ(c.q) })) })),
+      prodotti: (b?.prodotti ?? []).map(p => ({ ...p, prezzoTxt: fmtImp(p.prezzo), maxTxt: p.max ? String(p.max) : '', contTxt: p.contenuto ? fmtQ(p.contenuto) : '', formTxt: (p.confezioni ?? []).map(c => ({ id: c.id, tipo: c.tipo, qTxt: fmtQ(p.unita === 'pz' && p.contenuto ? Math.round(c.q * p.contenuto * 1000) / 1000 : c.q) })) })),
       periodi: (b?.periodi ?? []).map(p => ({ id: p.id, nome: p.nome, dal: p.dal, al: p.al, postiTxt: p.posti ? String(p.posti) : '' })),
       articoli: (b?.articoli ?? []).map(a => ({ id: a.id, nome: a.nome, prezzoTxt: fmtImp(a.prezzo) })),
       quotaTxt: b?.quota ? fmtImp(b.quota) : '', scontiTxt: scontiInTxt(b?.sconti ?? {}),
@@ -141,7 +151,7 @@ function IniziativaModal({ id, onClose, onCreata, copia }: { id: string | null; 
   const [formAperti, setFormAperti] = useState<string | null>(null)
   const inUso = !!esistente && (scelte.length > 0 || esistente.carichi.length > 0 || esistente.richieste.length > 0)
   const opzOk = mod !== 'SCELTA' || (f.opzioni.length >= 2 && f.opzioni.every(o => o.etichetta.trim()))
-  const prodOk = mod !== 'ORDINE' || (f.prodotti.length >= 1 && f.prodotti.every(p => p.nome.trim() && parseEuro(p.prezzoTxt) !== null && (!p.maxTxt || /^\d+$/.test(p.maxTxt)) && (!p.contTxt || /^\d+([.,]\d+)?$/.test(p.contTxt)) && (p.unita === 'cas' || p.formTxt.every(x => misuraOk(x.qTxt)))))
+  const prodOk = mod !== 'ORDINE' || (f.prodotti.length >= 1 && f.prodotti.every(p => p.nome.trim() && parseEuro(p.prezzoTxt) !== null && (!p.maxTxt || /^\d+$/.test(p.maxTxt)) && (!p.contTxt || /^\d+([.,]\d+)?$/.test(p.contTxt)) && (p.unita === 'cas' || p.formTxt.every(x => formaOk(p, x.qTxt)))))
   const turOk = mod !== 'TURNI' || (f.periodi.length >= 1 && f.periodi.every(p => p.nome.trim() && p.dal && p.al && p.al >= p.dal && (!p.postiTxt || /^\d+$/.test(p.postiTxt))) && (parseEuro(f.quotaTxt) ?? 0) > 0)
   const magOk = mod !== 'MAGAZZINO' || (f.articoli.length >= 1 && f.articoli.every(a => a.nome.trim() && parseEuro(a.prezzoTxt || '0') !== null))
   const ok = !!f.titolo.trim() && !!f.data && opzOk && prodOk && turOk && magOk && scontiTxtOk(f.scontiTxt) && (f.modoPart === 'SINGOLI' || f.gruppi.length > 0) && !salvo
@@ -173,7 +183,7 @@ function IniziativaModal({ id, onClose, onCreata, copia }: { id: string | null; 
       config: {
         opzioni: mod === 'SCELTA' ? f.opzioni.map(o => ({ id: o.id, etichetta: o.etichetta.trim() })) : [],
         prodotti: mod === 'ORDINE' ? f.prodotti.map(({ prezzoTxt, maxTxt, contTxt, formTxt, ...p }) => ({ ...p, nome: p.nome.trim(), prezzo: parseEuro(prezzoTxt) ?? 0, max: maxTxt ? +maxTxt : null, contenuto: contTxt ? +contTxt.replace(',', '.') : null,
-          confezioni: p.unita === 'cas' ? [] : formTxt.map(x => ({ id: x.id, tipo: x.tipo, q: +x.qTxt.trim().replace(',', '.') })) })) : [],
+          confezioni: p.unita === 'cas' ? [] : formTxt.map(x => ({ id: x.id, tipo: x.tipo, q: pezziForm({ unita: p.unita, contTxt }, x.qTxt) })) })) : [],
         periodi: mod === 'TURNI' ? f.periodi.map(({ postiTxt, ...p }) => ({ ...p, nome: p.nome.trim(), posti: postiTxt ? +postiTxt : null })) : [],
         articoli: mod === 'MAGAZZINO' ? f.articoli.map(({ prezzoTxt, ...a }) => ({ ...a, nome: a.nome.trim(), prezzo: parseEuro(prezzoTxt || '0') ?? 0 })) : [],
         sconti: ['ORDINE', 'TURNI', 'MAGAZZINO'].includes(mod) ? scontiDaTxt(f.scontiTxt, mod) : {},
@@ -267,10 +277,10 @@ function IniziativaModal({ id, onClose, onCreata, copia }: { id: string | null; 
               <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500"><th className="py-1.5 pr-2 font-semibold">Tipologia</th><th className="py-1.5 px-2 font-semibold">Prodotto / formato</th><th className="py-1.5 px-2 font-semibold">Prezzo €</th><th className="py-1.5 px-2 font-semibold">Si vende</th><th className="py-1.5 px-2 font-semibold">Contenuto</th><th className="py-1.5 px-2 font-semibold">Confezioni</th><th className="py-1.5 px-2 font-semibold">Max a testa</th><th /></tr></thead>
               <tbody>{f.prodotti.map(p => {
                 const errP = p.prezzoTxt !== '' && parseEuro(p.prezzoTxt) === null
-                const um = umDi(p), aperto = formAperti === p.id && p.unita !== 'cas'
+                const um = umForm(p), aperto = formAperti === p.id && p.unita !== 'cas'
                 const usatoForm = p.formTxt.some(x => usatiForm.has(`${p.id}|${x.id}`))
-                const riass = p.formTxt.filter(x => misuraOk(x.qTxt)).map(x => `${nomeConfezione(db, x.tipo)} ${x.qTxt.trim()} ${um}`).join(' · ')
-                const errF = p.formTxt.some(x => !misuraOk(x.qTxt))
+                const riass = p.formTxt.filter(x => formaOk(p, x.qTxt)).map(x => `${nomeConfezione(db, x.tipo)} ${x.qTxt.trim()} ${um}`).join(' · ')
+                const errF = p.formTxt.some(x => !formaOk(p, x.qTxt))
                 return (
                   <Fragment key={p.id}><tr>
                     <td className="py-1 pr-2 w-44"><select className={inputCls + ' py-1.5'} value={p.tipologia} onChange={e => setProd(p.id, { tipologia: e.target.value })}>{db.tipologie.filter(t => t.attiva || t.id === p.tipologia).map(t => <option key={t.id} value={t.id}>{t.nome}</option>)}</select></td>
@@ -295,15 +305,16 @@ function IniziativaModal({ id, onClose, onCreata, copia }: { id: string | null; 
                               {db.confezioni.filter(c => c.attiva || c.id === x.tipo).map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
                               {!db.confezioni.some(c => c.id === x.tipo) && <option value={x.tipo}>{x.tipo}</option>}</select>
                             <span className="text-xs text-slate-500">da</span>
-                            <input inputMode="decimal" disabled={usato} aria-label="Quanto contiene" className={inputW + ' py-1.5 w-20 text-right tabular-nums ' + (misuraOk(x.qTxt) ? '' : 'border-red-600')} value={x.qTxt} placeholder="2" onChange={e => setForm(p.id, x.id, { qTxt: e.target.value })} />
+                            <input inputMode="decimal" disabled={usato} aria-label="Quanto contiene" className={inputW + ' py-1.5 w-20 text-right tabular-nums ' + (formaOk(p, x.qTxt) ? '' : 'border-red-600')} value={x.qTxt} placeholder="2" onChange={e => setForm(p.id, x.id, { qTxt: e.target.value })} />
                             <span className="text-xs text-slate-300 w-6">{um}</span>
                             <button disabled={usato} title={usato ? 'Scelto a mano da qualcuno: non si toglie' : 'Togli formato'} className="p-2 rounded-md text-slate-500 hover:text-red-400 disabled:opacity-30" onClick={() => setProd(p.id, { formTxt: p.formTxt.filter(y => y.id !== x.id) })}><Ico d={D.trash} /></button>
                             {usato && <span className="text-[11px] text-pink-300">in uso in una scelta a mano: misura fissa, non si toglie</span>}
+                            {!usato && misuraOk(x.qTxt) && !formaOk(p, x.qTxt) && <span className="text-[11px] text-red-300">deve fare un numero intero di pezzi da {p.contTxt.trim()} {um}</span>}
                           </div>)
                       })}
                       <div className="flex flex-wrap items-center gap-3">
                         <button className={btnPiccoloSec} disabled={p.formTxt.length >= 10 || !db.confezioni.some(c => c.attiva)} onClick={() => setProd(p.id, { formTxt: [...p.formTxt, { id: nuovoId('F'), tipo: db.confezioni.find(c => c.attiva)?.id ?? '', qTxt: '' }] })}><Ico d={D.plus} cls="w-3.5 h-3.5" />Aggiungi formato</button>
-                        <span className="text-xs text-slate-500">Il prezzo resta quello del prodotto ({fmtEuro(parseEuro(p.prezzoTxt) ?? 0)}{um === 'pz' ? ' al pezzo' : `/${um}`}). Senza formati il prodotto si vende come prima. I tipi (sacco, pacco…) si personalizzano in Parametri.</span>
+                        <span className="text-xs text-slate-500">Il prezzo resta quello del prodotto ({fmtEuro(parseEuro(p.prezzoTxt) ?? 0)}{p.unita === 'pz' ? ' al pezzo' : `/${umDi(p)}`}). Senza formati il prodotto si vende come prima. I tipi (sacco, pacco…) si personalizzano in Parametri.</span>
                       </div>
                     </div></td></tr>}
                   </Fragment>)
@@ -374,7 +385,7 @@ function TabellaOrdini({ ini }: { ini: Iniziativa }) {
   const tutti = righe.flatMap(([, r]) => r.ids)
   const cols = colonneOrdine(ini, tutti)
   const nCol = (g: { prod: Prodotto[] }) => cols.filter(c => g.prod.includes(c.p)).length
-  const cella = (ids: string[], c: ColonnaOrdine) => { const v = valoreColonna(ini, ids, c); return c.resto ? (v ? `${fmtQ(v)} ${umDi(c.p)}` : '0') : fmtQ(v) }
+  const cella = (ids: string[], c: ColonnaOrdine) => { const v = valoreColonna(ini, ids, c); return c.resto ? (v ? `${fmtQ(misura(c.p, v))} ${umFormato(c.p)}` : '0') : fmtQ(v) }
   const tono = (ids: string[], c: ColonnaOrdine) => (valoreColonna(ini, ids, c) ? (c.resto ? 'text-amber-300' : 'text-slate-200') : 'text-slate-600')
   return (
     <Scorrevole><table className="w-full text-sm">
@@ -498,7 +509,7 @@ function ConfezioniModal({ ini, sid, pid, attivo, onClose, onPatch }: { ini: Ini
   const { db } = useCral()
   const s = db.perId.get(sid), p = ini.prodotti.find(x => x.id === pid)
   if (!s || !p) return null
-  const fs = formati(p), um = umDi(p), sc = ini.scelte[sid]
+  const fs = formati(p), um = umFormato(p), sc = ini.scelte[sid]
   const q = qta(ini, sid, pid)
   const cp = confezioniDi(ini, sid, p) ?? { n: Object.fromEntries(fs.map(f => [f.id, 0])), resto: 0, mano: !!sc?.conf?.[pid] }
   const inConf = fs.reduce((a, f) => a + (cp.n[f.id] ?? 0) * f.q, 0)
@@ -531,10 +542,10 @@ function ConfezioniModal({ ini, sid, pid, attivo, onClose, onPatch }: { ini: Ini
             </div>))}
         </div>
         <div className="flex flex-wrap justify-between gap-2 text-sm tabular-nums">
-          <span className="text-slate-400">Ordinati {fmtQ(q)} {um} · in confezioni {fmtQ(inConf)} {um}</span>
+          <span className="text-slate-400">Ordinati {fmtQ(misura(p, q))} {um}{um !== umDi(p) ? ` (${fmtQ(q)} ${umDi(p)})` : ''} · in confezioni {fmtQ(misura(p, inConf))} {um}</span>
           <span className="text-white font-medium">{fmtEuro(Math.round(q * p.prezzo))}</span>
         </div>
-        {cp.resto > 0 && <p className="text-xs"><span className="rounded-full px-2 py-0.5 bg-amber-950/70 text-amber-300">non confezionabile · {fmtQ(cp.resto)} {um}</span> <span className="text-slate-500">non entra in nessun formato: resta da consegnare a parte, o si sceglie a mano.</span></p>}
+        {cp.resto > 0 && <p className="text-xs"><span className="rounded-full px-2 py-0.5 bg-amber-950/70 text-amber-300">non confezionabile · {fmtQ(misura(p, cp.resto))} {um}</span> <span className="text-slate-500">non entra in nessun formato: resta da consegnare a parte, o si sceglie a mano.</span></p>}
         {!attivo && <p className="text-xs text-amber-400">Lo stato dell'evento non permette di cambiare gli ordini.</p>}
       </div>
     </Modale>
@@ -699,8 +710,8 @@ function IniziativaDettaglio({ id, onBack, onApri }: { id: string; onBack: () =>
                             {cp && <div className="flex flex-col items-center gap-0.5 mt-1">
                               {breve && <button type="button" onClick={() => setConfAperta({ sid: s.id, pid: p.id })} title={`${cp.mano ? 'Scelte a mano' : 'Automatico'}: ${testoConfezioni(db, p, { ...cp, resto: 0 })}. Clic per cambiare`}
                                 className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] whitespace-nowrap ${cp.mano ? 'bg-pink-950/70 text-pink-200 hover:bg-pink-900/60' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>{breve}{cp.mano && <Ico d={D.edit} cls="w-3 h-3" />}</button>}
-                              {cp.resto > 0 && <button type="button" onClick={() => setConfAperta({ sid: s.id, pid: p.id })} title={`${fmtQ(cp.resto)} ${umDi(p)} non entrano in nessuna confezione. Clic per sceglierle a mano`}
-                                className="rounded-full px-2 py-0.5 text-[11px] whitespace-nowrap bg-amber-950/70 text-amber-300 hover:bg-amber-900/60">non confez. · {fmtQ(cp.resto)} {umDi(p)}</button>}
+                              {cp.resto > 0 && <button type="button" onClick={() => setConfAperta({ sid: s.id, pid: p.id })} title={`${fmtQ(misura(p, cp.resto))} ${umFormato(p)} non entrano in nessuna confezione. Clic per sceglierle a mano`}
+                                className="rounded-full px-2 py-0.5 text-[11px] whitespace-nowrap bg-amber-950/70 text-amber-300 hover:bg-amber-900/60">non confez. · {fmtQ(misura(p, cp.resto))} {umFormato(p)}</button>}
                             </div>}</td>
                         })}
                         {mod === 'ORDINE' && <><td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{ordinato ? <>{nettoSocio(db, ini, s.id) !== totaleSocio(ini, s.id) && <div className="text-[11px] text-slate-500 line-through">{fmtEuro(totaleSocio(ini, s.id))}</div>}<span className="text-white">{fmtEuro(nettoSocio(db, ini, s.id))}</span>

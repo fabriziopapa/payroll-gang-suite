@@ -542,3 +542,20 @@ test('report: il PDF si genera con e senza griglia (26.11.25.2)', async () => {
     assert.ok(b.size > 1000)
   }
 })
+
+test('confezioni di un prodotto al pezzo con un contenuto: si leggono nell\'unità del contenuto (26.11.25.3)', async () => {
+  const { testoPdf } = await import('./report.ts')
+  // castagne «al pezzo» da 1 kg, sacchi da 1 e 2 pezzi; olio in latte da 5 lt, cartoni da 4 latte
+  const ca = { id: 'CA', tipologia: 'TER', nome: 'Castagne', prezzo: 400, unita: 'pz' as const, contenuto: 1, contenutoUm: 'kg' as const, max: null,
+    confezioni: [{ id: 'F1', tipo: 'SAC', q: 1 }, { id: 'F2', tipo: 'SAC', q: 2 }] }
+  const ol = { ...ca, id: 'OL', nome: 'Latta 5 lt', contenuto: 5, contenutoUm: 'lt' as const, confezioni: [{ id: 'C4', tipo: 'CAR', q: 4 }] }
+  const d = db({ confezioni: [{ id: 'SAC', nome: 'Sacco', attiva: true, ordine: 1 }, { id: 'CAR', nome: 'Cartone', attiva: true, ordine: 2 }] })
+  assert.equal(L.umFormato(ca), 'kg'); assert.equal(L.umFormato(ol), 'lt'); assert.equal(L.umFormato({ ...ca, contenuto: null }), 'pz')
+  assert.equal(L.etichettaFormato(d, ca, ca.confezioni[1]!), 'Sacco 2 kg')
+  assert.equal(L.etichettaFormato(d, ol, ol.confezioni[0]!), 'Cartone 20 lt')
+  const ini = evento({ modalita: 'ORDINE', gruppi: ['SD'], prodotti: [ca, ol], scelte: { '090001': { q: { CA: 5, OL: 6 } } } })
+  assert.equal(L.breveConfezioni(ca, L.confezioniDi(ini, '090001', ca)!), '1×1 kg + 2×2 kg')
+  assert.equal(L.testoConfezioni(d, ol, L.confezioniDi(ini, '090001', ol)!), '1 × Cartone 20 lt + 10 lt non confezionabili')
+  // nel PDF la freccia delle righe per formato non diventa «?»
+  assert.equal(testoPdf('↳ Sacco 2 kg'), '› Sacco 2 kg')
+})

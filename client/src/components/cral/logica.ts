@@ -178,7 +178,16 @@ export const umDi = (p: Pick<Prodotto, 'unita'>): string => (p.unita === 'kg' ? 
 export const formati = (p: Prodotto): Formato[] => (p.unita === 'cas' ? [] : (p.confezioni ?? []).filter(f => f.q > 0))
 export const nomeConfezione = (db: Pick<Db, 'confezioni'>, id: string): string => db.confezioni.find(c => c.id === id)?.nome ?? id
 /** «Sacco 2 kg» */
-export const etichettaFormato = (db: Pick<Db, 'confezioni'>, p: Prodotto, f: Formato): string => `${nomeConfezione(db, f.tipo)} ${fmtQ(f.q)} ${umDi(p)}`
+/**
+ * 26.11.25.3: un prodotto al pezzo con un contenuto (es. castagne «al pezzo» da 1 kg) mostra formati,
+ * resti e totali delle confezioni nell'unità del contenuto. Nei dati i formati restano in pezzi.
+ */
+const perContenuto = (p: Pick<Prodotto, 'unita' | 'contenuto'>): boolean => p.unita === 'pz' && !!p.contenuto
+/** Unità in cui si leggono i formati: quella del contenuto per i prodotti al pezzo che ne hanno uno. */
+export const umFormato = (p: Pick<Prodotto, 'unita' | 'contenuto' | 'contenutoUm'>): string => (perContenuto(p) ? p.contenutoUm : umDi(p))
+/** Una quantità nell'unità di vendita, portata nell'unità dei formati (pezzi × contenuto). */
+export const misura = (p: Pick<Prodotto, 'unita' | 'contenuto'>, n: number): number => (perContenuto(p) ? Math.round(n * p.contenuto! * 1000) / 1000 : n)
+export const etichettaFormato = (db: Pick<Db, 'confezioni'>, p: Prodotto, f: Formato): string => `${nomeConfezione(db, f.tipo)} ${fmtQ(misura(p, f.q))} ${umFormato(p)}`
 
 /**
  * Il minimo di confezioni che fa esattamente `q` con le misure date; se non si può, quelle che si
@@ -219,10 +228,10 @@ export function confezioniDi(ini: Pick<Iniziativa, 'scelte'>, sid: string, p: Pr
 }
 /** «2×2 kg + 1×1 kg» (per il tag sotto la quantità). */
 export const breveConfezioni = (p: Prodotto, c: ConfPersona): string =>
-  formati(p).filter(f => c.n[f.id]).map(f => `${c.n[f.id]}×${fmtQ(f.q)} ${umDi(p)}`).join(' + ')
+  formati(p).filter(f => c.n[f.id]).map(f => `${c.n[f.id]}×${fmtQ(misura(p, f.q))} ${umFormato(p)}`).join(' + ')
 /** «2 Sacco 2 kg + 1 Sacco 1 kg» (report e titoli). */
 export const testoConfezioni = (db: Pick<Db, 'confezioni'>, p: Prodotto, c: ConfPersona): string =>
-  [...formati(p).filter(f => c.n[f.id]).map(f => `${c.n[f.id]} × ${etichettaFormato(db, p, f)}`), ...(c.resto > 0 ? [`${fmtQ(c.resto)} ${umDi(p)} non confezionabili`] : [])].join(' + ')
+  [...formati(p).filter(f => c.n[f.id]).map(f => `${c.n[f.id]} × ${etichettaFormato(db, p, f)}`), ...(c.resto > 0 ? [`${fmtQ(misura(p, c.resto))} ${umFormato(p)} non confezionabili`] : [])].join(' + ')
 /** Confezioni di più persone sommate: per formato e il resto. */
 export function sommaConfezioni(ini: Pick<Iniziativa, 'scelte'>, sids: string[], p: Prodotto): ConfPersona {
   const out: ConfPersona = { n: Object.fromEntries(formati(p).map(f => [f.id, 0])), resto: 0, mano: false }
@@ -254,7 +263,7 @@ export const sottoColonna = (db: Pick<Db, 'confezioni'>, c: ColonnaOrdine): stri
 export function cellaColonna(ini: Iniziativa, sids: string[], c: ColonnaOrdine, vuotoSeZero = false): string {
   const v = valoreColonna(ini, sids, c)
   if (!v) return vuotoSeZero ? '' : '0'
-  return c.resto ? `${fmtQ(v)} ${umDi(c.p)}` : fmtQ(v)
+  return c.resto ? `${fmtQ(misura(c.p, v))} ${umFormato(c.p)}` : fmtQ(v)
 }
 /** Plurali dei tipi di partenza; per gli altri «26 × Rete». */
 const PLURALI: Record<string, [string, string]> = {
